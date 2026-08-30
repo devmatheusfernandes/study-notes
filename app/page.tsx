@@ -53,9 +53,14 @@ export default function LandingPage() {
           <div className="size-6 rounded-full bg-primary" />
           <span className="font-heading text-lg tracking-tight">Study Notes</span>
         </div>
-        <Button variant="outline" render={<Link href="/login" />}>
-          Entrar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" render={<Link href="/install" />}>
+            Instalar app
+          </Button>
+          <Button variant="outline" render={<Link href="/login" />}>
+            Entrar
+          </Button>
+        </div>
       </motion.header>
 
       <motion.section
@@ -143,8 +148,11 @@ export default function LandingPage() {
         </motion.div>
       </section>
 
-      <footer className="mx-auto w-full max-w-6xl px-6 py-8 text-center text-xs text-muted-foreground">
-        Study Notes — feito para quem estuda todos os dias.
+      <footer className="mx-auto flex w-full max-w-6xl flex-col items-center gap-2 px-6 py-8 text-center text-xs text-muted-foreground">
+        <span>Study Notes — feito para quem estuda todos os dias.</span>
+        <Link href="/install" className="text-accent hover:text-accent/80">
+          Instalar como app
+        </Link>
       </footer>
     </div>
   );
