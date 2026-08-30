@@ -34,6 +34,8 @@ const Button = forwardRef<React.ComponentRef<typeof ButtonPrimitive>, ButtonProp
       children,
       disabled,
       onClick,
+      render,
+      nativeButton,
       ...props
     },
     ref
@@ -84,6 +86,8 @@ const Button = forwardRef<React.ComponentRef<typeof ButtonPrimitive>, ButtonProp
         data-slot="button"
         disabled={isLoading || disabled}
         onClick={handleInteraction}
+        render={render}
+        nativeButton={nativeButton ?? !render}
         className={cn(
           buttonVariants({
             variant,

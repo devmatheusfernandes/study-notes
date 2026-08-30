@@ -1,26 +1,78 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #121110;
+  --foreground: #f5ead8;
+
+  --card: #1b1917;
+  --card-foreground: #f5ead8;
+
+  --popover: #241f1d;
+  --popover-foreground: #f5ead8;
+
+  --primary: #c67139;
+  --primary-foreground: #1b1917;
+
+  --secondary: #262220;
+  --secondary-foreground: #f5ead8;
+
+  --muted: #262220;
+  --muted-foreground: #a89a86;
+
+  --accent: #f6a06b;
+  --accent-foreground: #241a12;
+
+  --success: #aebf92;
+  --success-foreground: #1b1917;
+
+  --destructive: #e0623f;
+  --destructive-foreground: #1b1917;
+
+  --border: rgba(245, 234, 216, 0.12);
+  --input: rgba(245, 234, 216, 0.12);
+  --ring: #f6a06b;
+
+  --surface: #211d1b;
+  --surface-elevated: #302b28;
+
+  --radius: 1.25rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-sm: calc(var(--radius) - 0.5rem);
+  --radius-md: calc(var(--radius) - 0.25rem);
+  --radius-lg: var(--radius);
+
+  --font-sans: var(--font-figtree);
+  --font-heading: var(--font-caprasimo);
+  --font-mono: var(--font-jetbrains-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

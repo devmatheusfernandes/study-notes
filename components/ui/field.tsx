@@ -16,7 +16,7 @@ const Field = React.forwardRef<HTMLDivElement, FieldProps>(
                 className={cn("flex flex-col gap-2", className)}
                 {...props}
             >
-                <label className="text-sm font-medium leading-none text-foreground peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                <label className="text-xs font-medium text-foreground/70 peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                     {label}
                     {required && <span className="text-destructive ml-1">*</span>}
                 </label>
