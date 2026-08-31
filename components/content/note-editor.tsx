@@ -55,12 +55,17 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         updateNote(createdId.current, { title: title.trim() || "Nova nota", body });
       } else {
         createdId.current = addNote({ title: title.trim() || "Nova nota", body, folderId });
-        router.replace(`/notes/${createdId.current}`);
+        // Not router.replace(): that navigates from the /notes/new route tree
+        // to /notes/[id], which remounts this whole component (replaying the
+        // entrance animation and dropping focus — the "flicker"). A plain
+        // history update keeps this same instance alive and just relabels
+        // the URL bar, since nothing here actually depends on route params.
+        window.history.replaceState(null, "", `/notes/${createdId.current}`);
       }
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [title, body, hydrated, addNote, updateNote, router, folderId]);
+  }, [title, body, hydrated, addNote, updateNote, folderId]);
 
   const current = createdId.current ? notes.find((n) => n.id === createdId.current) : undefined;
   const pinned = current?.pinned ?? false;

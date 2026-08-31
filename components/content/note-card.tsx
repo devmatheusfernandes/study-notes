@@ -141,27 +141,36 @@ export function NoteCard({
       }
     : undefined;
 
+  // Collapsed to zero width at rest (not just hidden) so it doesn't reserve
+  // layout space — the badge/icon next to it sits flush until hover pushes
+  // it over. Expanded permanently once something's selected, so multi-select
+  // doesn't need re-hovering every card.
+  const checkboxExpanded = selectionMode || selected;
   const checkbox = onToggleSelect && (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggleSelect(id);
-      }}
-      aria-label={selected ? `Remover ${title} da seleção` : `Selecionar ${title}`}
-      aria-pressed={selected}
+    <span
       className={cn(
-        "flex size-5 shrink-0 items-center justify-center rounded-full border transition-opacity",
-        selected
-          ? "border-primary bg-primary text-primary-foreground opacity-100"
-          : "border-border bg-background/60 text-transparent hover:border-accent",
-        // Hidden until hovered, unless something's already selected — then every
-        // card's checkbox stays visible so multi-select doesn't need re-hovering.
-        selectionMode || selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        "inline-block shrink-0 overflow-hidden transition-[width,margin-right] duration-200 ease-out",
+        checkboxExpanded ? "mr-2 w-5" : "mr-0 w-0 group-hover:mr-2 group-hover:w-5"
       )}
     >
-      <Check className="size-3" strokeWidth={3} />
-    </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect(id);
+        }}
+        aria-label={selected ? `Remover ${title} da seleção` : `Selecionar ${title}`}
+        aria-pressed={selected}
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded-full border",
+          selected
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-border bg-background/60 text-transparent hover:border-accent"
+        )}
+      >
+        <Check className="size-3" strokeWidth={3} />
+      </button>
+    </span>
   );
 
   const menu = (
@@ -280,7 +289,7 @@ export function NoteCard({
           : "border-transparent bg-secondary hover:border-accent/40"
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-start">
         {checkbox}
         <span
           className={cn(
