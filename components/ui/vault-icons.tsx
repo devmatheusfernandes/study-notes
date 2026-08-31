@@ -61,7 +61,7 @@ export const vaultIcons = {
     ),
     delete: (
         <svg
-            className="w-8 h-8 text-rose-500"
+            className="w-8 h-8 text-destructive"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

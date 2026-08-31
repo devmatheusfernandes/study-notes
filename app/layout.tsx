@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Caprasimo, Figtree, JetBrains_Mono } from "next/font/google";
 import { SerwistProvider } from "@serwist/turbopack/react";
 import { Toaster } from "@/components/ui/toaster";
-import { APPLE_SPLASH_SCREENS } from "@/lib/apple-splash-screens";
+import { DeviceListener } from "@/components/providers/device-listener";
 import "./globals.css";
 
 const caprasimo = Caprasimo({
@@ -50,16 +50,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="pt-BR"
       className={`${caprasimo.variable} ${figtree.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <head>
-        {APPLE_SPLASH_SCREENS.map(({ media, href }) => (
-          <link key={href} rel="apple-touch-startup-image" media={media} href={href} />
-        ))}
-      </head>
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+        <DeviceListener />
         <SerwistProvider swUrl="/serwist/sw.js">
           {children}
           <Toaster />
         </SerwistProvider>
+        <div id="vault-root" />
       </body>
     </html>
   );

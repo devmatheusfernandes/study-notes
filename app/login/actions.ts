@@ -19,7 +19,7 @@ export async function signIn(_prevState: AuthState, formData: FormData): Promise
     return { error: "E-mail ou senha incorretos." };
   }
 
-  redirect("/dashboard");
+  redirect("/notes");
 }
 
 export async function signUp(_prevState: AuthState, formData: FormData): Promise<AuthState> {
@@ -41,7 +41,7 @@ export async function signUp(_prevState: AuthState, formData: FormData): Promise
     return { message: "Quase lá! Confirme sua conta pelo link que enviamos ao seu e-mail." };
   }
 
-  redirect("/dashboard");
+  redirect("/notes");
 }
 
 export async function signOut() {

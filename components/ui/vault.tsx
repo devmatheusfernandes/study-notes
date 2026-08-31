@@ -141,7 +141,7 @@ const VaultContent = React.forwardRef<
                     }
                 }}
                 className={twMerge(
-                    "fixed z-50 flex flex-col bg-background backdrop-blur-xl border border-gray-200/50 dark:border-gray-700/50 outline-none",
+                    "fixed z-50 flex flex-col bg-background backdrop-blur-xl border border-border outline-none",
 
                     isStandalone
                         ? "bottom-2 inset-x-2 w-auto rounded-2xl after:hidden! mt-24"
@@ -209,7 +209,7 @@ const VaultTitle = React.forwardRef<
         <Drawer.Title
             ref={ref}
             className={twMerge(
-                "text-xl font-bold text-center leading-tight tracking-tight text-gray-900 dark:text-gray-100",
+                "text-xl font-heading text-center leading-tight tracking-tight text-foreground",
                 className,
             )}
             {...props}
@@ -233,7 +233,7 @@ const VaultDescription = React.forwardRef<
         >
             <Drawer.Description
                 className={twMerge(
-                    "text-center text-sm text-gray-600 dark:text-gray-400 leading-relaxed",
+                    "text-center text-sm text-muted-foreground leading-relaxed",
                     className,
                 )}
             >
@@ -254,7 +254,7 @@ const VaultFooter = ({
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.2 }}
             className={twMerge(
-                "flex lg:flex-row md:flex-row flex-col justify-center gap-3 pt-4 border-t border-gray-200/50 dark:border-gray-700/50",
+                "flex lg:flex-row md:flex-row flex-col justify-center gap-3 pt-4 border-t border-border",
                 className,
             )}
             {...props}
@@ -348,12 +348,12 @@ const VaultIcon = ({
                             }
                         }}
                     />
-                    <div className="fallback-icon hidden justify-center items-center w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-full">
+                    <div className="fallback-icon hidden justify-center items-center w-12 h-12 bg-muted rounded-full">
                         {vaultIcons[type]}
                     </div>
                 </div>
             ) : (
-                <div className="flex justify-center items-center w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-full">
+                <div className="flex justify-center items-center w-12 h-12 bg-muted rounded-full">
                     {iconContent}
                 </div>
             )}
@@ -421,14 +421,14 @@ const VaultField = ({
             {...props}
         >
             {label && (
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <label className="block text-xs font-medium text-foreground/70">
                     {label}
-                    {required && <span className="text-red-500 ml-1">*</span>}
+                    {required && <span className="text-destructive ml-1">*</span>}
                 </label>
             )}
             {children}
             {error && (
-                <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+                <p className="text-xs text-destructive">{error}</p>
             )}
         </motion.div>
     );
@@ -452,7 +452,7 @@ const VaultInput = React.forwardRef<
             <Input
                 ref={ref}
                 className={twMerge(
-                    "h-10 px-4 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-md",
+                    "",
                     className,
                 )}
                 {...props}
@@ -469,12 +469,9 @@ const VaultPrimaryButton = React.forwardRef<
     } & HTMLMotionProps<"button">
 >(({ className, variant = "default", ...props }, ref) => {
     const variantStyles = {
-        default:
-            "bg-primary hover:bg-primary-hover dark:bg-primary dark:hover:bg-primary-hover",
-        destructive:
-            "bg-destructive hover:bg-destructive-hover dark:bg-destructive dark:hover:bg-destructive-hover",
-        secondary:
-            "bg-secondary hover:bg-secondary-hover dark:bg-secondary dark:hover:bg-secondary-hover",
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
     };
 
     return (
@@ -484,8 +481,8 @@ const VaultPrimaryButton = React.forwardRef<
             whileTap={{ scale: 0.98 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             className={twMerge(
-                `min-w-fit flex flex-1 items-center justify-center flex-row gap-2 px-7 py-3 lg:text-lg md:text-base text-sm font-semibold text-white rounded-md 
-        transition-all duration-150 focus:outline-none 
+                `min-w-fit flex flex-1 items-center justify-center flex-row gap-2 px-7 py-3 text-sm font-heading rounded-full
+        transition-all duration-150 focus:outline-none
         disabled:opacity-50 disabled:cursor-not-allowed
         ${variantStyles[variant]}`,
                 className,
@@ -507,12 +504,10 @@ const VaultSecondaryButton = React.forwardRef<
             whileTap={{ scale: 0.98 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             className={twMerge(
-                `flex items-center justify-center gap-2 flex-row min-w-fit px-6 py-3 lg:text-lg md:text-base text-sm font-semibold 
-        text-gray-700 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-200
-        bg-slate-300/50 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700
-        rounded-md transition-all duration-150
-        border border-gray-200/50 dark:border-gray-600/50 
-        hover:border-gray-300/70 dark:hover:border-gray-500/70
+                `flex items-center justify-center gap-2 flex-row min-w-fit px-6 py-3 text-sm font-heading
+        text-foreground hover:bg-secondary
+        bg-transparent rounded-full transition-all duration-150
+        border border-border
         disabled:opacity-50 disabled:cursor-not-allowed`,
                 className,
             )}

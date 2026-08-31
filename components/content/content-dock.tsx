@@ -1,0 +1,15 @@
+"use client";
+
+import { useSelectionStore } from "@/lib/store/selection-store";
+import { BulkActionBar } from "./bulk-action-bar";
+import { AssistantDock } from "@/components/assistant/assistant-dock";
+import type { NoteStatus } from "@/lib/store/notes-store";
+
+/**
+ * Selecting notes and asking the assistant both want the bottom-of-screen dock,
+ * so only one shows at a time — bulk actions take over the moment something's selected.
+ */
+export function ContentDock({ status }: { status: NoteStatus }) {
+  const hasSelection = useSelectionStore((s) => s.selectedIds.length > 0);
+  return hasSelection ? <BulkActionBar status={status} /> : <AssistantDock />;
+}
