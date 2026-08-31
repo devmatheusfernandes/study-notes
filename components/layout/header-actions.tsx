@@ -13,6 +13,7 @@ import {
   VaultDescription,
 } from "@/components/ui/vault";
 import { useDevice } from "@/hooks/ui/use-device";
+import { useFileUpload } from "@/hooks/use-file-upload";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
 
@@ -21,9 +22,9 @@ export function HeaderActions() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const { upload, isUploading } = useFileUpload();
 
   const createFolder = useNotesStore((s) => s.createFolder);
-  const addFiles = useNotesStore((s) => s.addFiles);
   const folders = useNotesStore((s) => s.folders);
   const activeFolderId = useFolderViewStore((s) => s.activeFolderId);
   const activeFolderName = folders.find((f) => f.id === activeFolderId)?.name;
@@ -38,10 +39,7 @@ export function HeaderActions() {
 
   function handleFiles(list: FileList | null) {
     if (!list || list.length === 0) return;
-    addFiles(
-      Array.from(list).map((f) => ({ name: f.name, size: f.size })),
-      activeFolderId ?? undefined
-    );
+    void upload(Array.from(list), activeFolderId ?? undefined);
     if (fileInput.current) fileInput.current.value = "";
   }
 
@@ -55,12 +53,14 @@ export function HeaderActions() {
             type="file"
             multiple
             hidden
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jwpub,.png,.jpg,.jpeg,.webp"
             onChange={(e) => handleFiles(e.target.files)}
           />
           <Button
             variant="ghost"
             size="icon"
             aria-label="Enviar arquivos"
+            isLoading={isUploading}
             onClick={() => fileInput.current?.click()}
           >
             <Upload className="size-[18px]" />

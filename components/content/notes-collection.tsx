@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { notify } from "@/components/ui/toaster";
 import { NoteCard } from "./note-card";
 import { FolderCard } from "./folder-card";
 import { useNotesStore, selectByStatus, type Note, type NoteStatus } from "@/lib/store/notes-store";
@@ -14,6 +15,7 @@ import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { useSelectionStore } from "@/lib/store/selection-store";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { FileDropZone } from "./file-drop-zone";
+import { getFileUrl } from "@/app/(app)/files-actions";
 
 interface NotesCollectionProps {
   status: NoteStatus;
@@ -89,6 +91,26 @@ export function NotesCollection({
     : [];
   const foldersVisible = childFolders.length > 0;
 
+  async function openNote(note: Note) {
+    if (!note.storagePath) {
+      // Text notes (and legacy seed/demo file cards with no real upload) use the editor.
+      router.push(`/notes/${note.id}`);
+      return;
+    }
+
+    // Open the tab synchronously, on the click itself, so browsers don't treat
+    // the later redirect as an unrequested popup once the signed URL resolves.
+    const tab = window.open("", "_blank");
+    const { url, error } = await getFileUrl(note.storagePath);
+    if (error || !url) {
+      tab?.close();
+      notify.error("Não foi possível abrir o arquivo", error);
+      return;
+    }
+    if (tab) tab.location.href = url;
+    else window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   const renderCard = (note: Note) => (
     <NoteCard
       key={note.id}
@@ -104,7 +126,7 @@ export function NotesCollection({
       selectionMode={selectionMode}
       selected={isSelected(note.id)}
       onToggleSelect={toggleSelect}
-      onOpen={() => router.push(`/notes/${note.id}`)}
+      onOpen={() => void openNote(note)}
       onTogglePin={status === "active" ? () => togglePin(note.id) : undefined}
       onArchive={status === "active" ? () => archive(note.id) : undefined}
       onRestore={status !== "active" ? () => restore(note.id) : undefined}

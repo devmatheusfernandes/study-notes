@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Upload } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 import { useDevice } from "@/hooks/ui/use-device";
-import { useNotesStore } from "@/lib/store/notes-store";
+import { useFileUpload } from "@/hooks/use-file-upload";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
 
 /**
@@ -17,7 +17,7 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
   // dragenter/dragleave fire for every child element, so count depth instead of toggling.
   const depth = useRef(0);
 
-  const addFiles = useNotesStore((s) => s.addFiles);
+  const { upload, isUploading } = useFileUpload();
   const activeFolderId = useFolderViewStore((s) => s.activeFolderId);
 
   if (isMobile) return <>{children}</>;
@@ -55,10 +55,7 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
         setDragging(false);
         const files = Array.from(e.dataTransfer.files);
         if (files.length === 0) return;
-        addFiles(
-          files.map((f) => ({ name: f.name, size: f.size })),
-          activeFolderId ?? undefined
-        );
+        void upload(files, activeFolderId ?? undefined);
       }}
     >
       {children}
@@ -79,6 +76,20 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
             <span className="text-[13px] text-muted-foreground">
               Os arquivos entram na pasta aberta.
             </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isUploading && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="pointer-events-none fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-elevated px-4 py-2 text-[13px] text-foreground shadow-[0_14px_34px_rgba(0,0,0,0.5)]"
+          >
+            <Loader2 className="size-4 animate-spin text-accent" />
+            Enviando arquivos…
           </motion.div>
         )}
       </AnimatePresence>

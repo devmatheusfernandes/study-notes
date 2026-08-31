@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { SyncStatus } from "@/components/content/sync-status";
+import { deleteStorageFile } from "@/app/(app)/files-actions";
 
 export type NoteType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "arquivo";
 export type NoteStatus = "active" | "archived" | "trashed";
@@ -33,6 +34,8 @@ export interface Note {
   updatedAt: number;
   /** Folder this item lives in, if any. Notes and files share the same folders. */
   folderId?: string;
+  /** Supabase Storage object path (`${userId}/...`) — only set for real uploaded files, never for notes or seed/demo data. */
+  storagePath?: string;
 }
 
 export interface Folder {
@@ -186,7 +189,7 @@ interface NotesStore {
   createFolder: (name: string, parentId?: string) => string;
   renameFolder: (id: string, name: string) => void;
   deleteFolder: (id: string) => void;
-  addFiles: (files: { name: string; size: number }[], folderId?: string) => void;
+  addFiles: (files: { name: string; size: number; storagePath: string }[], folderId?: string) => void;
   togglePin: (id: string) => void;
   archive: (id: string) => void;
   trash: (id: string) => void;
@@ -218,8 +221,8 @@ export const useNotesStore = create<NotesStore>()(
       renameFolder: (id, name) =>
         set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, name } : f)) })),
 
-      // NOTE: registers the files locally only — there is no Supabase Storage
-      // bucket configured yet, so nothing is uploaded to a server.
+      // Files are already uploaded to Supabase Storage by the time this runs
+      // (see app/(app)/files-actions.ts) — this just indexes them locally.
       addFiles: (files, folderId) =>
         set((s) => ({
           notes: [
@@ -227,13 +230,14 @@ export const useNotesStore = create<NotesStore>()(
               id: `n${Date.now().toString(36)}${index}`,
               type: typeFromFileName(file.name),
               title: file.name,
-              body: `${formatFileSize(file.size)} · aguardando envio`,
+              body: formatFileSize(file.size),
               meta: "Agora",
               pinned: false,
               status: "active" as const,
-              syncStatus: "local" as const,
+              syncStatus: "synced" as const,
               updatedAt: Date.now(),
               folderId,
+              storagePath: file.storagePath,
             })),
             ...s.notes,
           ],
@@ -276,7 +280,11 @@ export const useNotesStore = create<NotesStore>()(
           notes: s.notes.map((n) => (n.id === id ? { ...n, status: "active" as const } : n)),
         })),
 
-      deletePermanently: (id) => set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
+      deletePermanently: (id) => {
+        const note = get().notes.find((n) => n.id === id);
+        if (note?.storagePath) void deleteStorageFile(note.storagePath);
+        set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+      },
 
       rename: (id, title) =>
         set((s) => ({
@@ -310,6 +318,9 @@ export const useNotesStore = create<NotesStore>()(
 
       bulkDeletePermanently: (ids) => {
         const set_ = new Set(ids);
+        get()
+          .notes.filter((n) => set_.has(n.id) && n.storagePath)
+          .forEach((n) => void deleteStorageFile(n.storagePath!));
         set((s) => ({ notes: s.notes.filter((n) => !set_.has(n.id)) }));
       },
 
