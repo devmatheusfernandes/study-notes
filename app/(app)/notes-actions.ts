@@ -2,6 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteStorageFile } from "./files-actions";
+import { deleteNoteImages } from "./note-images-actions";
+import { extractNoteImagePaths } from "@/lib/note-images";
 import type { NoteType } from "@/lib/file-types";
 
 export interface NoteRow {
@@ -149,8 +151,9 @@ export async function deleteNotePermanently(id: string): Promise<{ error?: strin
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data: note } = await supabase.from("notes").select("storage_path").eq("id", id).single();
+  const { data: note } = await supabase.from("notes").select("storage_path, body").eq("id", id).single();
   if (note?.storage_path) await deleteStorageFile(note.storage_path);
+  if (note?.body) await deleteNoteImages(extractNoteImagePaths(note.body));
 
   const { error } = await supabase.from("notes").delete().eq("id", id);
   return error ? { error: "Não foi possível excluir." } : {};
@@ -160,9 +163,10 @@ export async function bulkDeleteNotesPermanently(ids: string[]): Promise<{ error
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data: notes } = await supabase.from("notes").select("storage_path").in("id", ids);
-  const paths = (notes ?? []).map((n) => n.storage_path).filter((p): p is string => !!p);
-  await Promise.all(paths.map((p) => deleteStorageFile(p)));
+  const { data: notes } = await supabase.from("notes").select("storage_path, body").in("id", ids);
+  const filePaths = (notes ?? []).map((n) => n.storage_path).filter((p): p is string => !!p);
+  const imagePaths = (notes ?? []).flatMap((n) => (n.body ? extractNoteImagePaths(n.body) : []));
+  await Promise.all([...filePaths.map((p) => deleteStorageFile(p)), deleteNoteImages(imagePaths)]);
 
   const { error } = await supabase.from("notes").delete().in("id", ids);
   return error ? { error: "Não foi possível excluir." } : {};

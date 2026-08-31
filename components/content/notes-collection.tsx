@@ -113,6 +113,7 @@ export function NotesCollection({
   const trash = useNotesStore((s) => s.trash);
   const restore = useNotesStore((s) => s.restore);
   const deletePermanently = useNotesStore((s) => s.deletePermanently);
+  const toggleChecklistItem = useNotesStore((s) => s.toggleChecklistItem);
   const viewMode = usePreferencesStore((s) => s.viewMode);
 
   const isTrashed = status === "trashed";
@@ -176,6 +177,7 @@ export function NotesCollection({
       onArchive={status === "active" ? () => archive(note.id) : undefined}
       onRestore={status !== "active" ? () => restore(note.id) : undefined}
       onDelete={isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
+      onToggleChecklistItem={(index) => toggleChecklistItem(note.id, index)}
     />
   );
 

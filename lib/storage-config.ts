@@ -32,3 +32,30 @@ export const MAX_FILES_PER_BATCH = 5;
 /** Sliding-window abuse guard, checked against the user's own recent uploads (see app/(app)/files-actions.ts). */
 export const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 export const RATE_LIMIT_MAX_UPLOADS = 20;
+
+/**
+ * Separate from `files` on purpose: images embedded inline in a note's rich
+ * text need a stable, unauthenticated URL (an <img src>, possibly cached by
+ * the browser/CDN for a long time) — the `files` bucket's 60s signed URLs
+ * can't serve that. This bucket is provisioned `public: true` (anon read),
+ * writes still go through the service-role client only. The `user_id/`
+ * path prefix (same convention as `files`) keeps objects from being
+ * guessable even though the bucket itself is publicly readable.
+ */
+export const NOTE_IMAGES_BUCKET = "note-images";
+
+export const ALLOWED_IMAGE_EXTENSIONS: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+export const ALLOWED_IMAGE_MIME_TYPES = [...new Set(Object.values(ALLOWED_IMAGE_EXTENSIONS))];
+
+/** 8 MB — inline note images don't need the same headroom as document uploads. */
+export const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
+
+export const IMAGE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+export const IMAGE_RATE_LIMIT_MAX_UPLOADS = 40;

@@ -21,7 +21,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SyncStatusIndicator, type SyncStatus } from "./sync-status";
+import { parseNotePreview } from "@/lib/note-preview";
 
 export type ContentType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "arquivo";
 
@@ -73,6 +75,8 @@ export interface NoteCardProps {
   onArchive?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
+  /** Checks/unchecks one of the checklist items shown in the preview, by its index among all of them. */
+  onToggleChecklistItem?: (index: number) => void;
 }
 
 export function NoteCard({
@@ -95,12 +99,21 @@ export function NoteCard({
   onArchive,
   onRestore,
   onDelete,
+  onToggleChecklistItem,
 }: NoteCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const config = TYPE_CONFIG[type];
-  const raw = body ?? description;
-  const text = raw ? toPreview(raw) : undefined;
   const isList = variant === "list";
+
+  // Text notes carry rich HTML (formatting preserved in the excerpt); files
+  // just carry a plain one-line description (e.g. "2.3 MB") — only the
+  // former is worth parsing for a checklist/image.
+  const preview = type === "nota" ? parseNotePreview(body ?? "") : undefined;
+  const previewHtml = preview ? preview.html : undefined;
+  const plainText = !preview && description ? toPreview(description) : undefined;
+  const checklist = preview?.checklist;
+  const checklistRemaining = preview?.checklistRemaining ?? 0;
+  const previewImageUrl = checklist ? undefined : preview?.imageUrl;
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFired = useRef(false);
@@ -263,12 +276,24 @@ export function NoteCard({
           type="button"
           onClick={handleOpen}
           {...openButtonProps}
-          className="flex min-w-0 flex-1 flex-col text-left"
+          className="group/open flex min-w-0 flex-1 flex-col text-left"
           style={{ touchAction: "manipulation" }}
         >
-          <span className="truncate font-heading text-[15px]">{title}</span>
-          {text && (
-            <span className="truncate text-[12.5px] text-muted-foreground">{text}</span>
+          <span className="truncate font-heading text-[15px] transition-colors group-hover/open:text-accent">
+            {title}
+          </span>
+          {checklist ? (
+            <span className="truncate text-[12.5px] text-muted-foreground">
+              {checklist.filter((i) => i.checked).length}/
+              {checklist.length + (checklistRemaining ?? 0)} concluídas
+            </span>
+          ) : previewHtml ? (
+            <span
+              className="truncate text-[12.5px] text-muted-foreground"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          ) : (
+            plainText && <span className="truncate text-[12.5px] text-muted-foreground">{plainText}</span>
           )}
         </button>
 
@@ -283,7 +308,7 @@ export function NoteCard({
   return (
     <div
       className={cn(
-        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-colors cursor-pointer",
+        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-colors",
         pinned
           ? "border-transparent bg-primary/[0.12] ring-1 ring-primary/25"
           : "border-transparent bg-secondary hover:border-accent/40"
@@ -310,16 +335,72 @@ export function NoteCard({
         type="button"
         onClick={handleOpen}
         {...openButtonProps}
-        className="flex flex-1 flex-col gap-1.5 text-left"
+        className="group/open flex flex-col gap-1.5 text-left cursor-pointer"
         style={{ touchAction: "manipulation" }}
       >
-        <span className="font-heading text-[17px] leading-tight text-balance">{title}</span>
-        {text && (
+        <span className="font-heading text-[17px] leading-tight text-balance transition-colors group-hover/open:text-accent">
+          {title}
+        </span>
+
+        {previewImageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element -- public Storage URL, not a local asset Next can optimize
+          <img
+            src={previewImageUrl}
+            alt=""
+            className="max-h-40 w-full rounded-xl object-cover"
+          />
+        )}
+
+        {!checklist && previewHtml && (
+          <span
+            className="text-[12.5px] leading-relaxed text-muted-foreground text-pretty"
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        )}
+        {!checklist && plainText && (
           <span className="text-[12.5px] leading-relaxed text-muted-foreground text-pretty">
-            {text}
+            {plainText}
           </span>
         )}
       </button>
+
+      {/* Deliberately a sibling of the open-button above, not nested inside
+          it — these need their own click target (toggle the item) that's
+          fully independent of "open the note", not just a stopped click
+          bubble inside an interactive element. */}
+      {checklist && (
+        <ul className="flex flex-1 flex-col gap-0.5">
+          {checklist.map((item, i) => (
+            <li key={i}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleChecklistItem?.(i);
+                }}
+                className="flex w-full items-center gap-2 text-left"
+              >
+                <span className="shrink-0 cursor-pointer">
+                  {/* The row's own button (above) drives the toggle — this is
+                      display-only, so it doesn't double-fire on click. */}
+                  <Checkbox checked={item.checked} className="pointer-events-none hover:bg-muted" tabIndex={-1} readOnly />
+                </span>
+                <span
+                  className={cn(
+                    "text-pretty text-[12.5px] leading-relaxed text-muted-foreground hover:text-foreground transition-colors duration-150 ease-out",
+                    item.checked && "text-muted-foreground/50 line-through"
+                  )}
+                >
+                  {item.text}
+                </span>
+              </button>
+            </li>
+          ))}
+          {checklistRemaining > 0 && (
+            <li className="pl-[26px] text-[12px] text-muted-foreground/70">+{checklistRemaining} mais</li>
+          )}
+        </ul>
+      )}
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-1 text-[11px] text-muted-foreground/70">
         <span>{meta}</span>

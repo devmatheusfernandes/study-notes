@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, Pin } from "lucide-react";
+import { ArrowLeft, ImagePlus, Pin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SyncStatusIndicator } from "@/components/content/sync-status";
+import { RichTextEditor, type RichTextEditorHandle } from "@/components/content/rich-text-editor";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useHydrated } from "@/components/providers/store-hydration";
 
@@ -36,6 +37,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   // Once a new note is persisted we keep writing to that same id.
   const createdId = useRef<string | null>(noteId ?? null);
   const seeded = useRef(false);
+  const editorRef = useRef<RichTextEditorHandle>(null);
 
   // Adopt the persisted note once localStorage rehydrates.
   useEffect(() => {
@@ -87,6 +89,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           Voltar
         </Button>
         <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => editorRef.current?.openImagePicker()}
+            aria-label="Inserir imagem"
+            className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <ImagePlus className="size-4" />
+          </button>
           {current && (
             <button
               type="button"
@@ -118,12 +128,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
         <SyncStatusIndicator status={current?.syncStatus ?? "local"} />
 
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Comece a escrever…"
-          aria-label="Conteúdo da nota"
-          className="min-h-[50vh] w-full flex-1 resize-none bg-transparent text-base leading-relaxed text-foreground/90 outline-none placeholder:text-muted-foreground/50"
+        <RichTextEditor
+          ref={editorRef}
+          content={body}
+          onChange={setBody}
+          autoFocus={!noteId}
+          className="flex flex-1 flex-col"
         />
       </div>
     </motion.main>

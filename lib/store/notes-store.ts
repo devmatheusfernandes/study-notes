@@ -19,6 +19,9 @@ import {
   type NoteRow,
   type FolderRow,
 } from "@/app/(app)/notes-actions";
+import { toggleChecklistItemInHtml } from "@/lib/note-preview";
+import { removedNoteImagePaths } from "@/lib/note-images";
+import { deleteNoteImages } from "@/app/(app)/note-images-actions";
 
 export type { NoteType };
 export type NoteStatus = "active" | "archived" | "trashed";
@@ -114,6 +117,8 @@ interface NotesStore {
   bulkDeletePermanently: (ids: string[]) => void;
   addNote: (note: { title: string; body: string; folderId?: string }) => string;
   updateNote: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
+  /** Flips one checklist item's checked state directly from a card preview, by its index among all task items in the note. */
+  toggleChecklistItem: (id: string, itemIndex: number) => void;
 }
 
 /** Runs a Server Action; a thrown error means the request never reached the origin (offline), so it's queued instead of surfaced as a failure. Returns which of the two happened. */
@@ -404,6 +409,8 @@ export const useNotesStore = create<NotesStore>()(
 
       updateNote: (id, patch) => {
         const now = Date.now();
+        const previousBody = get().notes.find((n) => n.id === id)?.body;
+
         set((s) => ({
           notes: s.notes.map((n) =>
             n.id === id
@@ -411,6 +418,16 @@ export const useNotesStore = create<NotesStore>()(
               : n
           ),
         }));
+
+        // An image the user just deleted from the text shouldn't linger in
+        // Storage forever — diffed client-side (both bodies are already in
+        // memory here) rather than adding a round trip to every autosave on
+        // the server. Best-effort: no outbox/retry, no error surfaced if it
+        // fails — worst case is an orphaned object, not lost data.
+        if (patch.body !== undefined && previousBody !== undefined) {
+          const removed = removedNoteImagePaths(previousBody, patch.body);
+          if (removed.length > 0) void deleteNoteImages(removed);
+        }
 
         // A later edit to the same note replaces any still-queued earlier one —
         // only the latest text needs to reach the server, not every keystroke batch.
@@ -431,6 +448,12 @@ export const useNotesStore = create<NotesStore>()(
           // the user just typed. The sync dot is the signal; the next edit retries.
           if (outcome === "rejected") notify.error("Não foi possível salvar");
         });
+      },
+
+      toggleChecklistItem: (id, itemIndex) => {
+        const note = get().notes.find((n) => n.id === id);
+        if (!note) return;
+        get().updateNote(id, { body: toggleChecklistItemInHtml(note.body, itemIndex) });
       },
     }),
     {
