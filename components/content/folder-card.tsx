@@ -31,7 +31,7 @@ export function FolderCard({ name, itemCount, onOpen, onRename, onDelete }: Fold
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-3xl bg-card p-4 text-left transition-colors hover:bg-secondary">
+    <div className="cursor-pointer flex items-center gap-3 rounded-3xl bg-card p-4 text-left transition-colors hover:bg-secondary">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-accent">
         <Folder className="size-[18px]" />
       </span>

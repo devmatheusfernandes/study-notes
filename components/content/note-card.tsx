@@ -283,7 +283,7 @@ export function NoteCard({
   return (
     <div
       className={cn(
-        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-colors",
+        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-colors cursor-pointer",
         pinned
           ? "border-transparent bg-primary/[0.12] ring-1 ring-primary/25"
           : "border-transparent bg-secondary hover:border-accent/40"

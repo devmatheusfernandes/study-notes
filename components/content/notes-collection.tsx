@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
@@ -37,6 +37,7 @@ export function NotesCollection({
   const hydrated = useHydrated();
   const activeFolder = useFolderViewStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderViewStore((s) => s.setActiveFolder);
+  const searchParams = useSearchParams();
 
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const isSelected = useSelectionStore((s) => s.isSelected);
@@ -45,11 +46,55 @@ export function NotesCollection({
   const setVisibleIds = useSelectionStore((s) => s.setVisibleIds);
   const selectionMode = selectedIds.length > 0;
 
-  // Folder scoping only applies to the main content screen; leaving it (or
-  // landing on archived/trash) drops back to the root.
+  // Folder scoping only applies to the main content screen — landing on
+  // archived/trash drops back to the root. (Deliberately no unmount cleanup
+  // here anymore: the folder now lives in the URL, so leaving /notes and
+  // coming back to the same `?folder=` should reopen it, not reset it — and
+  // an unconditional reset-on-unmount also fired spuriously under React
+  // Strict Mode's dev-only mount→cleanup→remount cycle, wiping out a
+  // just-adopted deep link before it ever rendered.)
   useEffect(() => {
     if (!showFolders) setActiveFolder(null);
-    return () => setActiveFolder(null);
+  }, [showFolders, setActiveFolder]);
+
+  // Mirrors the open folder into `?folder=<id>` so it's deep-linkable and the
+  // browser's back/forward buttons step through folder navigation — using
+  // plain History APIs (not next/navigation's router) so drilling into a
+  // folder never triggers a real Next.js navigation/remount of this screen.
+  const suppressNextUrlPush = useRef(false);
+  const didAdoptFromUrl = useRef(false);
+
+  useEffect(() => {
+    if (!showFolders || didAdoptFromUrl.current) return;
+    didAdoptFromUrl.current = true;
+    const folderParam = searchParams.get("folder");
+    if (folderParam) {
+      suppressNextUrlPush.current = true;
+      setActiveFolder(folderParam);
+    }
+  }, [showFolders, searchParams, setActiveFolder]);
+
+  useEffect(() => {
+    if (!showFolders) return;
+    if (suppressNextUrlPush.current) {
+      suppressNextUrlPush.current = false;
+      return;
+    }
+    const url = new URL(window.location.href);
+    if (activeFolder) url.searchParams.set("folder", activeFolder);
+    else url.searchParams.delete("folder");
+    if (url.href === window.location.href) return;
+    window.history.pushState(null, "", url);
+  }, [activeFolder, showFolders]);
+
+  useEffect(() => {
+    if (!showFolders) return;
+    function onPopState() {
+      suppressNextUrlPush.current = true;
+      setActiveFolder(new URLSearchParams(window.location.search).get("folder"));
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, [showFolders, setActiveFolder]);
 
   // A selection shouldn't survive switching screens or drilling into a folder —
