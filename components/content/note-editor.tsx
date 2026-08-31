@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, Pin } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,15 +13,16 @@ import { useHydrated } from "@/components/providers/store-hydration";
 interface NoteEditorProps {
   /** Existing note id, or undefined for a brand-new note. */
   noteId?: string;
-  /** Initial body text (used by the drag-to-create gesture from the dock). */
-  initialBody?: string;
-  /** Folder the new note should be created in, when created from inside one. */
-  folderId?: string;
 }
 
-export function NoteEditor({ noteId, initialBody = "", folderId }: NoteEditorProps) {
+export function NoteEditor({ noteId }: NoteEditorProps) {
   const router = useRouter();
   const hydrated = useHydrated();
+  // Read client-side (not as server searchParams) so /notes/new stays a
+  // static shell — see the comment on that page.
+  const searchParams = useSearchParams();
+  const initialBody = noteId ? "" : searchParams.get("q") ?? "";
+  const folderId = noteId ? undefined : searchParams.get("folder") ?? undefined;
 
   const notes = useNotesStore((s) => s.notes);
   const addNote = useNotesStore((s) => s.addNote);

@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { typeFromFileName, formatFileSize, type NoteType } from "@/lib/file-types";
 import {
   ALLOWED_EXTENSIONS,
   FILES_BUCKET,
@@ -13,9 +14,12 @@ import {
 } from "@/lib/storage-config";
 
 export interface UploadedFile {
-  name: string;
-  size: number;
+  id: string;
+  type: NoteType;
+  title: string;
+  body: string;
   storagePath: string;
+  updatedAt: number;
 }
 
 export interface UploadFilesResult {
@@ -49,7 +53,10 @@ async function countRecentUploads(userId: string) {
   return data.filter((f) => f.created_at && new Date(f.created_at).getTime() > cutoff).length;
 }
 
-export async function uploadFiles(formData: FormData): Promise<UploadFilesResult> {
+export async function uploadFiles(
+  formData: FormData,
+  folderId?: string
+): Promise<UploadFilesResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -98,12 +105,12 @@ export async function uploadFiles(formData: FormData): Promise<UploadFilesResult
     const contentType = ALLOWED_EXTENSIONS[ext];
     const storagePath = `${user.id}/${randomUUID()}-${sanitizeFileName(file.name)}`;
 
-    const { error } = await admin.storage.from(FILES_BUCKET).upload(storagePath, file, {
+    const { error: uploadError } = await admin.storage.from(FILES_BUCKET).upload(storagePath, file, {
       contentType,
       upsert: false,
     });
 
-    if (error) {
+    if (uploadError) {
       // Best-effort batch: report what succeeded, surface the first failure.
       return {
         files: uploaded,
@@ -111,7 +118,39 @@ export async function uploadFiles(formData: FormData): Promise<UploadFilesResult
       };
     }
 
-    uploaded.push({ name: file.name, size: file.size, storagePath });
+    // The bytes are in Storage; now index it as a real note row (RLS-scoped —
+    // this uses the caller's own session, not the admin client above).
+    const { data: row, error: dbError } = await supabase
+      .from("notes")
+      .insert({
+        user_id: user.id,
+        type: typeFromFileName(file.name),
+        title: file.name,
+        body: formatFileSize(file.size),
+        storage_path: storagePath,
+        folder_id: folderId ?? null,
+      })
+      .select("id, type, title, body, storage_path, updated_at")
+      .single();
+
+    if (dbError || !row) {
+      // The file made it to Storage but has no note row — clean up rather
+      // than leave an orphaned object the user can never see or delete.
+      await admin.storage.from(FILES_BUCKET).remove([storagePath]);
+      return {
+        files: uploaded,
+        error: `Falha ao registrar "${file.name}". ${uploaded.length > 0 ? "Os demais arquivos foram enviados." : ""}`,
+      };
+    }
+
+    uploaded.push({
+      id: row.id,
+      type: row.type as NoteType,
+      title: row.title,
+      body: row.body,
+      storagePath: row.storage_path!,
+      updatedAt: new Date(row.updated_at).getTime(),
+    });
   }
 
   return { files: uploaded };

@@ -74,6 +74,22 @@ export function AssistantDock({ variant = "floating" }: AssistantDockProps) {
 
   useEffect(() => () => clearHold(), [clearHold]);
 
+  // Warms the Router Cache for the note editor while online, so the
+  // press-and-drag gesture below can open it purely from that cache (no RSC
+  // fetch) if the user is offline by the time they actually use the gesture.
+  // `kind: "full"` matters here — the default "auto" prefetch only grabs the
+  // static shell for a dynamic route (this whole (app) subtree is dynamic,
+  // since its layout fetches the signed-in user's notes/folders per request),
+  // leaving the actual page content to be fetched at navigation time, which
+  // is exactly the fetch that fails offline.
+  useEffect(() => {
+    // PrefetchKind.FULL isn't part of the public next/navigation API, but its
+    // value is just the string "full" — routed straight through to the
+    // reducer without importing the internal enum type.
+    type PrefetchOptions = Parameters<typeof router.prefetch>[1];
+    router.prefetch("/notes/new", { kind: "full" } as PrefetchOptions);
+  }, [router]);
+
   async function submit() {
     const question = value.trim();
     if (!question) return;

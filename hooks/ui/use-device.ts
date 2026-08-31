@@ -18,6 +18,8 @@ interface DeviceStore {
   
   // Device State
   isMobile: boolean;
+  /** `navigator.onLine` mirrored into the store — see components/providers/device-listener.tsx. */
+  isOnline: boolean;
 
   // Actions
   setDeferredPrompt: (prompt: BeforeInstallPromptEvent | null) => void;
@@ -25,6 +27,7 @@ interface DeviceStore {
   setStandalone: (isStandalone: boolean) => void;
   setRegistration: (reg: ServiceWorkerRegistration | null) => void;
   setIsMobile: (isMobile: boolean) => void;
+  setIsOnline: (isOnline: boolean) => void;
   
   // Operations
   install: () => Promise<void>;
@@ -37,12 +40,16 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   isStandalone: false,
   registration: null,
   isMobile: false,
+  // Assume online for the first server/client render — matches navigator.onLine's
+  // own default and avoids a false "offline" flash before the listener mounts.
+  isOnline: true,
 
   setDeferredPrompt: (prompt) => set({ deferredPrompt: prompt }),
   setUpdateAvailable: (available) => set({ updateAvailable: available }),
   setStandalone: (isStandalone) => set({ isStandalone }),
   setRegistration: (reg) => set({ registration: reg }),
   setIsMobile: (isMobile) => set({ isMobile }),
+  setIsOnline: (isOnline) => set({ isOnline }),
 
   install: async () => {
     const { deferredPrompt } = get();
@@ -85,7 +92,8 @@ export function useDevice() {
   return {
     // Device
     isMobile: store.isMobile,
-    
+    isOnline: store.isOnline,
+
     // PWA
     isStandalone: store.isStandalone,
     isInstallable: !!store.deferredPrompt,

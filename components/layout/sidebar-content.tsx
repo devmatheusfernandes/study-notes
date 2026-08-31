@@ -6,6 +6,8 @@ import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SIDEBAR_NAV_ITEMS } from "./sidebar-nav-items";
+import { usePendingSyncCount } from "@/lib/store/notes-store";
+import { useDeviceStore } from "@/hooks/ui/use-device";
 
 interface SidebarContentProps {
   collapsed?: boolean;
@@ -65,6 +67,8 @@ function NavLink({
 
 export function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
+  const pendingCount = usePendingSyncCount();
+  const isOnline = useDeviceStore((s) => s.isOnline);
 
   return (
     <TooltipProvider delay={200}>
@@ -92,11 +96,18 @@ export function SidebarContent({ collapsed = false, onNavigate }: SidebarContent
         <div className="mt-auto flex flex-col gap-3">
           {!collapsed && (
             <div className="flex flex-col gap-1.5 rounded-3xl bg-secondary p-3.5">
-              <span className="font-mono text-[10px] font-medium tracking-[0.08em] text-success">
-                OFFLINE-FIRST
+              <span
+                className={cn(
+                  "font-mono text-[10px] font-medium tracking-[0.08em]",
+                  isOnline ? "text-success" : "text-accent"
+                )}
+              >
+                {isOnline ? "OFFLINE-FIRST" : "SEM CONEXÃO"}
               </span>
               <span className="text-[12px] leading-relaxed text-muted-foreground">
-                Suas notas continuam disponíveis sem conexão.
+                {pendingCount > 0
+                  ? `${pendingCount} alteraç${pendingCount === 1 ? "ão" : "ões"} aguardando sincronização.`
+                  : "Suas notas continuam disponíveis sem conexão."}
               </span>
             </div>
           )}

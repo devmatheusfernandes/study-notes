@@ -5,13 +5,11 @@ export const metadata: Metadata = {
   title: "Nova nota — Study Notes",
 };
 
-export default async function NewNotePage(props: PageProps<"/notes/new">) {
-  const { q, folder } = await props.searchParams;
-
-  return (
-    <NoteEditor
-      initialBody={typeof q === "string" ? q : ""}
-      folderId={typeof folder === "string" ? folder : undefined}
-    />
-  );
+// No async params/searchParams read here on purpose: NoteEditor reads them
+// client-side via useSearchParams(). That keeps this page free of any
+// dynamic server API, so Next can prerender it statically — the same static
+// shell then serves every "new note" navigation, offline included, instead
+// of needing a fresh RSC fetch keyed to that request's query string.
+export default function NewNotePage() {
+  return <NoteEditor />;
 }

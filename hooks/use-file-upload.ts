@@ -17,7 +17,7 @@ export function useFileUpload() {
       const formData = new FormData();
       files.forEach((file) => formData.append("files", file));
 
-      const result = await uploadFiles(formData);
+      const result = await uploadFiles(formData, folderId);
 
       if (result.files.length > 0) {
         addFiles(result.files, folderId);

@@ -1,26 +1,27 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { SyncStatus } from "@/components/content/sync-status";
-import { deleteStorageFile } from "@/app/(app)/files-actions";
+import type { NoteType } from "@/lib/file-types";
+import { formatRelativeMeta } from "@/lib/format-date";
+import { notify } from "@/components/ui/toaster";
+import type { UploadedFile } from "@/app/(app)/files-actions";
+import {
+  createNoteRow,
+  updateNoteRow,
+  setNotePinned,
+  setNoteStatus,
+  bulkSetNoteStatus,
+  deleteNotePermanently as deleteNoteRowPermanently,
+  bulkDeleteNotesPermanently as bulkDeleteNoteRowsPermanently,
+  createFolderRow,
+  renameFolderRow,
+  deleteFolderRow,
+  type NoteRow,
+  type FolderRow,
+} from "@/app/(app)/notes-actions";
 
-export type NoteType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "arquivo";
+export type { NoteType };
 export type NoteStatus = "active" | "archived" | "trashed";
-
-/** Maps an uploaded file's extension onto one of our card types. */
-export function typeFromFileName(name: string): NoteType {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "pdf") return "pdf";
-  if (ext === "doc" || ext === "docx") return "docx";
-  if (ext === "xls" || ext === "xlsx" || ext === "csv") return "xlsx";
-  if (ext === "jwpub") return "jwpub";
-  return "arquivo";
-}
-
-export function formatFileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace(".", ",")} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
-}
 
 export interface Note {
   id: string;
@@ -34,7 +35,7 @@ export interface Note {
   updatedAt: number;
   /** Folder this item lives in, if any. Notes and files share the same folders. */
   folderId?: string;
-  /** Supabase Storage object path (`${userId}/...`) — only set for real uploaded files, never for notes or seed/demo data. */
+  /** Supabase Storage object path (`${userId}/...`) — only set for real uploaded files, never for text notes. */
   storagePath?: string;
 }
 
@@ -45,287 +46,329 @@ export interface Folder {
   parentId?: string;
 }
 
-const SEED_FOLDERS: Folder[] = [
-  { id: "f1", name: "Estudo Semanal" },
-  { id: "f2", name: "Discursos" },
-  { id: "f3", name: "Arquivos antigos" },
-];
+function toNote(row: NoteRow): Note {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    body: row.body,
+    meta: formatRelativeMeta(row.updatedAt),
+    pinned: row.pinned,
+    status: row.status,
+    syncStatus: "synced",
+    updatedAt: row.updatedAt,
+    folderId: row.folderId,
+    storagePath: row.storagePath,
+  };
+}
 
-// Seeded with varied body lengths so the masonry layout has real height
-// variation to work with (the Keep-style look depends on it).
-const SEED: Note[] = [
-  {
-    id: "n1",
-    folderId: "f1",
-    type: "nota",
-    title: "Resumo do capítulo 4",
-    body: "O ponto central do capítulo é a diferença entre preparo e improviso. Três trechos merecem atenção na revisão desta semana. A ordem das semanas 40 e 41 foi trocada no cronograma, e isso muda o material que precisa estar pronto antes.",
-    meta: "Editado há 2 h",
-    pinned: true,
-    status: "active",
-    syncStatus: "local",
-    updatedAt: Date.now() - 2 * 60 * 60 * 1000,
-  },
-  {
-    id: "n2",
-    type: "nota",
-    title: "Perguntas para revisar",
-    body: "Lista curta para o próximo encontro.",
-    meta: "27 ago",
-    pinned: true,
-    status: "active",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n3",
-    folderId: "f2",
-    type: "nota",
-    title: "Como elaborar um esboço",
-    body: "O objetivo central é tocar o coração. O nosso propósito não é apenas transmitir informações, mas fazer o coração dos irmãos arder. A lição de Lucas 24:32: os discípulos sentiram o coração arder porque Jesus abriu plenamente as Escrituras. Não é o orador ou seu cargo que impacta a assistência, mas as Escrituras. Não use o esboço para explicar a Bíblia — use a Bíblia para ensinar o que está no esboço.",
-    meta: "Hoje",
-    pinned: false,
-    status: "active",
-    syncStatus: "local",
-    updatedAt: Date.now() - 30 * 60 * 1000,
-  },
-  {
-    id: "n4",
-    folderId: "f1",
-    type: "pdf",
-    title: "Apostila-2026.pdf",
-    body: "4,2 MB · indexado para busca",
-    meta: "28 ago",
-    pinned: false,
-    status: "active",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 4 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n5",
-    folderId: "f1",
-    type: "nota",
-    title: "Como fazer pesquisas",
-    body: "Normalmente, basta fazer uma procura simples. Muitas vezes, basta saber localizar uma única palavra ou um texto bíblico nas publicações. No entanto, às vezes pode ser necessária uma procura mais detalhada a fim de encontrar um texto específico.",
-    meta: "25 ago",
-    pinned: false,
-    status: "active",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 6 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n6",
-    folderId: "f3",
-    type: "jwpub",
-    title: "biblioteca-2026.jwpub",
-    body: "Importado e disponível offline",
-    meta: "21 ago",
-    pinned: false,
-    status: "active",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 9 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n7",
-    type: "nota",
-    title: "Indicação não depende de fluência no idioma local",
-    body: "O corpo de anciãos não deve segurar a recomendação de um irmão como servo ministerial ou ancião só porque ele ainda não é fluente no idioma da congregação. O que os anciãos devem analisar é se o irmão se encaixa nas qualificações bíblicas.",
-    meta: "20 ago",
-    pinned: false,
-    status: "active",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 10 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n8",
-    folderId: "f3",
-    type: "xlsx",
-    title: "Cronograma.xlsx",
-    body: "Semanas 34–52",
-    meta: "19 ago",
-    pinned: false,
-    status: "active",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 11 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n9",
-    type: "docx",
-    title: "Rascunho-ensaio.docx",
-    body: "Aguardando sincronização",
-    meta: "Hoje",
-    pinned: false,
-    status: "active",
-    syncStatus: "local",
-    updatedAt: Date.now() - 60 * 60 * 1000,
-  },
-  {
-    id: "n10",
-    type: "nota",
-    title: "Paz e Segurança",
-    body: "(1Ts 5:1, 2) O dia de Jeová começa com a destruição da religião falsa e vai até o Armagedom.",
-    meta: "18 ago",
-    pinned: false,
-    status: "archived",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 12 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: "n11",
-    type: "nota",
-    title: "Anotações antigas",
-    body: "Rascunho que não uso mais.",
-    meta: "10 ago",
-    pinned: false,
-    status: "trashed",
-    syncStatus: "synced",
-    updatedAt: Date.now() - 20 * 24 * 60 * 60 * 1000,
-  },
-];
+function toFolder(row: FolderRow): Folder {
+  return { id: row.id, name: row.name, parentId: row.parentId };
+}
+
+/**
+ * The offline outbox. Every mutation that touches the server goes through
+ * `runOrQueue`, which attempts the Server Action right away and — only if the
+ * `fetch()` itself throws (no network reachable the origin, not a server
+ * rejection) — records it here instead of losing it. `key` is what makes an
+ * op "the same slot": a second `updateNote` for the same note replaces the
+ * first instead of stacking, so a burst of offline keystrokes queues once.
+ */
+type PendingOp =
+  | { key: string; entityId: string; kind: "createNote"; payload: { id: string; title: string; body: string; folderId?: string } }
+  | { key: string; entityId: string; kind: "updateNote"; payload: { id: string; patch: { title?: string; body?: string } } }
+  | { key: string; entityId: string; kind: "setNotePinned"; payload: { id: string; pinned: boolean } }
+  | { key: string; entityId: string; kind: "setNoteStatus"; payload: { id: string; status: NoteStatus } }
+  | { key: string; entityId: string; kind: "deleteNote"; payload: { id: string } }
+  | { key: string; entityId: string; kind: "createFolder"; payload: { id: string; name: string; parentId?: string } }
+  | { key: string; entityId: string; kind: "renameFolder"; payload: { id: string; name: string } }
+  | { key: string; entityId: string; kind: "deleteFolder"; payload: { id: string } };
 
 interface NotesStore {
   notes: Note[];
   folders: Folder[];
+  /** False until `hydrate` runs — gate rendering on this, not on "has some component mounted". */
+  hydrated: boolean;
+  /** Mutations that failed to reach the server (offline) and are waiting for reconnection, keyed so retries coalesce. */
+  pendingOps: Record<string, PendingOp>;
+  /** Seeds the store from the server-fetched rows — see components/providers/store-hydration.tsx. */
+  hydrate: (notes: NoteRow[], folders: FolderRow[]) => void;
+  /** Replays every queued op in order; stops at the first one that still can't reach the server. */
+  syncPendingOps: () => Promise<void>;
+
   createFolder: (name: string, parentId?: string) => string;
   renameFolder: (id: string, name: string) => void;
   deleteFolder: (id: string) => void;
-  addFiles: (files: { name: string; size: number; storagePath: string }[], folderId?: string) => void;
+  /** Files are already uploaded and indexed server-side by the time this runs — see hooks/use-file-upload.ts. */
+  addFiles: (files: UploadedFile[], folderId?: string) => void;
+
   togglePin: (id: string) => void;
   archive: (id: string) => void;
   trash: (id: string) => void;
   restore: (id: string) => void;
   /** Removes a note for good — only meaningful for items already in the trash. */
   deletePermanently: (id: string) => void;
-  rename: (id: string, title: string) => void;
   bulkArchive: (ids: string[]) => void;
   bulkRestore: (ids: string[]) => void;
   bulkTrash: (ids: string[]) => void;
   bulkDeletePermanently: (ids: string[]) => void;
-  addNote: (note: Pick<Note, "title" | "body"> & { folderId?: string }) => string;
+  addNote: (note: { title: string; body: string; folderId?: string }) => string;
   updateNote: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
-  getNote: (id: string) => Note | undefined;
+}
+
+/** Runs a Server Action; a thrown error means the request never reached the origin (offline), so it's queued instead of surfaced as a failure. Returns which of the two happened. */
+async function runOrQueue(
+  set: SetFn,
+  get: GetFn,
+  op: PendingOp,
+  action: () => Promise<{ error?: string }>
+): Promise<"synced" | "queued" | "rejected"> {
+  try {
+    const res = await action();
+    set((s) => {
+      const { [op.key]: _drop, ...rest } = s.pendingOps;
+      return { pendingOps: rest };
+    });
+    if (res.error) return "rejected";
+    return "synced";
+  } catch {
+    enqueueOp(set, op);
+    return "queued";
+  }
+}
+
+/** Applies coalescing rules: same-slot ops replace in place, and a delete queued behind an unsynced create cancels both out instead of round-tripping a doomed create-then-delete. */
+function enqueueOp(set: SetFn, op: PendingOp) {
+  set((s) => {
+    const next = { ...s.pendingOps };
+    if (op.kind === "deleteNote" || op.kind === "deleteFolder") {
+      const createKind = op.kind === "deleteNote" ? "createNote" : "createFolder";
+      const hadUnsyncedCreate = Object.values(next).some((p) => p.kind === createKind && p.entityId === op.entityId);
+      for (const key of Object.keys(next)) {
+        if (next[key].entityId === op.entityId) delete next[key];
+      }
+      if (hadUnsyncedCreate) return { pendingOps: next };
+    }
+    next[op.key] = op;
+    return { pendingOps: next };
+  });
+}
+
+function opAction(op: PendingOp): () => Promise<{ error?: string }> {
+  switch (op.kind) {
+    case "createNote":
+      return () => createNoteRow(op.payload);
+    case "updateNote":
+      return () => updateNoteRow(op.payload.id, op.payload.patch);
+    case "setNotePinned":
+      return () => setNotePinned(op.payload.id, op.payload.pinned);
+    case "setNoteStatus":
+      return () => setNoteStatus(op.payload.id, op.payload.status);
+    case "deleteNote":
+      return () => deleteNoteRowPermanently(op.payload.id);
+    case "createFolder":
+      return () => createFolderRow(op.payload);
+    case "renameFolder":
+      return () => renameFolderRow(op.payload.id, op.payload.name);
+    case "deleteFolder":
+      return () => deleteFolderRow(op.payload.id);
+  }
 }
 
 export const useNotesStore = create<NotesStore>()(
   persist(
     (set, get) => ({
-      notes: SEED,
-      folders: SEED_FOLDERS,
+      notes: [],
+      folders: [],
+      hydrated: false,
+      pendingOps: {},
+
+      hydrate: (rows, folderRows) =>
+        set((s) => {
+          const pendingByEntity = new Map(Object.values(s.pendingOps).map((op) => [op.entityId, op.kind]));
+          const isDeletedLocally = (id: string) => {
+            const kind = pendingByEntity.get(id);
+            return kind === "deleteNote" || kind === "deleteFolder";
+          };
+          const localNotes = new Map(s.notes.map((n) => [n.id, n]));
+          const localFolders = new Map(s.folders.map((f) => [f.id, f]));
+
+          const serverIds = new Set(rows.map((r) => r.id));
+          const serverFolderIds = new Set(folderRows.map((f) => f.id));
+
+          const mergedNotes = rows
+            .filter((row) => !isDeletedLocally(row.id))
+            .map((row) => (pendingByEntity.has(row.id) && localNotes.has(row.id) ? localNotes.get(row.id)! : toNote(row)));
+          const localOnlyNotes = s.notes.filter((n) => pendingByEntity.has(n.id) && !serverIds.has(n.id) && !isDeletedLocally(n.id));
+
+          const mergedFolders = folderRows
+            .filter((row) => !isDeletedLocally(row.id))
+            .map((row) => (pendingByEntity.has(row.id) && localFolders.has(row.id) ? localFolders.get(row.id)! : toFolder(row)));
+          const localOnlyFolders = s.folders.filter((f) => pendingByEntity.has(f.id) && !serverFolderIds.has(f.id) && !isDeletedLocally(f.id));
+
+          return {
+            notes: [...localOnlyNotes, ...mergedNotes],
+            folders: [...localOnlyFolders, ...mergedFolders],
+            hydrated: true,
+          };
+        }),
+
+      syncPendingOps: async () => {
+        // Snapshot + FIFO by insertion order; stop at the first op that's still
+        // unreachable so ordering is preserved (e.g. a create before its update).
+        const ops = Object.values(get().pendingOps);
+        for (const op of ops) {
+          if (!get().pendingOps[op.key]) continue; // already resolved by a later coalesced op
+          const outcome = await runOrQueue(set, get, op, opAction(op));
+          if (outcome === "queued") break; // still offline — stop and retry the whole batch next time
+          if (outcome === "rejected") {
+            set((s) => {
+              const { [op.key]: _drop, ...rest } = s.pendingOps;
+              return { pendingOps: rest };
+            });
+            notify.error("Não foi possível sincronizar uma alteração");
+          }
+          if (op.kind === "createNote" || op.kind === "updateNote") {
+            set((s) => ({ notes: s.notes.map((n) => (n.id === op.entityId ? { ...n, syncStatus: outcome === "synced" ? "synced" : n.syncStatus } : n)) }));
+          }
+        }
+      },
 
       createFolder: (name, parentId) => {
-        const id = `f${Date.now().toString(36)}`;
+        const id = crypto.randomUUID();
         set((s) => ({ folders: [...s.folders, { id, name, parentId }] }));
+
+        const op: PendingOp = { key: `folder:${id}`, entityId: id, kind: "createFolder", payload: { id, name, parentId } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ folders: s.folders.filter((f) => f.id !== id) }));
+            notify.error("Não foi possível criar a pasta");
+          }
+        });
+
         return id;
       },
 
-      renameFolder: (id, name) =>
-        set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, name } : f)) })),
+      renameFolder: (id, name) => {
+        const previous = get().folders.find((f) => f.id === id)?.name;
+        set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, name } : f)) }));
 
-      // Files are already uploaded to Supabase Storage by the time this runs
-      // (see app/(app)/files-actions.ts) — this just indexes them locally.
+        const op: PendingOp = { key: `folder:${id}`, entityId: id, kind: "renameFolder", payload: { id, name } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected" && previous !== undefined) {
+            set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, name: previous } : f)) }));
+            notify.error("Não foi possível renomear a pasta");
+          }
+        });
+      },
+
+      // Removing a folder keeps its contents — notes and any nested subfolders
+      // just move up to wherever the deleted folder itself lived.
+      deleteFolder: (id) => {
+        const prevFolders = get().folders;
+        const prevNotes = get().notes;
+        const parentId = prevFolders.find((f) => f.id === id)?.parentId;
+
+        set((s) => ({
+          folders: s.folders
+            .filter((f) => f.id !== id)
+            .map((f) => (f.parentId === id ? { ...f, parentId } : f)),
+          notes: s.notes.map((n) => (n.folderId === id ? { ...n, folderId: parentId } : n)),
+        }));
+
+        const op: PendingOp = { key: `folder:${id}`, entityId: id, kind: "deleteFolder", payload: { id } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set({ folders: prevFolders, notes: prevNotes });
+            notify.error("Não foi possível excluir a pasta");
+          }
+        });
+      },
+
       addFiles: (files, folderId) =>
         set((s) => ({
           notes: [
-            ...files.map((file, index) => ({
-              id: `n${Date.now().toString(36)}${index}`,
-              type: typeFromFileName(file.name),
-              title: file.name,
-              body: formatFileSize(file.size),
-              meta: "Agora",
-              pinned: false,
-              status: "active" as const,
-              syncStatus: "synced" as const,
-              updatedAt: Date.now(),
-              folderId,
-              storagePath: file.storagePath,
-            })),
+            ...files.map(
+              (file): Note => ({
+                id: file.id,
+                type: file.type,
+                title: file.title,
+                body: file.body,
+                meta: formatRelativeMeta(file.updatedAt),
+                pinned: false,
+                status: "active",
+                syncStatus: "synced",
+                updatedAt: file.updatedAt,
+                folderId,
+                storagePath: file.storagePath,
+              })
+            ),
             ...s.notes,
           ],
         })),
 
-      // Removing a folder keeps its contents — notes and any nested subfolders
-      // just move up to wherever the deleted folder itself lived.
-      deleteFolder: (id) =>
-        set((s) => {
-          const parentId = s.folders.find((f) => f.id === id)?.parentId;
-          return {
-            folders: s.folders
-              .filter((f) => f.id !== id)
-              .map((f) => (f.parentId === id ? { ...f, parentId } : f)),
-            notes: s.notes.map((n) => (n.folderId === id ? { ...n, folderId: parentId } : n)),
-          };
-        }),
+      togglePin: (id) => {
+        const note = get().notes.find((n) => n.id === id);
+        if (!note) return;
+        const nextPinned = !note.pinned;
 
-      togglePin: (id) =>
-        set((s) => ({
-          notes: s.notes.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n)),
-        })),
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, pinned: nextPinned } : n)) }));
 
-      archive: (id) =>
-        set((s) => ({
-          notes: s.notes.map((n) =>
-            n.id === id ? { ...n, status: "archived" as const, pinned: false } : n
-          ),
-        })),
+        const op: PendingOp = { key: `note:${id}:pin`, entityId: id, kind: "setNotePinned", payload: { id, pinned: nextPinned } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, pinned: !nextPinned } : n)) }));
+            notify.error("Não foi possível fixar a nota");
+          }
+        });
+      },
 
-      trash: (id) =>
-        set((s) => ({
-          notes: s.notes.map((n) =>
-            n.id === id ? { ...n, status: "trashed" as const, pinned: false } : n
-          ),
-        })),
-
-      restore: (id) =>
-        set((s) => ({
-          notes: s.notes.map((n) => (n.id === id ? { ...n, status: "active" as const } : n)),
-        })),
+      archive: (id) => applyStatus(set, get, id, "archived"),
+      trash: (id) => applyStatus(set, get, id, "trashed"),
+      restore: (id) => applyStatus(set, get, id, "active"),
 
       deletePermanently: (id) => {
-        const note = get().notes.find((n) => n.id === id);
-        if (note?.storagePath) void deleteStorageFile(note.storagePath);
+        const previous = get().notes;
         set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+
+        const op: PendingOp = { key: `note:${id}:delete`, entityId: id, kind: "deleteNote", payload: { id } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set({ notes: previous });
+            notify.error("Não foi possível excluir");
+          }
+        });
       },
 
-      rename: (id, title) =>
-        set((s) => ({
-          notes: s.notes.map((n) => (n.id === id ? { ...n, title, updatedAt: Date.now() } : n)),
-        })),
-
-      bulkArchive: (ids) => {
-        const set_ = new Set(ids);
-        set((s) => ({
-          notes: s.notes.map((n) =>
-            set_.has(n.id) ? { ...n, status: "archived" as const, pinned: false } : n
-          ),
-        }));
-      },
-
-      bulkRestore: (ids) => {
-        const set_ = new Set(ids);
-        set((s) => ({
-          notes: s.notes.map((n) => (set_.has(n.id) ? { ...n, status: "active" as const } : n)),
-        }));
-      },
-
-      bulkTrash: (ids) => {
-        const set_ = new Set(ids);
-        set((s) => ({
-          notes: s.notes.map((n) =>
-            set_.has(n.id) ? { ...n, status: "trashed" as const, pinned: false } : n
-          ),
-        }));
-      },
+      bulkArchive: (ids) => applyBulkStatus(set, get, ids, "archived"),
+      bulkRestore: (ids) => applyBulkStatus(set, get, ids, "active"),
+      bulkTrash: (ids) => applyBulkStatus(set, get, ids, "trashed"),
 
       bulkDeletePermanently: (ids) => {
-        const set_ = new Set(ids);
-        get()
-          .notes.filter((n) => set_.has(n.id) && n.storagePath)
-          .forEach((n) => void deleteStorageFile(n.storagePath!));
-        set((s) => ({ notes: s.notes.filter((n) => !set_.has(n.id)) }));
+        const idSet = new Set(ids);
+        const previous = get().notes;
+        set((s) => ({ notes: s.notes.filter((n) => !idSet.has(n.id)) }));
+
+        void bulkDeleteNoteRowsPermanently(ids)
+          .then((res) => {
+            if (res.error) {
+              set({ notes: previous });
+              notify.error("Não foi possível excluir", res.error);
+            }
+          })
+          .catch(() => {
+            // Offline: queue each id as its own delete op so the batch still
+            // syncs individually once the connection returns.
+            for (const id of ids) {
+              enqueueOp(set, { key: `note:${id}:delete`, entityId: id, kind: "deleteNote", payload: { id } });
+            }
+          });
       },
 
       addNote: ({ title, body, folderId }) => {
-        const id = `n${Date.now().toString(36)}`;
+        const id = crypto.randomUUID();
+        const now = Date.now();
+
         set((s) => ({
           notes: [
             {
@@ -333,31 +376,113 @@ export const useNotesStore = create<NotesStore>()(
               type: "nota" as const,
               title,
               body,
-              meta: "Agora",
+              meta: formatRelativeMeta(now),
               pinned: false,
               status: "active" as const,
               syncStatus: "local" as const,
-              updatedAt: Date.now(),
+              updatedAt: now,
               folderId,
             },
             ...s.notes,
           ],
         }));
+
+        const op: PendingOp = { key: `note:${id}`, entityId: id, kind: "createNote", payload: { id, title, body, folderId } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+            notify.error("Não foi possível salvar a nota");
+          } else {
+            set((s) => ({
+              notes: s.notes.map((n) => (n.id === id ? { ...n, syncStatus: outcome === "synced" ? "synced" : "local" } : n)),
+            }));
+          }
+        });
+
         return id;
       },
 
-      updateNote: (id, patch) =>
+      updateNote: (id, patch) => {
+        const now = Date.now();
         set((s) => ({
           notes: s.notes.map((n) =>
-            n.id === id ? { ...n, ...patch, updatedAt: Date.now(), syncStatus: "local" as const } : n
+            n.id === id
+              ? { ...n, ...patch, updatedAt: now, meta: formatRelativeMeta(now), syncStatus: "local" as const }
+              : n
           ),
-        })),
+        }));
 
-      getNote: (id) => get().notes.find((n) => n.id === id),
+        // A later edit to the same note replaces any still-queued earlier one —
+        // only the latest text needs to reach the server, not every keystroke batch.
+        const existingCreate = get().pendingOps[`note:${id}`];
+        const key = existingCreate?.kind === "createNote" ? `note:${id}` : `note:${id}:update`;
+        const op: PendingOp =
+          existingCreate?.kind === "createNote"
+            ? { ...existingCreate, payload: { ...existingCreate.payload, title: patch.title ?? existingCreate.payload.title, body: patch.body ?? existingCreate.payload.body } }
+            : { key, entityId: id, kind: "updateNote", payload: { id, patch } };
+
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          set((s) => ({
+            notes: s.notes.map((n) =>
+              n.id === id ? { ...n, syncStatus: outcome === "synced" ? "synced" : outcome === "queued" ? "local" : "offline" } : n
+            ),
+          }));
+          // Not rolling back the text on a real rejection — that would erase what
+          // the user just typed. The sync dot is the signal; the next edit retries.
+          if (outcome === "rejected") notify.error("Não foi possível salvar");
+        });
+      },
     }),
-    { name: "study-notes:notes", skipHydration: true }
+    {
+      name: "study-notes:notes",
+      skipHydration: true,
+      partialize: (s) => ({ notes: s.notes, folders: s.folders, pendingOps: s.pendingOps }),
+    }
   )
 );
+
+type SetFn = (partial: Partial<NotesStore> | ((s: NotesStore) => Partial<NotesStore>)) => void;
+type GetFn = () => NotesStore;
+
+function applyStatus(set: SetFn, get: GetFn, id: string, status: NoteStatus) {
+  const previous = get().notes;
+  set((s) => ({
+    notes: s.notes.map((n) =>
+      n.id === id ? { ...n, status, pinned: status === "active" ? n.pinned : false } : n
+    ),
+  }));
+
+  const op: PendingOp = { key: `note:${id}:status`, entityId: id, kind: "setNoteStatus", payload: { id, status } };
+  void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+    if (outcome === "rejected") {
+      set({ notes: previous });
+      notify.error("Não foi possível atualizar");
+    }
+  });
+}
+
+function applyBulkStatus(set: SetFn, get: GetFn, ids: string[], status: NoteStatus) {
+  const idSet = new Set(ids);
+  const previous = get().notes;
+  set((s) => ({
+    notes: s.notes.map((n) =>
+      idSet.has(n.id) ? { ...n, status, pinned: status === "active" ? n.pinned : false } : n
+    ),
+  }));
+
+  void bulkSetNoteStatus(ids, status)
+    .then((res) => {
+      if (res.error) {
+        set({ notes: previous });
+        notify.error("Não foi possível atualizar", res.error);
+      }
+    })
+    .catch(() => {
+      for (const id of ids) {
+        enqueueOp(set, { key: `note:${id}:status`, entityId: id, kind: "setNoteStatus", payload: { id, status } });
+      }
+    });
+}
 
 interface FolderScope {
   /** `null` means the folder root — notes filed into any folder are excluded. */
@@ -380,4 +505,9 @@ export function selectByStatus(notes: Note[], status: NoteStatus, folderScope?: 
     pinned: filtered.filter((n) => n.pinned).sort((a, b) => b.updatedAt - a.updatedAt),
     others: filtered.filter((n) => !n.pinned).sort((a, b) => b.updatedAt - a.updatedAt),
   };
+}
+
+/** Count of mutations waiting for a connection — drives the sidebar's offline-status card. */
+export function usePendingSyncCount() {
+  return useNotesStore((s) => Object.keys(s.pendingOps).length);
 }
