@@ -144,6 +144,13 @@ export function NotesCollection({
       return;
     }
 
+    // Publications are read in-app rather than downloaded — the route itself
+    // decides between the reader and the editor.
+    if (note.type === "jwpub") {
+      router.push(`/notes/${note.id}`);
+      return;
+    }
+
     // Open the tab synchronously, on the click itself, so browsers don't treat
     // the later redirect as an unrequested popup once the signed URL resolves.
     const tab = window.open("", "_blank");

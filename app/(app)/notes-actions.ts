@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { deleteStorageFile } from "./files-actions";
 import { deleteNoteImages } from "./note-images-actions";
+import { deletePublicationMediaForNote } from "./jwpub-actions";
 import { extractNoteImagePaths } from "@/lib/note-images";
 import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
@@ -156,10 +157,16 @@ export async function deleteNotePermanently(id: string): Promise<{ error?: strin
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data: note } = await supabase.from("notes").select("storage_path, body").eq("id", id).single();
+  const { data: note } = await supabase
+    .from("notes")
+    .select("storage_path, body, type")
+    .eq("id", id)
+    .single();
   if (note?.storage_path) await deleteStorageFile(note.storage_path);
   const body = decryptText(note?.body);
   if (body) await deleteNoteImages(extractNoteImagePaths(body));
+  // Publication rows cascade from `notes`, but their Storage media doesn't.
+  if (note?.type === "jwpub") await deletePublicationMediaForNote(id);
 
   const { error } = await supabase.from("notes").delete().eq("id", id);
   return error ? { error: "Não foi possível excluir." } : {};
@@ -169,13 +176,18 @@ export async function bulkDeleteNotesPermanently(ids: string[]): Promise<{ error
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data: notes } = await supabase.from("notes").select("storage_path, body").in("id", ids);
+  const { data: notes } = await supabase.from("notes").select("id, storage_path, body, type").in("id", ids);
   const filePaths = (notes ?? []).map((n) => n.storage_path).filter((p): p is string => !!p);
   const imagePaths = (notes ?? []).flatMap((n) => {
     const body = decryptText(n.body);
     return body ? extractNoteImagePaths(body) : [];
   });
-  await Promise.all([...filePaths.map((p) => deleteStorageFile(p)), deleteNoteImages(imagePaths)]);
+  const publicationIds = (notes ?? []).filter((n) => n.type === "jwpub").map((n) => n.id);
+  await Promise.all([
+    ...filePaths.map((p) => deleteStorageFile(p)),
+    deleteNoteImages(imagePaths),
+    ...publicationIds.map((noteId) => deletePublicationMediaForNote(noteId)),
+  ]);
 
   const { error } = await supabase.from("notes").delete().in("id", ids);
   return error ? { error: "Não foi possível excluir." } : {};

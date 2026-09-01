@@ -8,8 +8,8 @@ import { encryptText, decryptText } from "@/lib/encryption";
 import {
   ALLOWED_EXTENSIONS,
   FILES_BUCKET,
-  MAX_FILE_SIZE,
   MAX_FILES_PER_BATCH,
+  maxSizeForExtension,
   RATE_LIMIT_MAX_UPLOADS,
   RATE_LIMIT_WINDOW_MS,
 } from "@/lib/storage-config";
@@ -76,15 +76,17 @@ export async function uploadFiles(
   }
 
   for (const file of incoming) {
-    if (file.size > MAX_FILE_SIZE) {
-      return {
-        files: [],
-        error: `"${file.name}" excede o limite de ${MAX_FILE_SIZE / 1024 / 1024} MB.`,
-      };
-    }
     const ext = extensionOf(file.name);
     if (!(ext in ALLOWED_EXTENSIONS)) {
       return { files: [], error: `"${file.name}" tem um tipo de arquivo não suportado.` };
+    }
+    // `.jwpub` gets a bigger ceiling than everything else — see storage-config.
+    const maxSize = maxSizeForExtension(ext);
+    if (file.size > maxSize) {
+      return {
+        files: [],
+        error: `"${file.name}" excede o limite de ${maxSize / 1024 / 1024} MB.`,
+      };
     }
   }
 
