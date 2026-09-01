@@ -35,7 +35,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [title, setTitle] = useState(existing?.title ?? "");
   const [body, setBody] = useState(existing?.body ?? initialBody);
   // Once a new note is persisted we keep writing to that same id.
-  const createdId = useRef<string | null>(noteId ?? null);
+  const [createdId, setCreatedId] = useState<string | null>(noteId ?? null);
   const seeded = useRef(false);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
@@ -53,23 +53,24 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     if (!title.trim() && !body.trim()) return;
 
     const timer = setTimeout(() => {
-      if (createdId.current) {
-        updateNote(createdId.current, { title: title.trim() || "Nova nota", body });
+      if (createdId) {
+        updateNote(createdId, { title: title.trim() || "Nova nota", body });
       } else {
-        createdId.current = addNote({ title: title.trim() || "Nova nota", body, folderId });
+        const newId = addNote({ title: title.trim() || "Nova nota", body, folderId });
+        setCreatedId(newId);
         // Not router.replace(): that navigates from the /notes/new route tree
         // to /notes/[id], which remounts this whole component (replaying the
         // entrance animation and dropping focus — the "flicker"). A plain
         // history update keeps this same instance alive and just relabels
         // the URL bar, since nothing here actually depends on route params.
-        window.history.replaceState(null, "", `/notes/${createdId.current}`);
+        window.history.replaceState(null, "", `/notes/${newId}`);
       }
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [title, body, hydrated, addNote, updateNote, folderId]);
+  }, [title, body, hydrated, addNote, updateNote, folderId, createdId]);
 
-  const current = createdId.current ? notes.find((n) => n.id === createdId.current) : undefined;
+  const current = createdId ? notes.find((n) => n.id === createdId) : undefined;
   const pinned = current?.pinned ?? false;
 
   return (

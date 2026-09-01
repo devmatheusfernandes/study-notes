@@ -131,8 +131,9 @@ async function runOrQueue(
   try {
     const res = await action();
     set((s) => {
-      const { [op.key]: _drop, ...rest } = s.pendingOps;
-      return { pendingOps: rest };
+      const next = { ...s.pendingOps };
+      delete next[op.key];
+      return { pendingOps: next };
     });
     if (res.error) return "rejected";
     return "synced";
@@ -228,8 +229,9 @@ export const useNotesStore = create<NotesStore>()(
           if (outcome === "queued") break; // still offline — stop and retry the whole batch next time
           if (outcome === "rejected") {
             set((s) => {
-              const { [op.key]: _drop, ...rest } = s.pendingOps;
-              return { pendingOps: rest };
+              const next = { ...s.pendingOps };
+              delete next[op.key];
+              return { pendingOps: next };
             });
             notify.error("Não foi possível sincronizar uma alteração");
           }

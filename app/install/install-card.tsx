@@ -23,8 +23,10 @@ export function InstallCard() {
     const ua = window.navigator.userAgent;
     const isIOS = /iPad|iPhone|iPod/.test(ua) && !("MSStream" in window);
     const isAndroid = /Android/.test(ua);
-    setPlatform(isIOS ? "ios" : isAndroid ? "android" : "desktop");
-    setIsStandalone(window.matchMedia("(display-mode: standalone)").matches);
+    queueMicrotask(() => {
+      setPlatform(isIOS ? "ios" : isAndroid ? "android" : "desktop");
+      setIsStandalone(window.matchMedia("(display-mode: standalone)").matches);
+    });
 
     const onBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
