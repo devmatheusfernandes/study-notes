@@ -23,6 +23,14 @@ function extractExactPhrase(snippet?: string): string | undefined {
 }
 
 function sourceHref(source: ChatSource): string {
+  if (source.type === "video" || source.videoId) {
+    if (source.videoId) {
+      return `https://www.jw.org/finder?lank=${source.videoId}&wtlocale=P`;
+    }
+    if (source.videoUrl) return source.videoUrl;
+    return "https://www.jw.org";
+  }
+
   if (!source.noteId) return "/notes";
 
   const params = new URLSearchParams();
@@ -174,7 +182,8 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
             </span>
             <div className="flex flex-wrap gap-1.5">
               {sources.map((source, idx) => {
-                const Icon = source.type === "video" || source.videoId ? Video : sourceIcon(source.type);
+                const isVideo = source.type === "video" || Boolean(source.videoId);
+                const Icon = isVideo ? Video : sourceIcon(source.type);
                 const uniqueKey = source.videoId
                   ? `video-${source.videoId}-${idx}`
                   : source.noteId
@@ -184,6 +193,8 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
                   <Link
                     key={uniqueKey}
                     href={sourceHref(source)}
+                    target={isVideo ? "_blank" : undefined}
+                    rel={isVideo ? "noopener noreferrer" : undefined}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11.5px] text-accent",
                       "transition-colors hover:bg-accent/20 hover:border-accent/50"

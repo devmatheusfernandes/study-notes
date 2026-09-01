@@ -19,6 +19,14 @@ function extractExactPhrase(snippet?: string): string | undefined {
 }
 
 function sourceHref(source: AssistantSource): string {
+  if (source.type === "video" || source.videoId) {
+    if (source.videoId) {
+      return `https://www.jw.org/finder?lank=${source.videoId}&wtlocale=P`;
+    }
+    if (source.videoUrl) return source.videoUrl;
+    return "https://www.jw.org";
+  }
+
   if (!source.noteId) return "/notes";
 
   const params = new URLSearchParams();
@@ -131,20 +139,25 @@ function Conversation() {
                 FONTES
               </span>
               <div className="flex flex-wrap gap-2">
-                {sources.map((source) => (
-                  <Link
-                    key={`${source.noteId ?? source.videoId}-${source.chapterTitle ?? source.title}`}
-                    href={sourceHref(source)}
-                    onClick={() => close()}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-[12px] font-normal text-accent transition-colors hover:bg-accent/20"
-                  >
-                    <span className="font-mono text-[9px]">{source.type}</span>
-                    <span className="truncate max-w-[200px]">
-                      {source.chapterTitle ? `${source.title} — ${source.chapterTitle}` : source.title}
-                    </span>
-                    <ExternalLink className="size-3 shrink-0" />
-                  </Link>
-                ))}
+                {sources.map((source) => {
+                  const isVideo = source.type === "video" || Boolean(source.videoId);
+                  return (
+                    <Link
+                      key={`${source.noteId ?? source.videoId}-${source.chapterTitle ?? source.title}`}
+                      href={sourceHref(source)}
+                      target={isVideo ? "_blank" : undefined}
+                      rel={isVideo ? "noopener noreferrer" : undefined}
+                      onClick={() => !isVideo && close()}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-[12px] font-normal text-accent transition-colors hover:bg-accent/20"
+                    >
+                      <span className="font-mono text-[9px]">{source.type}</span>
+                      <span className="truncate max-w-[200px]">
+                        {source.chapterTitle ? `${source.title} — ${source.chapterTitle}` : source.title}
+                      </span>
+                      <ExternalLink className="size-3 shrink-0" />
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           )}
