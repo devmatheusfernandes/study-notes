@@ -14,6 +14,7 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
   const { id } = await props.params;
   const searchParams = await props.searchParams;
   const chapterParam = typeof searchParams?.chapter === "string" ? searchParams.chapter : undefined;
+  const docParam = typeof searchParams?.doc === "string" ? searchParams.doc : undefined;
 
   // An uploaded .jwpub gets the JwpubReader.
   const { publication, chapters } = await getPublication(id);
@@ -25,6 +26,7 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
           initialPublication={publication}
           initialChapters={chapters ?? []}
           initialChapterParam={chapterParam}
+          initialDocParam={docParam}
         />
       </Suspense>
     );

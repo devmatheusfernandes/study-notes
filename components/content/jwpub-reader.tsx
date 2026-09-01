@@ -19,6 +19,7 @@ interface JwpubReaderProps {
   initialPublication: PublicationSummary;
   initialChapters: ChapterSummary[];
   initialChapterParam?: string;
+  initialDocParam?: string;
 }
 
 export function JwpubReader({
@@ -26,6 +27,7 @@ export function JwpubReader({
   initialPublication,
   initialChapters,
   initialChapterParam,
+  initialDocParam,
 }: JwpubReaderProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -34,7 +36,27 @@ export function JwpubReader({
 
   const [publication, setPublication] = useState(initialPublication);
   const [chapters, setChapters] = useState(initialChapters);
-  const findChapterIndex = useCallback(
+
+  // `doc` (JWPUB documentId) is a stable, unique-per-chapter number — resolve
+  // it with an exact match ONLY, no title heuristics. Some books have a
+  // chapter whose title equals the book's own cover title except for
+  // capitalization ("Organizados para Fazer a Vontade de Jeová" is both the
+  // cover, documentId 0, and a real chapter, documentId 4) — a title-based
+  // lookup can't tell those apart since it normalizes case, but documentId can.
+  const findChapterIndexByDocId = useCallback(
+    (docParam?: string | null): number | undefined => {
+      if (!docParam) return undefined;
+      const num = parseInt(docParam, 10);
+      if (!Number.isFinite(num)) return undefined;
+      const docMatch = chapters.findIndex((c) => c.documentId === num);
+      return docMatch !== -1 ? docMatch : undefined;
+    },
+    [chapters]
+  );
+
+  // Title-based lookup — kept for links that only have a chapter title
+  // (no documentId), matched case-insensitively.
+  const findChapterIndexByTitle = useCallback(
     (paramVal?: string | null) => {
       if (!paramVal || chapters.length === 0) return 0;
 
@@ -47,12 +69,11 @@ export function JwpubReader({
       });
       if (titleIndex !== -1) return titleIndex;
 
-      // 2. Numeric match (chapter number, documentId, or position)
+      // 2. Numeric match (chapter number or position — NOT documentId, which
+      // goes through findChapterIndexByDocId instead)
       const numMatch = paramVal.match(/\d+/);
       if (numMatch) {
         const num = parseInt(numMatch[0], 10);
-        const docMatch = chapters.findIndex((c) => c.documentId === num);
-        if (docMatch !== -1) return docMatch;
 
         const numTitleIndex = chapters.findIndex((c) => {
           const t = c.title.toLowerCase();
@@ -75,21 +96,28 @@ export function JwpubReader({
     [chapters]
   );
 
+  const resolveChapterIndex = useCallback(
+    (docParam?: string | null, chapterParam?: string | null) =>
+      findChapterIndexByDocId(docParam) ?? findChapterIndexByTitle(chapterParam),
+    [findChapterIndexByDocId, findChapterIndexByTitle]
+  );
+
   const [activeIndex, setActiveIndex] = useState(() =>
-    findChapterIndex(initialChapterParam)
+    resolveChapterIndex(initialDocParam, initialChapterParam)
   );
 
   // Sync activeIndex with URL search parameters on client-side navigation
   useEffect(() => {
-    const chapterParam = searchParams.get("chapter") || searchParams.get("doc");
-    if (!chapterParam) return;
-    const targetIdx = findChapterIndex(chapterParam);
+    const docParam = searchParams.get("doc");
+    const chapterParam = searchParams.get("chapter");
+    if (!docParam && !chapterParam) return;
+    const targetIdx = resolveChapterIndex(docParam, chapterParam);
     if (targetIdx !== activeIndex) {
       queueMicrotask(() => {
         setActiveIndex(targetIdx);
       });
     }
-  }, [searchParams, findChapterIndex, activeIndex]);
+  }, [searchParams, resolveChapterIndex, activeIndex]);
   const [html, setHtml] = useState<string | null>(null);
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [showChapters, setShowChapters] = useState(false);

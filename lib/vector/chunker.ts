@@ -70,7 +70,20 @@ export function splitTextIntoChunks(text: string, chunkSize = 500, overlap = 80)
     }
 
     if (end >= clean.length) break;
-    start = Math.max(end - overlap, start + 1);
+
+    let nextStart = Math.max(end - overlap, start + 1);
+    // Stepping back by `overlap` can land mid-word (the *end* boundary above
+    // snaps to a sentence/space, but this back-step doesn't) — nudge forward
+    // to the next word boundary so no chunk's visible text starts truncated
+    // (this used to produce snippets like "ua devoção..." instead of "Sua
+    // devoção...", which then can't be found verbatim for highlighting).
+    if (clean[nextStart - 1] !== " ") {
+      const nextSpace = clean.indexOf(" ", nextStart);
+      if (nextSpace !== -1 && nextSpace < end) {
+        nextStart = nextSpace + 1;
+      }
+    }
+    start = nextStart;
   }
 
   return chunks;

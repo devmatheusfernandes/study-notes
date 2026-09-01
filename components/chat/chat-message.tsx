@@ -17,7 +17,11 @@ interface ChatMessageProps {
 function extractExactPhrase(snippet?: string): string | undefined {
   if (!snippet) return undefined;
   const clean = snippet.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  const words = clean.split(" ").filter((w) => w.length > 1);
+  // Keep every word, including one-letter ones ("a", "e", "o", "é"...) — those
+  // are essential connective words in Portuguese, and dropping them broke the
+  // "verbatim substring" assumption the reader's highlighter depends on
+  // (e.g. "devoção a Deus" would become "devoção Deus", which never matches).
+  const words = clean.split(" ").filter(Boolean);
   if (words.length === 0) return undefined;
   return words.slice(0, 6).join(" ");
 }
@@ -35,10 +39,16 @@ function sourceHref(source: ChatSource): string {
 
   const params = new URLSearchParams();
 
-  if (source.chapterTitle) {
+  // documentId is a stable, unique numeric id per chapter — prefer it over
+  // the title. Some JW books have a chapter whose title matches the book's
+  // own cover title except for capitalization (confirmed in "Organizados
+  // para Fazer a Vontade de Jeová": chapter 0 is the cover, chapter 4 is a
+  // real chapter with the same title in lowercase) — the reader's
+  // case-insensitive title lookup can't tell those apart, but documentId can.
+  if (source.documentId !== undefined) {
+    params.set("doc", String(source.documentId));
+  } else if (source.chapterTitle) {
     params.set("chapter", source.chapterTitle);
-  } else if (source.documentId !== undefined) {
-    params.set("chapter", String(source.documentId));
   }
 
   const phrase = extractExactPhrase(source.snippet);

@@ -111,8 +111,14 @@ export async function extractContentForNote(noteId: string): Promise<ExtractedCo
       const chText = stripHtmlTags(ch.content_html || "");
       if (!chText) continue;
 
-      const fullText = `${decryptedTitle} - ${chTitle}\n\n${chText}`.trim();
-      const chunks = splitTextIntoChunks(fullText);
+      // Chunk the chapter's own text only — title/chapterTitle already ride
+      // along in `metadata` below (and get labeled back in for the LLM's
+      // context). Gluing "{title} - {chapterTitle}" onto the front of the
+      // text used to consume part of every chapter's first chunk, so its
+      // cited snippet started with junk like "od_T.jwpub - Capítulo X" that
+      // never appears in the actual rendered chapter — the reader's
+      // highlight-by-text search could never find it there.
+      const chunks = splitTextIntoChunks(chText);
 
       for (const c of chunks) {
         allChunks.push({
