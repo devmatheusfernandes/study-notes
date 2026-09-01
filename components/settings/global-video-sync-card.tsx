@@ -71,23 +71,35 @@ export function GlobalVideoSyncCard() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="flex flex-col gap-1 rounded-2xl bg-secondary/50 p-3.5 border border-border/50">
           <span className="text-[11px] font-medium text-muted-foreground">Vídeos no Banco</span>
-          <span className="font-mono text-lg font-bold text-foreground">
-            {isLoadingStats ? "…" : stats.totalVideos.toLocaleString("pt-BR")}
-          </span>
+          {isLoadingStats ? (
+            <div className="h-7 w-16 animate-pulse rounded bg-muted/60" />
+          ) : (
+            <span className="font-mono text-lg font-bold text-foreground">
+              {stats.totalVideos.toLocaleString("pt-BR")}
+            </span>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl bg-secondary/50 p-3.5 border border-border/50">
           <span className="text-[11px] font-medium text-muted-foreground">Vetorizados (RAG)</span>
-          <span className="flex items-center gap-1.5 font-mono text-lg font-bold text-success">
-            {isLoadingStats ? "…" : stats.vectorizedCount.toLocaleString("pt-BR")}
-          </span>
+          {isLoadingStats ? (
+            <div className="h-7 w-16 animate-pulse rounded bg-muted/60" />
+          ) : (
+            <span className="flex items-center gap-1.5 font-mono text-lg font-bold text-success">
+              {stats.vectorizedCount.toLocaleString("pt-BR")}
+            </span>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 rounded-2xl bg-secondary/50 p-3.5 border border-border/50">
           <span className="text-[11px] font-medium text-muted-foreground">Pendentes na Fila</span>
-          <span className="font-mono text-lg font-bold text-accent">
-            {isLoadingStats ? "…" : stats.pendingCount.toLocaleString("pt-BR")}
-          </span>
+          {isLoadingStats ? (
+            <div className="h-7 w-16 animate-pulse rounded bg-muted/60" />
+          ) : (
+            <span className="font-mono text-lg font-bold text-accent">
+              {stats.pendingCount.toLocaleString("pt-BR")}
+            </span>
+          )}
         </div>
       </div>
 

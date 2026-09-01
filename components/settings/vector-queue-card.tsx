@@ -199,19 +199,35 @@ export function VectorQueueCard() {
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <div className="flex flex-col gap-0.5 rounded-2xl bg-secondary/60 p-3">
           <span className="font-mono text-[10px] text-muted-foreground">TOTAL NA FILA</span>
-          <span className="font-heading text-lg">{items.length}</span>
+          {isLoading ? (
+            <div className="h-6 w-12 animate-pulse rounded bg-muted/60 mt-0.5" />
+          ) : (
+            <span className="font-heading text-lg">{items.length}</span>
+          )}
         </div>
         <div className="flex flex-col gap-0.5 rounded-2xl bg-accent/10 p-3">
           <span className="font-mono text-[10px] text-accent">PENDENTES / PROCESSANDO</span>
-          <span className="font-heading text-lg text-accent">{pendingCount}</span>
+          {isLoading ? (
+            <div className="h-6 w-12 animate-pulse rounded bg-muted/60 mt-0.5" />
+          ) : (
+            <span className="font-heading text-lg text-accent">{pendingCount}</span>
+          )}
         </div>
         <div className="flex flex-col gap-0.5 rounded-2xl bg-destructive/10 p-3">
           <span className="font-mono text-[10px] text-destructive">COM ERRO</span>
-          <span className="font-heading text-lg text-destructive">{failedCount}</span>
+          {isLoading ? (
+            <div className="h-6 w-12 animate-pulse rounded bg-muted/60 mt-0.5" />
+          ) : (
+            <span className="font-heading text-lg text-destructive">{failedCount}</span>
+          )}
         </div>
         <div className="flex flex-col gap-0.5 rounded-2xl bg-success/10 p-3">
           <span className="font-mono text-[10px] text-success">CONCLUÍDOS</span>
-          <span className="font-heading text-lg text-success">{completedCount}</span>
+          {isLoading ? (
+            <div className="h-6 w-12 animate-pulse rounded bg-muted/60 mt-0.5" />
+          ) : (
+            <span className="font-heading text-lg text-success">{completedCount}</span>
+          )}
         </div>
       </div>
 
@@ -231,9 +247,21 @@ export function VectorQueueCard() {
         </div>
       )}
 
-      {/* List of items */}
       <div className="flex flex-col gap-2">
-        {items.length === 0 ? (
+        {isLoading ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-surface p-3.5 h-[76px] animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="size-7 rounded-xl bg-muted/60" />
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <div className="h-3 w-1/3 rounded bg-muted/60" />
+                  <div className="h-2.5 w-1/4 rounded bg-muted/60" />
+                </div>
+                <div className="h-5 w-20 rounded-full bg-muted/60" />
+              </div>
+            </div>
+          ))
+        ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-muted-foreground">
             <CheckCircle2 className="size-8 text-success/60" />
             <p className="text-[13px]">A fila de vetorização está totalmente limpa.</p>

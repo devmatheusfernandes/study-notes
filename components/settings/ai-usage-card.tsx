@@ -83,8 +83,17 @@ export function AiUsageCard() {
       </div>
 
       {isLoading ? (
-        <div className="py-8 text-center text-xs text-muted-foreground">
-          Carregando dados de uso…
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex flex-col gap-2 rounded-2xl bg-secondary/50 p-4 border border-border/50">
+              <div className="flex items-center gap-1.5">
+                <div className="size-3.5 rounded-full bg-muted/60 animate-pulse" />
+                <div className="h-3 w-24 rounded bg-muted/60 animate-pulse" />
+              </div>
+              <div className="h-7 w-20 mt-1 rounded bg-muted/60 animate-pulse" />
+              <div className="h-2.5 w-16 mt-0.5 rounded bg-muted/60 animate-pulse" />
+            </div>
+          ))}
         </div>
       ) : (
         <>
