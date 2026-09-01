@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { deleteStorageFile } from "./files-actions";
 import { deleteNoteImages } from "./note-images-actions";
 import { extractNoteImagePaths } from "@/lib/note-images";
+import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
 
 export interface NoteRow {
@@ -46,8 +47,8 @@ function mapNote(row: DbNoteRow): NoteRow {
   return {
     id: row.id,
     type: row.type as NoteType,
-    title: row.title,
-    body: row.body,
+    title: decryptText(row.title) ?? "",
+    body: decryptText(row.body) ?? "",
     storagePath: row.storage_path ?? undefined,
     pinned: row.pinned,
     status: row.status as NoteRow["status"],
@@ -95,8 +96,8 @@ export async function createNoteRow(input: {
   const { error } = await supabase.from("notes").insert({
     id: input.id,
     user_id: user.id,
-    title: input.title,
-    body: input.body,
+    title: encryptText(input.title),
+    body: encryptText(input.body),
     folder_id: input.folderId ?? null,
     type: "nota",
   });
@@ -111,7 +112,11 @@ export async function updateNoteRow(
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada. Entre novamente." };
 
-  const { error } = await supabase.from("notes").update(patch).eq("id", id);
+  const encryptedPatch: { title?: string | null; body?: string | null } = {};
+  if (patch.title !== undefined) encryptedPatch.title = encryptText(patch.title);
+  if (patch.body !== undefined) encryptedPatch.body = encryptText(patch.body);
+
+  const { error } = await supabase.from("notes").update(encryptedPatch).eq("id", id);
   return error ? { error: "Não foi possível salvar." } : {};
 }
 
@@ -153,7 +158,8 @@ export async function deleteNotePermanently(id: string): Promise<{ error?: strin
 
   const { data: note } = await supabase.from("notes").select("storage_path, body").eq("id", id).single();
   if (note?.storage_path) await deleteStorageFile(note.storage_path);
-  if (note?.body) await deleteNoteImages(extractNoteImagePaths(note.body));
+  const body = decryptText(note?.body);
+  if (body) await deleteNoteImages(extractNoteImagePaths(body));
 
   const { error } = await supabase.from("notes").delete().eq("id", id);
   return error ? { error: "Não foi possível excluir." } : {};
@@ -165,7 +171,10 @@ export async function bulkDeleteNotesPermanently(ids: string[]): Promise<{ error
 
   const { data: notes } = await supabase.from("notes").select("storage_path, body").in("id", ids);
   const filePaths = (notes ?? []).map((n) => n.storage_path).filter((p): p is string => !!p);
-  const imagePaths = (notes ?? []).flatMap((n) => (n.body ? extractNoteImagePaths(n.body) : []));
+  const imagePaths = (notes ?? []).flatMap((n) => {
+    const body = decryptText(n.body);
+    return body ? extractNoteImagePaths(body) : [];
+  });
   await Promise.all([...filePaths.map((p) => deleteStorageFile(p)), deleteNoteImages(imagePaths)]);
 
   const { error } = await supabase.from("notes").delete().in("id", ids);

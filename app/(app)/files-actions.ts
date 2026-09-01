@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { typeFromFileName, formatFileSize, type NoteType } from "@/lib/file-types";
+import { encryptText, decryptText } from "@/lib/encryption";
 import {
   ALLOWED_EXTENSIONS,
   FILES_BUCKET,
@@ -125,8 +126,8 @@ export async function uploadFiles(
       .insert({
         user_id: user.id,
         type: typeFromFileName(file.name),
-        title: file.name,
-        body: formatFileSize(file.size),
+        title: encryptText(file.name),
+        body: encryptText(formatFileSize(file.size)),
         storage_path: storagePath,
         folder_id: folderId ?? null,
       })
@@ -146,8 +147,8 @@ export async function uploadFiles(
     uploaded.push({
       id: row.id,
       type: row.type as NoteType,
-      title: row.title,
-      body: row.body,
+      title: decryptText(row.title) ?? "",
+      body: decryptText(row.body) ?? "",
       storagePath: row.storage_path!,
       updatedAt: new Date(row.updated_at).getTime(),
     });
