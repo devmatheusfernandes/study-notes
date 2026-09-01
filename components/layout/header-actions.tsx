@@ -53,7 +53,7 @@ export function HeaderActions() {
             type="file"
             multiple
             hidden
-            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jwpub,.png,.jpg,.jpeg,.webp"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.md,.json,.jwpub,.png,.jpg,.jpeg,.webp"
             onChange={(e) => handleFiles(e.target.files)}
           />
           <Button

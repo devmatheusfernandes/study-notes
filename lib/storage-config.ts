@@ -14,6 +14,8 @@ export const ALLOWED_EXTENSIONS: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   csv: "text/csv",
   txt: "text/plain",
+  md: "text/markdown",
+  json: "application/json",
   jwpub: "application/octet-stream",
   png: "image/png",
   jpg: "image/jpeg",

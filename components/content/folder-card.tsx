@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Folder, MoreHorizontal } from "lucide-react";
+import { useRef, useState } from "react";
+import { Folder, MoreHorizontal, Upload } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { extractDiscoveredItems, type DiscoveredFile } from "@/lib/import-notes";
 
 export interface FolderCardProps {
   name: string;
@@ -16,12 +17,22 @@ export interface FolderCardProps {
   onOpen?: () => void;
   onRename?: (name: string) => void;
   onDelete?: () => void;
+  onDropItems?: (items: DiscoveredFile[]) => void;
 }
 
-export function FolderCard({ name, itemCount, onOpen, onRename, onDelete }: FolderCardProps) {
+export function FolderCard({
+  name,
+  itemCount,
+  onOpen,
+  onRename,
+  onDelete,
+  onDropItems,
+}: FolderCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragDepth = useRef(0);
 
   function commit() {
     const next = draft.trim();
@@ -30,10 +41,60 @@ export function FolderCard({ name, itemCount, onOpen, onRename, onDelete }: Fold
     setEditing(false);
   }
 
+  function hasFiles(event: React.DragEvent) {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
   return (
-    <div className="cursor-pointer flex items-center gap-3 rounded-3xl bg-card p-4 text-left transition-colors hover:bg-secondary">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-accent">
-        <Folder className="size-[18px]" />
+    <div
+      className={`relative cursor-pointer flex items-center gap-3 rounded-3xl p-4 text-left transition-all duration-200 ${
+        isDragOver
+          ? "bg-accent/20 ring-2 ring-accent scale-[1.02] shadow-lg"
+          : "bg-card hover:bg-secondary"
+      }`}
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepth.current += 1;
+        setIsDragOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepth.current -= 1;
+        if (dragDepth.current <= 0) {
+          dragDepth.current = 0;
+          setIsDragOver(false);
+        }
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepth.current = 0;
+        setIsDragOver(false);
+
+        void extractDiscoveredItems(e.dataTransfer).then((discovered) => {
+          if (discovered.length > 0) {
+            onDropItems?.(discovered);
+          }
+        });
+      }}
+    >
+      <span
+        className={`flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+          isDragOver ? "bg-accent text-background" : "bg-primary/20 text-accent"
+        }`}
+      >
+        {isDragOver ? <Upload className="size-[18px] animate-bounce" /> : <Folder className="size-[18px]" />}
       </span>
 
       {editing ? (
@@ -56,7 +117,7 @@ export function FolderCard({ name, itemCount, onOpen, onRename, onDelete }: Fold
         <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col text-left">
           <span className="truncate font-heading text-[15px]">{name}</span>
           <span className="text-[11.5px] text-muted-foreground">
-            {itemCount} {itemCount === 1 ? "item" : "itens"}
+            {isDragOver ? "Soltar aqui" : `${itemCount} ${itemCount === 1 ? "item" : "itens"}`}
           </span>
         </button>
       )}

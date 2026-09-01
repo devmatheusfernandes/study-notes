@@ -5,6 +5,11 @@ import { notify } from "@/components/ui/toaster";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { uploadFiles, type UploadedFile } from "@/app/(app)/files-actions";
 import { ingestJwpubWithFeedback } from "@/lib/jwpub/ingest";
+import {
+  isNoteImportFile,
+  parseFileToNotes,
+  type DiscoveredFile,
+} from "@/lib/import-notes";
 
 /**
  * Matches each just-uploaded `.jwpub` back to its new note row (by filename,
@@ -19,39 +24,143 @@ async function ingestUploadedPublications(originals: File[], uploaded: UploadedF
   }
 }
 
-/** Shared upload flow for both the mobile header button and desktop drag-and-drop. */
+/** Shared upload & note import flow for header button, drop zone, and folder cards. */
 export function useFileUpload() {
   const [isUploading, setIsUploading] = useState(false);
   const addFiles = useNotesStore((s) => s.addFiles);
+  const addNote = useNotesStore((s) => s.addNote);
+  const createFolder = useNotesStore((s) => s.createFolder);
 
-  async function upload(files: File[], folderId?: string) {
-    if (files.length === 0) return;
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      files.forEach((file) => formData.append("files", file));
+  /** Resolves or creates nested subfolders for OS folder structures. */
+  function resolveFolderForPath(
+    folderPath: string[],
+    targetFolderId?: string
+  ): string | undefined {
+    if (folderPath.length === 0) return targetFolderId;
 
-      const result = await uploadFiles(formData, folderId);
+    let currentParentId = targetFolderId;
+    const folderCache = new Map<string, string>();
 
-      if (result.files.length > 0) {
-        addFiles(result.files, folderId);
-        // Publications get parsed in the browser after the card already exists,
-        // so a parse failure just leaves a normal file card behind.
-        void ingestUploadedPublications(files, result.files);
+    for (let i = 0; i < folderPath.length; i++) {
+      const pathKey = folderPath.slice(0, i + 1).join("/");
+      if (folderCache.has(pathKey)) {
+        currentParentId = folderCache.get(pathKey);
+        continue;
       }
-      if (result.error) {
-        notify.error("Não foi possível concluir o envio", result.error);
-      } else if (result.files.length > 0) {
+
+      const segmentName = folderPath[i];
+      const existingFolders = useNotesStore.getState().folders;
+      const match = existingFolders.find(
+        (f) =>
+          f.name.toLowerCase() === segmentName.toLowerCase() &&
+          (f.parentId ?? null) === (currentParentId ?? null)
+      );
+
+      if (match) {
+        currentParentId = match.id;
+      } else {
+        currentParentId = createFolder(segmentName, currentParentId);
+      }
+      folderCache.set(pathKey, currentParentId);
+    }
+
+    return currentParentId;
+  }
+
+  async function processDiscoveredItems(
+    items: DiscoveredFile[],
+    targetFolderId?: string
+  ) {
+    if (items.length === 0) return;
+    setIsUploading(true);
+
+    try {
+      let createdNotesCount = 0;
+      const binaryFilesByFolder = new Map<
+        string,
+        { folderId?: string; files: File[] }
+      >();
+
+      for (const item of items) {
+        const itemFolderId = resolveFolderForPath(item.folderPath, targetFolderId);
+
+        if (isNoteImportFile(item.file)) {
+          try {
+            const notes = await parseFileToNotes(item.file);
+            for (const note of notes) {
+              addNote({
+                title: note.title,
+                body: note.body,
+                folderId: itemFolderId,
+              });
+              createdNotesCount++;
+            }
+          } catch {
+            notify.error(`Falha ao ler o arquivo "${item.file.name}"`);
+          }
+        } else {
+          const key = itemFolderId ?? "__root__";
+          if (!binaryFilesByFolder.has(key)) {
+            binaryFilesByFolder.set(key, {
+              folderId: itemFolderId,
+              files: [],
+            });
+          }
+          binaryFilesByFolder.get(key)!.files.push(item.file);
+        }
+      }
+
+      let totalUploadedFiles = 0;
+
+      for (const { folderId, files } of binaryFilesByFolder.values()) {
+        if (files.length === 0) continue;
+        const formData = new FormData();
+        files.forEach((file) => formData.append("files", file));
+
+        const result = await uploadFiles(formData, folderId);
+        if (result.files.length > 0) {
+          addFiles(result.files, folderId);
+          totalUploadedFiles += result.files.length;
+          void ingestUploadedPublications(files, result.files);
+        }
+        if (result.error) {
+          notify.error("Não foi possível concluir o envio de alguns arquivos", result.error);
+        }
+      }
+
+      // User feedback toasts
+      if (createdNotesCount > 0 && totalUploadedFiles > 0) {
         notify.success(
-          result.files.length === 1 ? "Arquivo enviado" : `${result.files.length} arquivos enviados`
+          `${createdNotesCount} ${createdNotesCount === 1 ? "nota criada" : "notas criadas"} e ${totalUploadedFiles} ${totalUploadedFiles === 1 ? "arquivo enviado" : "arquivos enviados"}`
+        );
+      } else if (createdNotesCount > 0) {
+        notify.success(
+          createdNotesCount === 1
+            ? "Nota importada com sucesso"
+            : `${createdNotesCount} notas importadas com sucesso`
+        );
+      } else if (totalUploadedFiles > 0) {
+        notify.success(
+          totalUploadedFiles === 1
+            ? "Arquivo enviado"
+            : `${totalUploadedFiles} arquivos enviados`
         );
       }
     } catch {
-      notify.error("Não foi possível enviar os arquivos", "Verifique sua conexão e tente novamente.");
+      notify.error("Não foi possível processar a importação", "Tente novamente.");
     } finally {
       setIsUploading(false);
     }
   }
 
-  return { upload, isUploading };
+  async function upload(files: File[], folderId?: string) {
+    const discovered: DiscoveredFile[] = files.map((file) => ({
+      file,
+      relativePath: file.name,
+      folderPath: [],
+    }));
+    await processDiscoveredItems(discovered, folderId);
+  }
+
+  return { upload, processDiscoveredItems, isUploading };
 }

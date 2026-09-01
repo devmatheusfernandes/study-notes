@@ -15,6 +15,7 @@ import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { useSelectionStore } from "@/lib/store/selection-store";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { FileDropZone } from "./file-drop-zone";
+import { useFileUpload } from "@/hooks/use-file-upload";
 import { getFileUrl } from "@/app/(app)/files-actions";
 
 interface NotesCollectionProps {
@@ -115,6 +116,7 @@ export function NotesCollection({
   const deletePermanently = useNotesStore((s) => s.deletePermanently);
   const toggleChecklistItem = useNotesStore((s) => s.toggleChecklistItem);
   const viewMode = usePreferencesStore((s) => s.viewMode);
+  const { processDiscoveredItems } = useFileUpload();
 
   const isTrashed = status === "trashed";
   const { pinned, others } = selectByStatus(
@@ -267,6 +269,7 @@ export function NotesCollection({
                   onOpen={() => setActiveFolder(folder.id)}
                   onRename={(name) => renameFolder(folder.id, name)}
                   onDelete={() => deleteFolder(folder.id)}
+                  onDropItems={(items) => void processDiscoveredItems(items, folder.id)}
                 />
               ))}
             </div>

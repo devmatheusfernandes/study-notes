@@ -6,9 +6,10 @@ import { Loader2, Upload } from "lucide-react";
 import { useDevice } from "@/hooks/ui/use-device";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
+import { extractDiscoveredItems } from "@/lib/import-notes";
 
 /**
- * Desktop file uploads: drop anywhere over the content area.
+ * Desktop file uploads & note import: drop anywhere over the content area or onto folders.
  * Mobile uses the header's upload button instead (no drag source there).
  */
 export function FileDropZone({ children }: { children: React.ReactNode }) {
@@ -17,7 +18,7 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
   // dragenter/dragleave fire for every child element, so count depth instead of toggling.
   const depth = useRef(0);
 
-  const { upload, isUploading } = useFileUpload();
+  const { processDiscoveredItems, isUploading } = useFileUpload();
   const activeFolderId = useFolderViewStore((s) => s.activeFolderId);
 
   if (isMobile) return <>{children}</>;
@@ -53,9 +54,11 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         depth.current = 0;
         setDragging(false);
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length === 0) return;
-        void upload(files, activeFolderId ?? undefined);
+
+        void extractDiscoveredItems(e.dataTransfer).then((discovered) => {
+          if (discovered.length === 0) return;
+          void processDiscoveredItems(discovered, activeFolderId ?? undefined);
+        });
       }}
     >
       {children}
@@ -72,9 +75,9 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
             <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/20 text-accent">
               <Upload className="size-5" />
             </span>
-            <span className="font-heading text-lg">Solte para enviar</span>
+            <span className="font-heading text-lg">Solte para importar</span>
             <span className="text-[13px] text-muted-foreground">
-              Os arquivos entram na pasta aberta.
+              Arquivos .json, .txt e .md viram notas. Pastas e arquivos entram na pasta aberta.
             </span>
           </motion.div>
         )}
@@ -89,7 +92,7 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
             className="pointer-events-none fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-elevated px-4 py-2 text-[13px] text-foreground shadow-[0_14px_34px_rgba(0,0,0,0.5)]"
           >
             <Loader2 className="size-4 animate-spin text-accent" />
-            Enviando arquivos…
+            Processando importação…
           </motion.div>
         )}
       </AnimatePresence>
