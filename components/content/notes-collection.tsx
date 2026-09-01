@@ -13,6 +13,8 @@ import { useNotesStore, selectByStatus, type Note, type NoteStatus } from "@/lib
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { useSelectionStore } from "@/lib/store/selection-store";
+import { useSearchStore } from "@/lib/store/search-store";
+import { matchesSearch } from "@/lib/search";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { FileDropZone } from "./file-drop-zone";
 import { useFileUpload } from "@/hooks/use-file-upload";
@@ -119,11 +121,16 @@ export function NotesCollection({
   const { processDiscoveredItems } = useFileUpload();
 
   const isTrashed = status === "trashed";
-  const { pinned, others } = selectByStatus(
+  const query = useSearchStore((s) => s.query);
+  const isSearching = query.trim().length > 0;
+  const { pinned: allPinned, others: allOthers } = selectByStatus(
     notes,
     status,
     showFolders ? { folderId: activeFolder } : undefined
   );
+  const matchesNote = (note: Note) => matchesSearch(query, note.title, note.body);
+  const pinned = allPinned.filter(matchesNote);
+  const others = allOthers.filter(matchesNote);
   const isEmpty = pinned.length === 0 && others.length === 0;
 
   // Keeps the selection store's notion of "all" matched to what's actually on
@@ -134,9 +141,9 @@ export function NotesCollection({
 
   const openFolder = folders.find((f) => f.id === activeFolder);
   // Subfolders of whatever level we're currently browsing (root, or the open folder).
-  const childFolders = showFolders
-    ? folders.filter((f) => (f.parentId ?? null) === (activeFolder ?? null))
-    : [];
+  const childFolders = (
+    showFolders ? folders.filter((f) => (f.parentId ?? null) === (activeFolder ?? null)) : []
+  ).filter((f) => matchesSearch(query, f.name));
   const foldersVisible = childFolders.length > 0;
 
   async function openNote(note: Note) {
@@ -281,11 +288,15 @@ export function NotesCollection({
             <Empty>
               <EmptyHeader>
                 <EmptyMedia variant="icon">{emptyIcon}</EmptyMedia>
-                <EmptyTitle>{openFolder ? "Pasta vazia" : emptyTitle}</EmptyTitle>
+                <EmptyTitle>
+                  {isSearching ? "Nenhum resultado" : openFolder ? "Pasta vazia" : emptyTitle}
+                </EmptyTitle>
                 <EmptyDescription>
-                  {openFolder
-                    ? "Nada aqui ainda. Arraste arquivos ou crie uma nota dentro dela."
-                    : emptyDescription}
+                  {isSearching
+                    ? `Nada encontrado para "${query.trim()}".`
+                    : openFolder
+                      ? "Nada aqui ainda. Arraste arquivos ou crie uma nota dentro dela."
+                      : emptyDescription}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

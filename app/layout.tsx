@@ -42,6 +42,12 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#121110",
+  // Without this, Android/Chrome leaves the layout viewport (and every dvh/vh
+  // calc) untouched when the on-screen keyboard opens and instead just shrinks
+  // the *visual* viewport — which is what made the sticky assistant dock and
+  // the Vault drawer end up stranded mid-screen once the keyboard closed.
+  // "resizes-content" makes the keyboard behave like a real layout resize.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
