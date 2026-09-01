@@ -142,19 +142,21 @@ export function InlineVideoCard({
 
   return (
     <div className="my-2.5 flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm transition-all hover:border-border">
-      {/* Header Info Bar */}
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-secondary/30 px-3.5 py-2.5 text-xs">
-        <div className="flex items-center gap-2 min-w-0">
+      {/* Header Info Bar — wraps instead of overlapping when the badge row and the
+          convert button can't all fit on one line at the card's narrower mobile width. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border/60 bg-secondary/30 px-3.5 py-2.5 text-xs">
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           <Badge variant="outline" className="h-auto px-2 py-0.5 font-mono text-[9.5px] uppercase">
             Vídeo JW
           </Badge>
           <span className="truncate font-medium text-foreground/90">{videoData.title}</span>
-          {relevantTimeFormatted && (
-            <Badge className="h-auto shrink-0 bg-accent/20 text-accent border-accent/40 px-2 py-0.5 font-mono text-[10px]">
-              🎯 Início em {relevantTimeFormatted}
-            </Badge>
-          )}
         </div>
+
+        {relevantTimeFormatted && (
+          <Badge className="h-auto shrink-0 bg-accent/20 text-accent border-accent/40 px-2 py-0.5 font-mono text-[10px]">
+            🎯 Início em {relevantTimeFormatted}
+          </Badge>
+        )}
 
         <Button
           variant="outline"
@@ -162,7 +164,7 @@ export function InlineVideoCard({
           isLoading={isConverting}
           leftIcon={<NotebookPen className="size-3 text-accent" />}
           onClick={() => void handleConvertToNote()}
-          className="h-7 shrink-0 rounded-full px-2.5 text-[11px]"
+          className="ml-auto h-7 shrink-0 rounded-full px-2.5 text-[11px]"
         >
           Transformar em nota
         </Button>
