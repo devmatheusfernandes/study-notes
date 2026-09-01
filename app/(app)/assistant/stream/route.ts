@@ -52,6 +52,12 @@ export async function POST(request: Request) {
       }
 
       try {
+        const body = (await request.json().catch(() => ({}))) as { question?: string; allowedSourceTypes?: string[] };
+        const question = body.question?.trim() || "";
+        const allowedSourceTypes = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
+          ? body.allowedSourceTypes
+          : ["nota", "pdf", "jwpub", "video"];
+
         // 1. Generate query embedding for similarity search
         const { embedding, tokens: queryTokens, cost: queryCost } =
           await generateSingleEmbedding(question);
@@ -75,6 +81,7 @@ export async function POST(request: Request) {
           user_id_param: user.id,
           match_threshold: 0.15,
           match_count: 6,
+          allowed_types: allowedSourceTypes,
         });
 
         const matchRows = (matches ?? []) as MatchResult[];
@@ -90,6 +97,8 @@ export async function POST(request: Request) {
           videoUrl?: string;
           coverImage?: string;
           durationFormatted?: string;
+          subtitlesUrl?: string;
+          snippet?: string;
         }
 
         const sourcesMap = new Map<string, SourceItem>();
@@ -107,11 +116,17 @@ export async function POST(request: Request) {
 
           const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
           const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
-          const type = match.source_type || (meta.type as string | undefined) || "nota";
-          const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
 
           const chapterTitle = meta.chapterTitle as string | undefined;
           const documentId = meta.documentId as number | undefined;
+
+          let type = (meta.type as string | undefined) || match.source_type || "nota";
+          if (chapterTitle || documentId || type === "jwpub") {
+            type = "jwpub";
+          }
+
+          const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
+
           const videoUrl = meta.videoUrl as string | undefined;
           const coverImage = meta.coverImage as string | undefined;
           const durationFormatted = meta.durationFormatted as string | undefined;

@@ -24,11 +24,8 @@ function sourceHref(source: AssistantSource): string {
   const params = new URLSearchParams();
 
   if (source.chapterTitle) {
-    const match = source.chapterTitle.match(/capítulo\s+(\d+)/i) || source.chapterTitle.match(/cap\.?\s*(\d+)/i);
-    if (match?.[1]) {
-      params.set("chapter", match[1]);
-    }
-  } else if (source.documentId) {
+    params.set("chapter", source.chapterTitle);
+  } else if (source.documentId !== undefined) {
     params.set("chapter", String(source.documentId));
   }
 
@@ -121,6 +118,7 @@ function Conversation() {
                             coverImage={videoSource.coverImage}
                             durationFormatted={videoSource.durationFormatted}
                             subtitlesUrl={videoSource.subtitlesUrl}
+                            snippet={videoSource.snippet}
                           />
                         </div>
                       ))}

@@ -26,6 +26,7 @@ export interface InlineVideoCardProps {
   coverImage?: string;
   durationFormatted?: string;
   subtitlesUrl?: string;
+  snippet?: string;
 }
 
 export function InlineVideoCard({
@@ -35,6 +36,7 @@ export function InlineVideoCard({
   coverImage: initialCoverImage,
   durationFormatted: initialDurationFormatted,
   subtitlesUrl: initialSubtitlesUrl,
+  snippet,
 }: InlineVideoCardProps) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -54,6 +56,10 @@ export function InlineVideoCard({
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
 
+  const [relevantStartTime, setRelevantStartTime] = useState<number | null>(null);
+  const [relevantTimeFormatted, setRelevantTimeFormatted] = useState<string | null>(null);
+  const hasSeekedRef = useRef(false);
+
   // Auto-fetch fresh video details from DB if missing props or default title
   useEffect(() => {
     if (videoId && (!videoData.videoUrl || !videoData.subtitlesUrl || videoData.title === "Vídeo JW")) {
@@ -71,20 +77,43 @@ export function InlineVideoCard({
     }
   }, [videoId, videoData.videoUrl, videoData.subtitlesUrl, videoData.title, initialTitle]);
 
-  // Fetch VTT segments when user opens transcript for the first time
+  // Fetch VTT segments & find relevant timestamp if snippet is provided
   useEffect(() => {
     const subUrl = videoData.subtitlesUrl;
-    if (showTranscript && subUrl && segments.length === 0) {
+    if (subUrl && segments.length === 0) {
       queueMicrotask(() => setIsLoadingTranscript(true));
       fetch(subUrl)
         .then((r) => r.text())
         .then((vtt) => {
-          setSegments(parseVttToSegments(vtt));
+          const parsed = parseVttToSegments(vtt);
+          setSegments(parsed);
+
+          if (snippet) {
+            const cleanTarget = snippet.toLowerCase();
+            const words = cleanTarget.split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
+            const matchedSeg = parsed.find((seg) => {
+              const segText = seg.text.toLowerCase();
+              return words.length > 0 && words.every((w) => segText.includes(w));
+            });
+
+            if (matchedSeg) {
+              setRelevantStartTime(matchedSeg.startTime);
+              setRelevantTimeFormatted(matchedSeg.startTimeFormatted);
+            }
+          }
         })
-        .catch((err) => console.error("Erro ao carregar legenda:", err))
+        .catch(() => null)
         .finally(() => setIsLoadingTranscript(false));
     }
-  }, [showTranscript, videoData.subtitlesUrl, segments.length]);
+  }, [videoData.subtitlesUrl, snippet, segments.length]);
+
+  const handlePlay = () => {
+    setIsPlaying(true);
+    if (!hasSeekedRef.current && relevantStartTime !== null && videoRef.current) {
+      hasSeekedRef.current = true;
+      videoRef.current.currentTime = relevantStartTime;
+    }
+  };
 
   const handleSeekTo = (seconds: number) => {
     if (videoRef.current) {
@@ -120,6 +149,11 @@ export function InlineVideoCard({
             Vídeo JW
           </Badge>
           <span className="truncate font-medium text-foreground/90">{videoData.title}</span>
+          {relevantTimeFormatted && (
+            <Badge className="h-auto shrink-0 bg-accent/20 text-accent border-accent/40 px-2 py-0.5 font-mono text-[10px]">
+              🎯 Início em {relevantTimeFormatted}
+            </Badge>
+          )}
         </div>
 
         <Button
@@ -143,7 +177,7 @@ export function InlineVideoCard({
             poster={videoData.coverImage}
             controls
             playsInline
-            onPlay={() => setIsPlaying(true)}
+            onPlay={handlePlay}
             onPause={() => setIsPlaying(false)}
             onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
             className="h-full w-full object-contain"

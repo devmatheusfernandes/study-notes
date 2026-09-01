@@ -38,51 +38,36 @@ export function JwpubReader({
     (paramVal?: string | null) => {
       if (!paramVal || chapters.length === 0) return 0;
 
-      const trimmed = paramVal.trim();
-      const targetId = parseInt(trimmed, 10);
+      const trimmed = paramVal.trim().toLowerCase();
 
-      // Strategy 1: Match by title containing "Capítulo X" or "Cap. X" or exact title match
-      if (!isNaN(targetId)) {
-        const titleMatchIndex = chapters.findIndex((c) => {
+      // 1. Exact or partial title match
+      const titleIndex = chapters.findIndex((c) => {
+        const t = c.title.toLowerCase();
+        return t === trimmed || t.includes(trimmed) || trimmed.includes(t);
+      });
+      if (titleIndex !== -1) return titleIndex;
+
+      // 2. Numeric match (chapter number, documentId, or position)
+      const numMatch = paramVal.match(/\d+/);
+      if (numMatch) {
+        const num = parseInt(numMatch[0], 10);
+        const docMatch = chapters.findIndex((c) => c.documentId === num);
+        if (docMatch !== -1) return docMatch;
+
+        const numTitleIndex = chapters.findIndex((c) => {
           const t = c.title.toLowerCase();
           return (
-            t.includes(`capítulo ${targetId}`) ||
-            t.includes(`capitulo ${targetId}`) ||
-            t.includes(`cap. ${targetId}`) ||
-            t === `capítulo ${targetId}` ||
-            t === `${targetId}`
+            t.includes(`capítulo ${num}`) ||
+            t.includes(`capitulo ${num}`) ||
+            t.includes(`cap. ${num}`) ||
+            t.includes(`seção ${num}`) ||
+            t.includes(`secao ${num}`)
           );
         });
+        if (numTitleIndex !== -1) return numTitleIndex;
 
-        if (titleMatchIndex !== -1) {
-          return titleMatchIndex;
-        }
-      }
-
-      // Strategy 2: Match by exact string title match if non-numeric
-      const exactTitleIndex = chapters.findIndex(
-        (c) => c.title.toLowerCase() === trimmed.toLowerCase()
-      );
-      if (exactTitleIndex !== -1) {
-        return exactTitleIndex;
-      }
-
-      if (!isNaN(targetId)) {
-        // Strategy 3: Match by documentId
-        const docMatchIndex = chapters.findIndex(
-          (c) => c.documentId === targetId
-        );
-        if (docMatchIndex !== -1) {
-          return docMatchIndex;
-        }
-
-        // Strategy 4: Match by position (0-based or 1-based)
-        const posMatchIndex = chapters.findIndex(
-          (c) => c.position === targetId - 1 || c.position === targetId
-        );
-        if (posMatchIndex !== -1) {
-          return posMatchIndex;
-        }
+        const posMatch = chapters.findIndex((c) => c.position === num - 1 || c.position === num);
+        if (posMatch !== -1) return posMatch;
       }
 
       return 0;

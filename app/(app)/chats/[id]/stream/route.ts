@@ -50,6 +50,10 @@ export async function POST(
 
   const body = await request.json();
   const message = (body.message as string)?.trim();
+  const allowedSourceTypes = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
+    ? body.allowedSourceTypes
+    : ["nota", "pdf", "jwpub", "video"];
+
   if (!message) {
     return new Response("Empty message", { status: 400 });
   }
@@ -104,6 +108,7 @@ export async function POST(
           user_id_param: user.id,
           match_threshold: 0.20,
           match_count: 8,
+          allowed_types: allowedSourceTypes,
         });
 
         const matchRows = (matches ?? []) as MatchResult[];
@@ -119,6 +124,8 @@ export async function POST(
           videoUrl?: string;
           coverImage?: string;
           durationFormatted?: string;
+          subtitlesUrl?: string;
+          snippet?: string;
         }
 
         const sourcesMap = new Map<string, SourceItem>();
@@ -136,11 +143,16 @@ export async function POST(
 
           const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
           const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
-          const type = match.source_type || (meta.type as string | undefined) || "nota";
-          const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
 
           const chapterTitle = meta.chapterTitle as string | undefined;
           const documentId = meta.documentId as number | undefined;
+
+          let type = (meta.type as string | undefined) || match.source_type || "nota";
+          if (chapterTitle || documentId || type === "jwpub") {
+            type = "jwpub";
+          }
+
+          const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
           const videoUrl = meta.videoUrl as string | undefined;
           const coverImage = meta.coverImage as string | undefined;
           const durationFormatted = meta.durationFormatted as string | undefined;

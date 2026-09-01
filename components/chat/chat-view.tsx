@@ -28,7 +28,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
   }, [messages]);
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video"]) => {
       // 1. Optimistic user message
       addUserMsg(content);
 
@@ -46,7 +46,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
         const response = await fetch(`/chats/${conversationId}/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: content }),
+          body: JSON.stringify({ message: content, allowedSourceTypes }),
         });
 
         if (!response.ok || !response.body) {
