@@ -7,7 +7,6 @@ import { ArrowUp, NotebookPen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAssistantStore } from "@/lib/store/assistant-store";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
-import { askAssistant } from "@/app/(app)/assistant-actions";
 
 /** How long the pointer must be held before the drag-to-new-note gesture arms. */
 const HOLD_MS = 320;
@@ -43,7 +42,6 @@ export function AssistantDock({ variant = "floating" }: AssistantDockProps) {
 
   const open = useAssistantStore((s) => s.open);
   const start = useAssistantStore((s) => s.start);
-  const resolve = useAssistantStore((s) => s.resolve);
   const fail = useAssistantStore((s) => s.fail);
   const activeFolderId = useFolderViewStore((s) => s.activeFolderId);
 
@@ -95,10 +93,54 @@ export function AssistantDock({ variant = "floating" }: AssistantDockProps) {
     if (!question) return;
     setValue("");
     start(question);
+
     try {
-      const reply = await askAssistant(question);
-      if (reply.error) fail(reply.error);
-      else resolve(reply.answer, reply.sources);
+      const response = await fetch("/assistant/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+
+      if (!response.ok || !response.body) {
+        fail("Não foi possível falar com o assistente agora.");
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value: chunk } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+
+          try {
+            const event = JSON.parse(jsonStr);
+            if (event.type === "delta" && event.content) {
+              useAssistantStore.getState().appendDelta(event.content);
+            } else if (event.type === "sources" && event.sources) {
+              useAssistantStore.getState().setSources(event.sources);
+            } else if (event.type === "done") {
+              useAssistantStore.getState().finishStream();
+            } else if (event.type === "error") {
+              fail(event.content || "Erro no assistente.");
+            }
+          } catch {
+            // skip malformed line
+          }
+        }
+      }
+
+      useAssistantStore.getState().finishStream();
     } catch {
       fail("Não foi possível falar com o assistente agora.");
     }

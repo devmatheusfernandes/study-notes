@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { NoteEditor } from "@/components/content/note-editor";
 import { JwpubReader } from "@/components/content/jwpub-reader";
@@ -11,12 +12,21 @@ export const metadata: Metadata = {
 
 export default async function NotePage(props: PageProps<"/notes/[id]">) {
   const { id } = await props.params;
+  const searchParams = await props.searchParams;
+  const chapterParam = typeof searchParams?.chapter === "string" ? searchParams.chapter : undefined;
 
   // An uploaded .jwpub gets the JwpubReader.
   const { publication, chapters } = await getPublication(id);
   if (publication) {
     return (
-      <JwpubReader noteId={id} initialPublication={publication} initialChapters={chapters ?? []} />
+      <Suspense fallback={null}>
+        <JwpubReader
+          noteId={id}
+          initialPublication={publication}
+          initialChapters={chapters ?? []}
+          initialChapterParam={chapterParam}
+        />
+      </Suspense>
     );
   }
 

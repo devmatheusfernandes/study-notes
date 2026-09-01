@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { typeFromFileName, formatFileSize, type NoteType } from "@/lib/file-types";
 import { encryptText, decryptText } from "@/lib/encryption";
+import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
 import {
   ALLOWED_EXTENSIONS,
   FILES_BUCKET,
@@ -154,6 +155,8 @@ export async function uploadFiles(
       storagePath: row.storage_path!,
       updatedAt: new Date(row.updated_at).getTime(),
     });
+
+    void enqueueNoteForVectorization(row.id);
   }
 
   return { files: uploaded };

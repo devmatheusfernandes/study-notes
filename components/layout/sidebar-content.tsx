@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { SIDEBAR_NAV_ITEMS } from "./sidebar-nav-items";
 import { usePendingSyncCount } from "@/lib/store/notes-store";
 import { useDeviceStore } from "@/hooks/ui/use-device";
+import { ChatList } from "@/components/chat/chat-list";
 
 interface SidebarContentProps {
   collapsed?: boolean;
@@ -73,7 +74,7 @@ export function SidebarContent({ collapsed = false, onNavigate }: SidebarContent
   return (
     <TooltipProvider delay={200}>
       <div className="flex h-full flex-col gap-6">
-        <div className={cn("flex items-center gap-2.5 px-1", collapsed && "justify-center px-0")}>
+        <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-1", collapsed && "justify-center px-0")}>
           <div className="size-[22px] shrink-0 rounded-full bg-primary" />
           {!collapsed && <span className="font-heading text-base tracking-tight">Study Notes</span>}
         </div>
@@ -92,6 +93,15 @@ export function SidebarContent({ collapsed = false, onNavigate }: SidebarContent
             />
           ))}
         </nav>
+
+        {!collapsed && (
+          <div className="flex flex-col gap-1.5">
+            <span className="px-1 font-mono text-[9.5px] font-medium tracking-[0.09em] text-muted-foreground">
+              CONVERSAS RECENTES
+            </span>
+            <ChatList compact maxItems={3} />
+          </div>
+        )}
 
         <div className="mt-auto flex flex-col gap-3">
           {!collapsed && (

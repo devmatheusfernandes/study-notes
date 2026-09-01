@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, ExternalLink, FileText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ interface PdfReaderProps {
 
 export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const notes = useNotesStore((s) => s.notes);
   const storeNote = notes.find((n) => n.id === noteId);
 
@@ -94,7 +95,7 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
         transition={{ duration: 0.3, ease: "easeOut" }}
         className="flex min-w-0 flex-1 flex-col"
       >
-        <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-md sm:px-6">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6">
           <Button
             variant="ghost"
             size="sm"
@@ -161,7 +162,7 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
           ) : (
             <div className="flex-1 w-full min-h-[calc(100dvh-6rem)] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
               <iframe
-                src={url!}
+                src={searchParams.get("page") ? `${url}#page=${searchParams.get("page")}` : url!}
                 title={title}
                 className="h-full w-full border-0 bg-card"
               />

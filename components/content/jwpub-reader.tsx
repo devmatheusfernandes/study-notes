@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,16 +18,93 @@ interface JwpubReaderProps {
   noteId: string;
   initialPublication: PublicationSummary;
   initialChapters: ChapterSummary[];
+  initialChapterParam?: string;
 }
 
-export function JwpubReader({ noteId, initialPublication, initialChapters }: JwpubReaderProps) {
+export function JwpubReader({
+  noteId,
+  initialPublication,
+  initialChapters,
+  initialChapterParam,
+}: JwpubReaderProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const notes = useNotesStore((s) => s.notes);
   const note = notes.find((n) => n.id === noteId);
 
   const [publication, setPublication] = useState(initialPublication);
   const [chapters, setChapters] = useState(initialChapters);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const findChapterIndex = useCallback(
+    (paramVal?: string | null) => {
+      if (!paramVal || chapters.length === 0) return 0;
+
+      const trimmed = paramVal.trim();
+      const targetId = parseInt(trimmed, 10);
+
+      // Strategy 1: Match by title containing "Capítulo X" or "Cap. X" or exact title match
+      if (!isNaN(targetId)) {
+        const titleMatchIndex = chapters.findIndex((c) => {
+          const t = c.title.toLowerCase();
+          return (
+            t.includes(`capítulo ${targetId}`) ||
+            t.includes(`capitulo ${targetId}`) ||
+            t.includes(`cap. ${targetId}`) ||
+            t === `capítulo ${targetId}` ||
+            t === `${targetId}`
+          );
+        });
+
+        if (titleMatchIndex !== -1) {
+          return titleMatchIndex;
+        }
+      }
+
+      // Strategy 2: Match by exact string title match if non-numeric
+      const exactTitleIndex = chapters.findIndex(
+        (c) => c.title.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (exactTitleIndex !== -1) {
+        return exactTitleIndex;
+      }
+
+      if (!isNaN(targetId)) {
+        // Strategy 3: Match by documentId
+        const docMatchIndex = chapters.findIndex(
+          (c) => c.documentId === targetId
+        );
+        if (docMatchIndex !== -1) {
+          return docMatchIndex;
+        }
+
+        // Strategy 4: Match by position (0-based or 1-based)
+        const posMatchIndex = chapters.findIndex(
+          (c) => c.position === targetId - 1 || c.position === targetId
+        );
+        if (posMatchIndex !== -1) {
+          return posMatchIndex;
+        }
+      }
+
+      return 0;
+    },
+    [chapters]
+  );
+
+  const [activeIndex, setActiveIndex] = useState(() =>
+    findChapterIndex(initialChapterParam)
+  );
+
+  // Sync activeIndex with URL search parameters on client-side navigation
+  useEffect(() => {
+    const chapterParam = searchParams.get("chapter") || searchParams.get("doc");
+    if (!chapterParam) return;
+    const targetIdx = findChapterIndex(chapterParam);
+    if (targetIdx !== activeIndex) {
+      queueMicrotask(() => {
+        setActiveIndex(targetIdx);
+      });
+    }
+  }, [searchParams, findChapterIndex, activeIndex]);
   const [html, setHtml] = useState<string | null>(null);
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
@@ -112,7 +189,7 @@ export function JwpubReader({ noteId, initialPublication, initialChapters }: Jwp
         transition={{ duration: 0.3, ease: "easeOut" }}
         className="flex min-w-0 flex-1 flex-col"
       >
-        <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-md sm:px-6">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6">
           <Button
             variant="ghost"
             size="sm"

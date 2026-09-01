@@ -40,6 +40,8 @@ export interface Note {
   folderId?: string;
   /** Supabase Storage object path (`${userId}/...`) — only set for real uploaded files, never for text notes. */
   storagePath?: string;
+  /** Status of OpenAI vector embedding for RAG search. */
+  vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
 }
 
 export interface Folder {
@@ -62,6 +64,7 @@ function toNote(row: NoteRow): Note {
     updatedAt: row.updatedAt,
     folderId: row.folderId,
     storagePath: row.storagePath,
+    vectorStatus: row.vectorStatus,
   };
 }
 
@@ -308,6 +311,7 @@ export const useNotesStore = create<NotesStore>()(
                 updatedAt: file.updatedAt,
                 folderId,
                 storagePath: file.storagePath,
+                vectorStatus: "pending",
               })
             ),
             ...s.notes,
@@ -389,6 +393,7 @@ export const useNotesStore = create<NotesStore>()(
               syncStatus: "local" as const,
               updatedAt: now,
               folderId,
+              vectorStatus: "pending",
             },
             ...s.notes,
           ],

@@ -7,6 +7,7 @@ import { deletePublicationMediaForNote } from "./jwpub-actions";
 import { extractNoteImagePaths } from "@/lib/note-images";
 import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
+import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
 
 export interface NoteRow {
   id: string;
@@ -18,6 +19,7 @@ export interface NoteRow {
   status: "active" | "archived" | "trashed";
   folderId?: string;
   updatedAt: number;
+  vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
 }
 
 export interface FolderRow {
@@ -44,7 +46,7 @@ interface DbFolderRow {
   parent_id: string | null;
 }
 
-function mapNote(row: DbNoteRow): NoteRow {
+function mapNote(row: DbNoteRow, vectorStatus?: NoteRow["vectorStatus"]): NoteRow {
   return {
     id: row.id,
     type: row.type as NoteType,
@@ -55,6 +57,7 @@ function mapNote(row: DbNoteRow): NoteRow {
     status: row.status as NoteRow["status"],
     folderId: row.folder_id ?? undefined,
     updatedAt: new Date(row.updated_at).getTime(),
+    vectorStatus,
   };
 }
 
@@ -74,13 +77,29 @@ export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: Fo
   const { supabase, user } = await requireUser();
   if (!user) return { notes: [], folders: [] };
 
-  const [notesRes, foldersRes] = await Promise.all([
+  const [notesRes, foldersRes, queueRes, embeddingsRes] = await Promise.all([
     supabase.from("notes").select("*").order("updated_at", { ascending: false }),
     supabase.from("folders").select("*").order("created_at", { ascending: true }),
+    supabase.from("vectorization_queue").select("note_id, status"),
+    supabase.from("note_embeddings").select("note_id"),
   ]);
 
+  const queueMap = new Map((queueRes.data ?? []).map((q) => [q.note_id, q.status]));
+  const embeddedNoteIds = new Set((embeddingsRes.data ?? []).map((e) => e.note_id));
+
   return {
-    notes: (notesRes.data ?? []).map(mapNote),
+    notes: (notesRes.data ?? []).map((row) => {
+      let vectorStatus: NoteRow["vectorStatus"] = "none";
+      if (embeddedNoteIds.has(row.id)) {
+        vectorStatus = "completed";
+      } else if (queueMap.has(row.id)) {
+        const qStatus = queueMap.get(row.id);
+        if (qStatus === "completed") vectorStatus = "completed";
+        else if (qStatus === "failed") vectorStatus = "failed";
+        else vectorStatus = "pending";
+      }
+      return mapNote(row, vectorStatus);
+    }),
     folders: (foldersRes.data ?? []).map(mapFolder),
   };
 }
@@ -117,6 +136,10 @@ export async function createNoteRow(input: {
     type: "nota",
   });
 
+  if (!error) {
+    void enqueueNoteForVectorization(input.id);
+  }
+
   return error ? { error: "Não foi possível salvar a nota." } : {};
 }
 
@@ -132,6 +155,9 @@ export async function updateNoteRow(
   if (patch.body !== undefined) encryptedPatch.body = encryptText(patch.body);
 
   const { error } = await supabase.from("notes").update(encryptedPatch).eq("id", id);
+  if (!error) {
+    void enqueueNoteForVectorization(id);
+  }
   return error ? { error: "Não foi possível salvar." } : {};
 }
 

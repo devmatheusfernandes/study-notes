@@ -173,6 +173,7 @@ export function NotesCollection({
       body={note.body}
       meta={note.meta}
       syncStatus={note.syncStatus}
+      vectorStatus={note.vectorStatus}
       pinned={note.pinned}
       variant={viewMode}
       permanentDelete={isTrashed}

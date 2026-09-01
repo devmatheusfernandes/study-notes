@@ -79,6 +79,8 @@ export async function ingestJwpubWithFeedback(file: Blob, noteId: string, fileNa
   const result = await ingestJwpub(file, noteId);
   if (result.ok) {
     notify.success(`"${fileName}" pronta para leitura`);
+    const { enqueueNoteForVectorization } = await import("@/lib/vector/queue-actions");
+    void enqueueNoteForVectorization(noteId);
   } else {
     notify.error("Não foi possível abrir esta publicação", result.error);
   }

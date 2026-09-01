@@ -11,6 +11,7 @@ import {
   NotebookPen,
   Pin,
   PinOff,
+  Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,7 @@ export interface NoteCardProps {
   description?: string;
   meta: string;
   syncStatus?: SyncStatus;
+  vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
   pinned?: boolean;
   variant?: "grid" | "list";
   /** Whether `onDelete` removes the item for good (trash screen) vs. moves it to the trash. */
@@ -87,6 +89,7 @@ export function NoteCard({
   description,
   meta,
   syncStatus,
+  vectorStatus = "none",
   pinned = false,
   variant = "grid",
   permanentDelete = false,
@@ -298,6 +301,18 @@ export function NoteCard({
         </button>
 
         <span className="hidden shrink-0 text-[11.5px] text-muted-foreground sm:block">{meta}</span>
+        {vectorStatus === "completed" && (
+          <span title="Vetorizado com IA" className="hidden shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25 sm:inline-flex">
+            <Sparkles className="size-2.5" />
+            Vetorizado
+          </span>
+        )}
+        {(vectorStatus === "pending" || vectorStatus === "processing") && (
+          <span title="Vetorização em andamento" className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25 sm:inline-flex">
+            <Sparkles className="size-2.5 animate-pulse" />
+            Vetorizando…
+          </span>
+        )}
         {pinButton}
         {menu}
         {confirmDialog}
@@ -314,7 +329,7 @@ export function NoteCard({
           : "border-transparent bg-secondary hover:border-accent/40"
       )}
     >
-      <div className="flex items-start">
+      <div className="flex items-center gap-1.5 flex-wrap">
         {checkbox}
         <span
           className={cn(
@@ -325,6 +340,32 @@ export function NoteCard({
           <config.icon className="size-2.5" />
           {config.label}
         </span>
+        {vectorStatus === "completed" && (
+          <span
+            title="Vetorizado com IA"
+            className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25"
+          >
+            <Sparkles className="size-2.5 text-accent" />
+            Vetorizado
+          </span>
+        )}
+        {(vectorStatus === "pending" || vectorStatus === "processing") && (
+          <span
+            title="Vetorização em andamento"
+            className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25"
+          >
+            <Sparkles className="size-2.5 animate-pulse text-amber-400" />
+            Vetorizando…
+          </span>
+        )}
+        {vectorStatus === "failed" && (
+          <span
+            title="Falha ao vetorizar"
+            className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-destructive border border-destructive/25"
+          >
+            Sem vetor
+          </span>
+        )}
         <span className="ml-auto flex shrink-0 items-center gap-0.5">
           {pinButton}
           {menu}
