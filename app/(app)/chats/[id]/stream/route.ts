@@ -4,13 +4,20 @@ import OpenAI from "openai";
 
 interface MatchResult {
   id: string;
-  note_id: string;
+  note_id: string | null;
+  video_id: string | null;
+  source_type: string;
   content: string;
   metadata: {
     title?: string;
     type?: string;
     chapterTitle?: string;
     documentId?: number;
+    videoId?: string;
+    videoUrl?: string;
+    coverImage?: string;
+    durationFormatted?: string;
+    subtitlesUrl?: string;
   };
   similarity: number;
 }
@@ -91,39 +98,69 @@ export async function POST(
           });
         }
 
-        // 2. Vector search
-        const { data: matches } = await supabase.rpc("match_embeddings", {
+        // 2. Vector search (hybrid: personal notes + global videos)
+        const { data: matches } = await supabase.rpc("match_hybrid_embeddings", {
           query_embedding: embedding,
+          user_id_param: user.id,
           match_threshold: 0.20,
           match_count: 8,
         });
 
         const matchRows = (matches ?? []) as MatchResult[];
 
-        // 3. Build sources array with note IDs for linking
+        // 3. Build sources array with note & video IDs for linking
         interface SourceItem {
-          noteId: string;
+          noteId?: string;
+          videoId?: string;
           type: string;
           title: string;
           chapterTitle?: string;
           documentId?: number;
+          videoUrl?: string;
+          coverImage?: string;
+          durationFormatted?: string;
         }
 
         const sourcesMap = new Map<string, SourceItem>();
         for (const match of matchRows) {
-          const noteId = match.note_id;
-          const title = match.metadata?.title || "Nota";
-          const type = match.metadata?.type || "nota";
-          const chapterTitle = match.metadata?.chapterTitle;
-          const documentId = match.metadata?.documentId;
-          const key = `${noteId}:${chapterTitle ?? ""}`;
+          let meta: Record<string, unknown> = {};
+          if (typeof match.metadata === "string") {
+            try {
+              meta = JSON.parse(match.metadata) as Record<string, unknown>;
+            } catch {
+              meta = {};
+            }
+          } else if (typeof match.metadata === "object" && match.metadata !== null) {
+            meta = match.metadata as Record<string, unknown>;
+          }
+
+          const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
+          const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
+          const type = match.source_type || (meta.type as string | undefined) || "nota";
+          const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
+
+          const chapterTitle = meta.chapterTitle as string | undefined;
+          const documentId = meta.documentId as number | undefined;
+          const videoUrl = meta.videoUrl as string | undefined;
+          const coverImage = meta.coverImage as string | undefined;
+          const durationFormatted = meta.durationFormatted as string | undefined;
+          const subtitlesUrl = meta.subtitlesUrl as string | undefined;
+          const snippet = match.content ? match.content.trim() : undefined;
+
+          const key = videoId ? `video:${videoId}` : `${noteId}:${chapterTitle ?? ""}`;
           if (!sourcesMap.has(key)) {
             sourcesMap.set(key, {
-              noteId,
+              ...(noteId ? { noteId } : {}),
+              ...(videoId ? { videoId } : {}),
               type,
               title,
               ...(chapterTitle ? { chapterTitle } : {}),
               ...(documentId ? { documentId } : {}),
+              ...(snippet ? { snippet } : {}),
+              ...(videoUrl ? { videoUrl } : {}),
+              ...(coverImage ? { coverImage } : {}),
+              ...(durationFormatted ? { durationFormatted } : {}),
+              ...(subtitlesUrl ? { subtitlesUrl } : {}),
             });
           }
         }

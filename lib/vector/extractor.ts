@@ -150,3 +150,34 @@ export async function extractContentForNote(noteId: string): Promise<ExtractedCo
     })),
   };
 }
+
+export async function extractContentForGlobalVideo(videoId: string): Promise<ExtractedContent | null> {
+  const admin = createAdminClient();
+  const { data: video, error } = await admin
+    .from("global_videos")
+    .select("id, title, content_text, duration_formatted, cover_image, video_url")
+    .eq("id", videoId)
+    .single();
+
+  if (error || !video || !video.content_text) return null;
+
+  const fullText = `Vídeo: ${video.title}\n\n${video.content_text}`.trim();
+  const chunks = splitTextIntoChunks(fullText);
+
+  return {
+    title: video.title,
+    type: "video",
+    chunks: chunks.map((c) => ({
+      chunkIndex: c.index,
+      content: c.content,
+      metadata: {
+        title: video.title,
+        type: "video",
+        videoId: video.id,
+        videoUrl: video.video_url,
+        coverImage: video.cover_image,
+        durationFormatted: video.duration_formatted,
+      },
+    })),
+  };
+}

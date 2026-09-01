@@ -7,19 +7,38 @@ import { useDevice } from "@/hooks/ui/use-device";
 import { useAssistantStore, type AssistantSource } from "@/lib/store/assistant-store";
 import { Vault, VaultContent, VaultTitle } from "@/components/ui/vault";
 import { AssistantDock } from "./assistant-dock";
+import { cn } from "@/lib/utils";
+import { InlineVideoCard } from "@/components/video/inline-video-card";
+
+function extractExactPhrase(snippet?: string): string | undefined {
+  if (!snippet) return undefined;
+  const clean = snippet.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const words = clean.split(" ").filter((w) => w.length > 1);
+  if (words.length === 0) return undefined;
+  return words.slice(0, 6).join(" ");
+}
 
 function sourceHref(source: AssistantSource): string {
   if (!source.noteId) return "/notes";
+
+  const params = new URLSearchParams();
+
   if (source.chapterTitle) {
     const match = source.chapterTitle.match(/capítulo\s+(\d+)/i) || source.chapterTitle.match(/cap\.?\s*(\d+)/i);
     if (match?.[1]) {
-      return `/notes/${source.noteId}?chapter=${match[1]}`;
+      params.set("chapter", match[1]);
     }
+  } else if (source.documentId) {
+    params.set("chapter", String(source.documentId));
   }
-  if (source.documentId) {
-    return `/notes/${source.noteId}?chapter=${source.documentId}`;
+
+  const phrase = extractExactPhrase(source.snippet);
+  if (phrase) {
+    params.set("text", phrase);
   }
-  return `/notes/${source.noteId}`;
+
+  const qs = params.toString();
+  return qs ? `/notes/${source.noteId}?${qs}` : `/notes/${source.noteId}`;
 }
 
 function renderMarkdown(text: string): string {
@@ -69,13 +88,54 @@ function Conversation() {
           </div>
           {!isStreaming && sources.length > 0 && (
             <div className="flex flex-col gap-2">
+              {/* Render Horizontal Carousel for Video Cards */}
+              {(() => {
+                const videoSources = sources.filter((s) => s.type.toLowerCase() === "video" || s.videoId);
+                if (videoSources.length === 0) return null;
+
+                return (
+                  <div className="w-full overflow-hidden">
+                    {videoSources.length > 1 && (
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="font-mono text-[9px] font-medium tracking-[0.09em] text-accent">
+                          VÍDEOS ENCONTRADOS ({videoSources.length})
+                        </span>
+                        <span className="font-mono text-[8.5px] text-muted-foreground">
+                          Deslize →
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex w-full overflow-x-auto snap-x snap-mandatory gap-2.5 pb-1 pt-0.5 scrollbar-thin scrollbar-thumb-border/60">
+                      {videoSources.map((videoSource) => (
+                        <div
+                          key={videoSource.videoId ? `video-${videoSource.videoId}` : `vid-${videoSource.title}`}
+                          className={cn(
+                            "snap-center shrink-0 min-w-0 transition-all",
+                            videoSources.length > 1 ? "w-[90%]" : "w-full"
+                          )}
+                        >
+                          <InlineVideoCard
+                            videoId={videoSource.videoId!}
+                            title={videoSource.title === "Item" ? "Vídeo JW" : videoSource.title}
+                            videoUrl={videoSource.videoUrl}
+                            coverImage={videoSource.coverImage}
+                            durationFormatted={videoSource.durationFormatted}
+                            subtitlesUrl={videoSource.subtitlesUrl}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <span className="font-mono text-[10px] font-medium tracking-[0.09em] text-muted-foreground">
                 FONTES
               </span>
               <div className="flex flex-wrap gap-2">
                 {sources.map((source) => (
                   <Link
-                    key={`${source.noteId ?? ""}-${source.chapterTitle ?? source.title}`}
+                    key={`${source.noteId ?? source.videoId}-${source.chapterTitle ?? source.title}`}
                     href={sourceHref(source)}
                     onClick={() => close()}
                     className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-[12px] font-normal text-accent transition-colors hover:bg-accent/20"

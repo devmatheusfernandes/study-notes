@@ -2,10 +2,16 @@ import { create } from "zustand";
 
 export interface AssistantSource {
   noteId?: string;
+  videoId?: string;
   type: string;
   title: string;
   chapterTitle?: string;
   documentId?: number;
+  snippet?: string;
+  videoUrl?: string;
+  coverImage?: string;
+  durationFormatted?: string;
+  subtitlesUrl?: string;
 }
 
 interface AssistantStore {

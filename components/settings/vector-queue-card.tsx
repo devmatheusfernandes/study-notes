@@ -178,7 +178,7 @@ export function VectorQueueCard() {
             onClick={() => void fetchItems()}
             className="h-8 gap-1.5 rounded-full text-[12px]"
           >
-            <RefreshCw className="size-3.5" />
+            <RefreshCw className="size-3.5 pr-2" />
             Atualizar
           </Button>
 
@@ -189,7 +189,7 @@ export function VectorQueueCard() {
             onClick={() => void handleProcessNow()}
             className="h-8 gap-1.5 rounded-full text-[12px]"
           >
-            <Play className="size-3.5" />
+            <Play className="size-3.5 pr-2" />
             Processar Agora
           </Button>
         </div>

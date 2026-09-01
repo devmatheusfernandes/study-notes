@@ -35,6 +35,7 @@
     "openai": "^7.8.0",
     "pako": "^3.0.1",
     "pdf-parse": "^2.4.5",
+    "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",

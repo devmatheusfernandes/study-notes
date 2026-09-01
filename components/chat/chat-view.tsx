@@ -105,9 +105,10 @@ export function ChatView({ conversationId }: ChatViewProps) {
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        <div className="mx-auto flex max-w-2xl flex-col gap-4">
+    <div className="relative flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
+      {/* Scrollable conversation messages container */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6">
+        <div className="mx-auto flex max-w-2xl sm:max-w-3xl flex-col gap-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-accent/15">
@@ -131,12 +132,13 @@ export function ChatView({ conversationId }: ChatViewProps) {
         </div>
       </div>
 
-      <div className="border-t border-border px-4 py-3 sm:px-6">
-        <div className="mx-auto max-w-2xl">
+      {/* Floating ChatGPT-style capsule input bar */}
+      <div className="pointer-events-none absolute bottom-4 left-0 right-0 z-20 px-4 sm:px-6">
+        <div className="pointer-events-auto mx-auto max-w-2xl sm:max-w-3xl">
           <ChatComposer
             onSend={sendMessage}
             disabled={isStreaming}
-            placeholder={isStreaming ? "Gerando resposta…" : "Pergunte às suas notas…"}
+            placeholder={isStreaming ? "Gerando resposta…" : "Pergunte às suas notas ou vídeos…"}
           />
         </div>
       </div>

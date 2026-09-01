@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 
@@ -9,14 +10,12 @@ interface JwpubChapterViewProps {
   onFootnote: (footnoteId: number) => void;
 }
 
-/**
- * Renders one chapter's stored HTML. The markup was already sanitized at
- * ingest time; sanitizing again here is cheap insurance against a row written
- * by an older ingest.
- */
 export function JwpubChapterView({ html, onFootnote }: JwpubChapterViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchParams = useSearchParams();
+  const highlightText = searchParams.get("text");
 
+  // Footnote click listener
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -34,6 +33,28 @@ export function JwpubChapterView({ html, onFootnote }: JwpubChapterViewProps) {
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
   }, [onFootnote]);
+
+  // Auto-scroll & Highlight matching snippet from chat RAG source
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !highlightText) return;
+
+    const lowerTarget = highlightText.toLowerCase();
+    const elements = container.querySelectorAll("p, blockquote, li, h1, h2, h3");
+
+    for (const el of Array.from(elements)) {
+      if (el.textContent?.toLowerCase().includes(lowerTarget)) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-accent", "bg-accent/20", "rounded-xl", "p-2.5", "transition-all", "duration-500");
+
+        const timer = setTimeout(() => {
+          el.classList.remove("ring-2", "ring-accent", "bg-accent/20");
+        }, 4500);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [html, highlightText]);
 
   return (
     <motion.div

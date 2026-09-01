@@ -18,6 +18,7 @@ import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { ViewModeToggle } from "@/components/content/view-mode-toggle";
 import { AiUsageCard } from "@/components/settings/ai-usage-card";
 import { VectorQueueCard } from "@/components/settings/vector-queue-card";
+import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
 
 interface SettingsViewProps {
   userEmail: string;
@@ -117,7 +118,10 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
       {/* Section 2: Real-time Vector Queue */}
       {(activeSection === "all" || activeSection === "ai") && (
-        <VectorQueueCard />
+        <>
+          <GlobalVideoSyncCard />
+          <VectorQueueCard />
+        </>
       )}
 
       {/* Section 3: AI Usage & Cost */}

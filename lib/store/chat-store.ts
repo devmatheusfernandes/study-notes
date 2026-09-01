@@ -1,11 +1,17 @@
 import { create } from "zustand";
 
 export interface ChatSource {
-  noteId: string;
+  noteId?: string;
+  videoId?: string;
   type: string;
   title: string;
   chapterTitle?: string;
   documentId?: number;
+  snippet?: string;
+  videoUrl?: string;
+  coverImage?: string;
+  durationFormatted?: string;
+  subtitlesUrl?: string;
 }
 
 export interface ChatMessage {

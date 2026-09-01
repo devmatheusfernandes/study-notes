@@ -82,7 +82,12 @@ export async function processVectorQueue(targetUserId?: string): Promise<{ proce
     .order("created_at", { ascending: true })
     .limit(10);
 
-  if (fetchError || !queueItems || queueItems.length === 0) {
+  if (fetchError) {
+    console.error("Erro ao buscar itens da fila de vetorização:", fetchError);
+    return { processed: 0, errors: 1 };
+  }
+
+  if (!queueItems || queueItems.length === 0) {
     return { processed: 0, errors: 0 };
   }
 
@@ -102,6 +107,8 @@ export async function processVectorQueue(targetUserId?: string): Promise<{ proce
   let errorCount = 0;
 
   for (const item of itemsToProcess) {
+    if (!item.note_id) continue;
+
     // 1. Mark as processing
     await supabase
       .from("vectorization_queue")
@@ -109,60 +116,64 @@ export async function processVectorQueue(targetUserId?: string): Promise<{ proce
       .eq("id", item.id);
 
     try {
-      // 2. Extract text chunks
-      const extracted = await extractContentForNote(item.note_id);
-
-      if (!extracted || extracted.chunks.length === 0) {
-        // Content not ready yet (e.g., JWPUB still ingesting chapters)
-        await supabase
-          .from("vectorization_queue")
-          .update({
-            status: "pending",
-            attempts: item.attempts + 1,
-            error: "Conteúdo da nota ainda não está pronto.",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", item.id);
+      // Check if note was deleted by user while in queue
+      const { data: noteCheck } = await supabase.from("notes").select("id").eq("id", item.note_id).single();
+      if (!noteCheck) {
+        await supabase.from("vectorization_queue").delete().eq("id", item.id);
+        await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
         continue;
       }
 
-      // 3. Generate OpenAI Embeddings
-      const texts = extracted.chunks.map((c) => c.content);
-      const embeddingsResult = await generateEmbeddings(texts);
+      // Handle Personal Note / PDF / JWPUB Vectorization
+      const extracted = await extractContentForNote(item.note_id);
 
-      // 4. Delete existing embeddings for this note before inserting fresh ones
-      await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
-
-      // 5. Insert new embeddings
-      const vectorRows = extracted.chunks.map((chunk, index) => ({
-        user_id: userId,
-        note_id: item.note_id,
-        jwpub_chapter_id: chunk.jwpubChapterId ?? null,
-        chunk_index: chunk.chunkIndex,
-        content: chunk.content,
-        embedding: embeddingsResult.embeddings[index],
-        metadata: chunk.metadata,
-      }));
-
-      const { error: insertError } = await supabase.from("note_embeddings").insert(vectorRows);
-
-      if (insertError) {
-        throw new Error(`Falha ao salvar vetores no banco: ${insertError.message}`);
+      if (!extracted || extracted.chunks.length === 0) {
+        await supabase
+          .from("vectorization_queue")
+          .update({
+            status: "failed",
+            attempts: item.attempts + 1,
+            error: "Conteúdo da nota vazio ou ainda não pronto.",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", item.id);
+        errorCount++;
+        continue;
       }
 
-      // 6. Log AI usage and cost
-      if (embeddingsResult.promptTokens > 0) {
-        await supabase.from("ai_usage_logs").insert({
+        const texts = extracted.chunks.map((c) => c.content);
+        const embeddingsResult = await generateEmbeddings(texts);
+
+        await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
+
+        const vectorRows = extracted.chunks.map((chunk, index) => ({
           user_id: userId,
           note_id: item.note_id,
-          operation_type: "vectorization",
-          model: "text-embedding-3-small",
-          prompt_tokens: embeddingsResult.promptTokens,
-          completion_tokens: 0,
-          total_tokens: embeddingsResult.promptTokens,
-          estimated_cost_usd: embeddingsResult.estimatedCostUsd,
-        });
-      }
+          jwpub_chapter_id: chunk.jwpubChapterId ?? null,
+          chunk_index: chunk.chunkIndex,
+          content: chunk.content,
+          embedding: embeddingsResult.embeddings[index],
+          metadata: chunk.metadata,
+        }));
+
+        const { error: insertError } = await supabase.from("note_embeddings").insert(vectorRows);
+
+        if (insertError) {
+          throw new Error(`Falha ao salvar vetores no banco: ${insertError.message}`);
+        }
+
+        if (embeddingsResult.promptTokens > 0) {
+          await supabase.from("ai_usage_logs").insert({
+            user_id: userId,
+            note_id: item.note_id,
+            operation_type: "vectorization",
+            model: "text-embedding-3-small",
+            prompt_tokens: embeddingsResult.promptTokens,
+            completion_tokens: 0,
+            total_tokens: embeddingsResult.promptTokens,
+            estimated_cost_usd: embeddingsResult.estimatedCostUsd,
+          });
+        }
 
       // 7. Mark queue item as completed
       await supabase

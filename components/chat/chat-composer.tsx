@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatComposerProps {
@@ -13,7 +13,7 @@ interface ChatComposerProps {
 export function ChatComposer({
   onSend,
   disabled = false,
-  placeholder = "Pergunte às suas notas…",
+  placeholder = "Pergunte às suas notas ou solicite um estudo…",
 }: ChatComposerProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -22,7 +22,7 @@ export function ChatComposer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 175)}px`;
   }, [value]);
 
   function handleSend() {
@@ -35,10 +35,17 @@ export function ChatComposer({
   return (
     <div
       className={cn(
-        "flex items-end gap-2 rounded-2xl border bg-surface-elevated px-3 py-2 transition-colors",
-        disabled ? "border-border/50 opacity-60" : "border-border"
+        "group relative flex items-end gap-3 rounded-[28px] sm:rounded-[32px] border transition-all duration-200 px-4 py-3 sm:px-5 sm:py-3.5",
+        "bg-[#211f1e]/90 dark:bg-[#1c1a18]/90 backdrop-blur-2xl shadow-[0_12px_36px_rgba(0,0,0,0.5)]",
+        disabled
+          ? "border-border/40 opacity-60"
+          : "border-white/12 hover:border-white/20 focus-within:border-accent/60 focus-within:shadow-[0_14px_44px_rgba(0,0,0,0.65)] focus-within:ring-2 focus-within:ring-accent/20"
       )}
     >
+      <div className="mb-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+        <Sparkles className="size-3.5" />
+      </div>
+
       <textarea
         ref={textareaRef}
         value={value}
@@ -52,18 +59,24 @@ export function ChatComposer({
         placeholder={placeholder}
         disabled={disabled}
         rows={1}
-        className="min-w-0 flex-1 resize-none bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-        style={{ maxHeight: 120 }}
+        className="min-h-[26px] max-h-44 flex-1 resize-none bg-transparent text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"
       />
+
       <button
         type="button"
         onClick={handleSend}
         disabled={!value.trim() || disabled}
         aria-label="Enviar mensagem"
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+          value.trim() && !disabled
+            ? "bg-primary text-primary-foreground shadow-md hover:bg-accent hover:scale-105 active:scale-95"
+            : "bg-secondary/70 text-muted-foreground opacity-40 cursor-not-allowed"
+        )}
       >
-        <ArrowUp className="size-4" />
+        <ArrowUp className="size-4 stroke-[2.5]" />
       </button>
     </div>
   );
 }
+

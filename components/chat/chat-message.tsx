@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FileText, NotebookPen, Sparkles } from "lucide-react";
+import { FileText, NotebookPen, Sparkles, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatSource } from "@/lib/store/chat-store";
+import { InlineVideoCard } from "@/components/video/inline-video-card";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
@@ -13,19 +14,37 @@ interface ChatMessageProps {
   isStreaming?: boolean;
 }
 
+function extractExactPhrase(snippet?: string): string | undefined {
+  if (!snippet) return undefined;
+  const clean = snippet.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const words = clean.split(" ").filter((w) => w.length > 1);
+  if (words.length === 0) return undefined;
+  return words.slice(0, 6).join(" ");
+}
+
 function sourceHref(source: ChatSource): string {
+  if (!source.noteId) return "/notes";
+
+  const params = new URLSearchParams();
+
   if (source.type === "jwpub") {
     if (source.chapterTitle) {
       const match = source.chapterTitle.match(/capítulo\s+(\d+)/i) || source.chapterTitle.match(/cap\.?\s*(\d+)/i);
       if (match?.[1]) {
-        return `/notes/${source.noteId}?chapter=${match[1]}`;
+        params.set("chapter", match[1]);
       }
-    }
-    if (source.documentId) {
-      return `/notes/${source.noteId}?chapter=${source.documentId}`;
+    } else if (source.documentId) {
+      params.set("chapter", String(source.documentId));
     }
   }
-  return `/notes/${source.noteId}`;
+
+  const phrase = extractExactPhrase(source.snippet);
+  if (phrase) {
+    params.set("text", phrase);
+  }
+
+  const qs = params.toString();
+  return qs ? `/notes/${source.noteId}?${qs}` : `/notes/${source.noteId}`;
 }
 
 function sourceIcon(type: string) {
@@ -110,31 +129,80 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
       </div>
 
       {!isStreaming && sources.length > 0 && (
-        <div className="ml-8 flex flex-col gap-1.5">
-          <span className="font-mono text-[9.5px] font-medium tracking-[0.09em] text-muted-foreground">
-            FONTES
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {sources.map((source) => {
-              const Icon = sourceIcon(source.type);
-              return (
-                <Link
-                  key={`${source.noteId}-${source.chapterTitle ?? ""}`}
-                  href={sourceHref(source)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11.5px] text-accent",
-                    "transition-colors hover:bg-accent/20 hover:border-accent/50"
-                  )}
-                >
-                  <Icon className="size-3 shrink-0" />
-                  <span className="truncate max-w-[180px]">
-                    {source.chapterTitle
-                      ? `${source.title} — ${source.chapterTitle}`
-                      : source.title}
-                  </span>
-                </Link>
-              );
-            })}
+        <div className="ml-8 flex flex-col gap-3">
+          {/* Render Horizontal Carousel for Video Cards */}
+          {(() => {
+            const videoSources = sources.filter((s) => s.type === "video" || s.videoId);
+            if (videoSources.length === 0) return null;
+
+            return (
+              <div className="w-full overflow-hidden">
+                {videoSources.length > 1 && (
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-mono text-[9.5px] font-medium tracking-[0.09em] text-accent">
+                      VÍDEOS ENCONTRADOS ({videoSources.length})
+                    </span>
+                    <span className="font-mono text-[9px] text-muted-foreground">
+                      Deslize para o lado →
+                    </span>
+                  </div>
+                )}
+                <div className="flex w-full overflow-x-auto snap-x snap-mandatory gap-3 pb-2 pt-1 scrollbar-thin scrollbar-thumb-border/60">
+                  {videoSources.map((videoSource) => (
+                    <div
+                      key={videoSource.videoId ? `video-${videoSource.videoId}` : `vid-${videoSource.title}`}
+                      className={cn(
+                        "snap-center shrink-0 min-w-0 transition-all",
+                        videoSources.length > 1 ? "w-[90%] sm:w-[480px]" : "w-full"
+                      )}
+                    >
+                      <InlineVideoCard
+                        videoId={videoSource.videoId!}
+                        title={videoSource.title === "Item" ? "Vídeo JW" : videoSource.title}
+                        videoUrl={videoSource.videoUrl}
+                        coverImage={videoSource.coverImage}
+                        durationFormatted={videoSource.durationFormatted}
+                        subtitlesUrl={videoSource.subtitlesUrl}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Render regular source pill links */}
+          <div className="flex flex-col gap-1.5">
+            <span className="font-mono text-[9.5px] font-medium tracking-[0.09em] text-muted-foreground">
+              FONTES
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {sources.map((source, idx) => {
+                const Icon = source.type === "video" || source.videoId ? Video : sourceIcon(source.type);
+                const uniqueKey = source.videoId
+                  ? `video-${source.videoId}-${idx}`
+                  : source.noteId
+                  ? `note-${source.noteId}-${source.chapterTitle ?? ""}-${idx}`
+                  : `src-${idx}-${source.title}`;
+                return (
+                  <Link
+                    key={uniqueKey}
+                    href={sourceHref(source)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11.5px] text-accent",
+                      "transition-colors hover:bg-accent/20 hover:border-accent/50"
+                    )}
+                  >
+                    <Icon className="size-3 shrink-0" />
+                    <span className="truncate max-w-[180px]">
+                      {source.chapterTitle
+                        ? `${source.title} — ${source.chapterTitle}`
+                        : source.title}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
