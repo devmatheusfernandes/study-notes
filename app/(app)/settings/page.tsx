@@ -9,9 +9,14 @@ export const metadata: Metadata = {
 
 export default async function SettingsPage() {
   const supabase = await createClient();
+  // getSession(), not getUser() — proxy.ts's middleware already
+  // network-validated this request's session; re-validating again here just
+  // to read the email would be a redundant Supabase Auth round-trip on top
+  // of the one UserMenu (rendered inside Header, below) also used to make.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user;
 
   return (
     <>
