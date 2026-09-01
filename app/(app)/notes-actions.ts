@@ -85,6 +85,20 @@ export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: Fo
   };
 }
 
+export async function getNoteRow(id: string): Promise<NoteRow | null> {
+  const { supabase, user } = await requireUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("notes")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) return null;
+  return mapNote(data);
+}
+
 export async function createNoteRow(input: {
   id: string;
   title: string;

@@ -144,9 +144,9 @@ export function NotesCollection({
       return;
     }
 
-    // Publications are read in-app rather than downloaded — the route itself
-    // decides between the reader and the editor.
-    if (note.type === "jwpub") {
+    // Publications and PDFs are read in-app rather than downloaded — the route itself
+    // decides between the respective reader and the editor.
+    if (note.type === "jwpub" || note.type === "pdf") {
       router.push(`/notes/${note.id}`);
       return;
     }

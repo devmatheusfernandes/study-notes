@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -42,7 +42,10 @@ export function JwpubReader({ noteId, initialPublication, initialChapters }: Jwp
   useEffect(() => {
     if (!activeChapter) return;
     let cancelled = false;
-    setIsLoadingChapter(true);
+
+    queueMicrotask(() => {
+      if (!cancelled) setIsLoadingChapter(true);
+    });
 
     void getChapter(publication.id, activeChapter.documentId).then((result) => {
       if (cancelled) return;
@@ -110,8 +113,14 @@ export function JwpubReader({ noteId, initialPublication, initialChapters }: Jwp
         className="flex min-w-0 flex-1 flex-col"
       >
         <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-md sm:px-6">
-          <Button variant="ghost" size="sm" leftIcon={<ArrowLeft />} onClick={() => router.push("/notes")}>
-            Voltar
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<ArrowLeft />}
+            onClick={() => router.push("/notes")}
+            className="max-sm:px-2"
+          >
+            <span className="hidden sm:inline">Voltar</span>
           </Button>
 
           <div className="mx-2 flex min-w-0 flex-1 flex-col">
@@ -161,32 +170,6 @@ export function JwpubReader({ noteId, initialPublication, initialChapters }: Jwp
           </div>
         ) : (
           <>
-            {showChapters && (
-              <nav className="border-b border-border bg-secondary/40 px-4 py-3 sm:px-6">
-                <ul className="mx-auto flex w-full max-w-2xl flex-col gap-0.5">
-                  {chapters.map((chapter, index) => (
-                    <li key={chapter.documentId}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveIndex(index);
-                          setShowChapters(false);
-                        }}
-                        className={cn(
-                          "w-full rounded-lg px-3 py-2 text-left text-[13.5px] transition-colors",
-                          index === activeIndex
-                            ? "bg-primary/[0.18] text-accent"
-                            : "text-foreground/80 hover:bg-secondary"
-                        )}
-                      >
-                        {chapter.title}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            )}
-
             <div className="flex-1 px-4 py-6 sm:px-6">
               {isLoadingChapter ? (
                 <p className="mx-auto max-w-2xl text-[13px] text-muted-foreground">carregando…</p>
@@ -222,6 +205,62 @@ export function JwpubReader({ noteId, initialPublication, initialChapters }: Jwp
         )}
       </motion.main>
 
+      <AnimatePresence>
+        {showChapters && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowChapters(false)}
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-xs"
+            />
+            <motion.aside
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 320, damping: 32 }}
+              className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xs flex-col border-l border-border bg-background shadow-2xl sm:max-w-sm"
+            >
+              <header className="flex items-center justify-between border-b border-border px-5 py-4">
+                <span className="font-heading text-base font-medium">Capítulos</span>
+                <button
+                  type="button"
+                  onClick={() => setShowChapters(false)}
+                  aria-label="Fechar capítulos"
+                  className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              </header>
+              <nav className="flex-1 overflow-y-auto p-3">
+                <ul className="flex flex-col gap-1">
+                  {chapters.map((chapter, index) => (
+                    <li key={chapter.documentId}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveIndex(index);
+                          setShowChapters(false);
+                        }}
+                        className={cn(
+                          "w-full rounded-lg px-3.5 py-2.5 text-left text-[13.5px] transition-colors",
+                          index === activeIndex
+                            ? "bg-primary/[0.18] text-accent font-medium"
+                            : "text-foreground/80 hover:bg-secondary"
+                        )}
+                      >
+                        {chapter.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
       <JwpubFootnoteSurface
         open={footnoteOpen}
         html={footnoteHtml}
@@ -231,3 +270,4 @@ export function JwpubReader({ noteId, initialPublication, initialChapters }: Jwp
     </div>
   );
 }
+
