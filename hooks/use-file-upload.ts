@@ -88,10 +88,14 @@ export function useFileUpload() {
           try {
             const notes = await parseFileToNotes(item.file);
             for (const note of notes) {
+              const noteFolderId =
+                note.folderPath && note.folderPath.length > 0
+                  ? resolveFolderForPath(note.folderPath, targetFolderId)
+                  : itemFolderId;
               addNote({
                 title: note.title,
                 body: note.body,
-                folderId: itemFolderId,
+                folderId: noteFolderId,
               });
               createdNotesCount++;
             }

@@ -7,6 +7,7 @@ export interface DiscoveredFile {
 export interface ParsedNote {
   title: string;
   body: string;
+  folderPath?: string[];
 }
 
 function escapeHtml(text: string): string {
@@ -30,6 +31,88 @@ function parseInlineMarkdown(text: string): string {
   // Links: [label](url)
   escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   return escaped;
+}
+
+export interface TiptapMark {
+  type: string;
+  attrs?: Record<string, unknown>;
+}
+
+export interface TiptapNode {
+  type?: string;
+  text?: string;
+  content?: TiptapNode[];
+  attrs?: Record<string, unknown>;
+  marks?: TiptapMark[];
+}
+
+/** Converts Tiptap AST JSON document node structure ({ type: "doc", content: [...] }) into HTML. */
+export function tiptapNodeToHtml(node: TiptapNode | null | undefined): string {
+  if (!node) return "";
+
+  if (node.type === "text") {
+    let text = escapeHtml(node.text || "");
+    if (Array.isArray(node.marks)) {
+      for (const mark of node.marks) {
+        if (mark.type === "bold") text = `<strong>${text}</strong>`;
+        else if (mark.type === "italic") text = `<em>${text}</em>`;
+        else if (mark.type === "code") text = `<code>${text}</code>`;
+        else if (mark.type === "superscript") text = `<sup>${text}</sup>`;
+        else if (mark.type === "subscript") text = `<sub>${text}</sub>`;
+        else if (mark.type === "link") {
+          const href = mark.attrs?.href || "#";
+          text = `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        }
+      }
+    }
+    return text;
+  }
+
+  const childrenHtml = (Array.isArray(node.content) ? node.content : [])
+    .map(tiptapNodeToHtml)
+    .join("");
+
+  switch (node.type) {
+    case "doc":
+      return childrenHtml;
+    case "paragraph":
+      return `<p>${childrenHtml}</p>`;
+    case "heading": {
+      const level = node.attrs?.level || 1;
+      return `<h${level}>${childrenHtml}</h${level}>`;
+    }
+    case "bulletList":
+      return `<ul>${childrenHtml}</ul>`;
+    case "orderedList":
+      return `<ol>${childrenHtml}</ol>`;
+    case "listItem":
+      return `<li>${childrenHtml}</li>`;
+    case "taskList":
+      return `<ul data-type="taskList">${childrenHtml}</ul>`;
+    case "taskItem": {
+      const checked = !!node.attrs?.checked;
+      return `<li data-type="taskItem" data-checked="${checked}"><label><input type="checkbox" ${
+        checked ? 'checked="checked"' : ""
+      }/></label><div>${childrenHtml}</div></li>`;
+    }
+    case "blockquote":
+      return `<blockquote>${childrenHtml}</blockquote>`;
+    case "codeBlock": {
+      const lang = node.attrs?.language || "";
+      return `<pre><code class="language-${lang}">${childrenHtml}</code></pre>`;
+    }
+    case "image": {
+      const src = node.attrs?.src || "";
+      const alt = node.attrs?.alt || "";
+      return `<img src="${src}" alt="${alt}" />`;
+    }
+    case "hardBreak":
+      return "<br/>";
+    case "horizontalRule":
+      return "<hr/>";
+    default:
+      return childrenHtml ? `<p>${childrenHtml}</p>` : "";
+  }
 }
 
 /** Converts markdown string into note title (extracted from # Heading if present) and Tiptap HTML. */
@@ -64,7 +147,6 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
     // Code blocks ```
     if (trimmed.startsWith("```")) {
       if (inCodeBlock) {
-        // Close code block
         htmlParts.push(`<pre><code class="language-${codeLang}">${escapeHtml(codeBuffer.join("\n"))}</code></pre>`);
         inCodeBlock = false;
         codeBuffer = [];
@@ -82,13 +164,11 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
       continue;
     }
 
-    // Empty lines
     if (!trimmed) {
       closeLists();
       continue;
     }
 
-    // Headings #, ##, ###, etc.
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       closeLists();
@@ -101,7 +181,6 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
       continue;
     }
 
-    // Blockquotes >
     if (trimmed.startsWith(">")) {
       closeLists();
       const quoteText = trimmed.replace(/^>\s*/, "");
@@ -109,7 +188,6 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
       continue;
     }
 
-    // Checkboxes / Task list items: - [ ] or - [x]
     const taskMatch = trimmed.match(/^[-*+]\s+\[([ xX])\]\s+(.*)$/);
     if (taskMatch) {
       const checked = taskMatch[1].toLowerCase() === "x";
@@ -127,7 +205,6 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
       continue;
     }
 
-    // Unordered list items: - or * or +
     const ulMatch = trimmed.match(/^[-*+]\s+(.*)$/);
     if (ulMatch) {
       if (inOrderedList) closeLists();
@@ -139,7 +216,6 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
       continue;
     }
 
-    // Ordered list items: 1. item
     const olMatch = trimmed.match(/^\d+\.\s+(.*)$/);
     if (olMatch) {
       if (inUnorderedList) closeLists();
@@ -151,7 +227,6 @@ export function parseMdToNote(content: string, fileName: string): ParsedNote {
       continue;
     }
 
-    // Regular paragraph
     closeLists();
     htmlParts.push(`<p>${parseInlineMarkdown(trimmed)}</p>`);
   }
@@ -184,65 +259,203 @@ export function parseTxtToNote(content: string, fileName: string): ParsedNote {
   };
 }
 
-/** Parses JSON file content into one or multiple ParsedNote objects. */
-export function parseJsonToNotes(content: string, fileName: string): ParsedNote[] {
-  const baseTitle = fileName.replace(/\.json$/i, "").trim() || "Nova nota";
+/** Sanitizes unescaped raw newlines/tabs inside string values in JSON files. */
+function sanitizeJsonContent(raw: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
 
-  try {
-    const parsed = JSON.parse(content);
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i];
 
-    // Array of note objects
-    if (Array.isArray(parsed)) {
-      const notes: ParsedNote[] = [];
-      for (let i = 0; i < parsed.length; i++) {
-        const item = parsed[i];
-        if (typeof item === "object" && item !== null) {
-          const title = item.title || item.name || `${baseTitle} (${i + 1})`;
-          const rawBody = item.body || item.content || item.text || JSON.stringify(item, null, 2);
-          const body =
-            typeof rawBody === "string" && (rawBody.includes("<p>") || rawBody.includes("<h1>"))
-              ? rawBody
-              : parseTxtToNote(typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody, null, 2), title).body;
-          notes.push({ title, body });
+    if (char === '"' && !escaped) {
+      inString = !inString;
+      result += char;
+    } else if (inString) {
+      if (char === "\n") {
+        const rest = raw.slice(i + 1).trimStart();
+        if (rest.startsWith("]") || rest.startsWith("}") || rest.startsWith(",")) {
+          inString = false;
+          result += '"\n';
         } else {
-          notes.push({
-            title: `${baseTitle} (${i + 1})`,
-            body: `<p>${escapeHtml(String(item))}</p>`,
-          });
+          result += "\\n";
+        }
+      } else if (char === "\r") {
+        result += "\\r";
+      } else if (char === "\t") {
+        result += "\\t";
+      } else {
+        result += char;
+      }
+    } else {
+      result += char;
+    }
+    escaped = char === "\\" && !escaped;
+  }
+
+  if (inString) result += '"';
+  return result;
+}
+
+function parseNoteContent(rawContent: unknown): string {
+  if (!rawContent) return "<p></p>";
+  if (typeof rawContent === "object" && rawContent !== null) {
+    const obj = rawContent as Record<string, unknown>;
+    if (obj.type === "doc" || Array.isArray(obj.content)) {
+      return tiptapNodeToHtml(obj as TiptapNode);
+    }
+    return `<pre><code>${escapeHtml(JSON.stringify(rawContent, null, 2))}</code></pre>`;
+  }
+  if (typeof rawContent === "string") {
+    if (rawContent.includes("<p>") || rawContent.includes("<h1>") || rawContent.includes("<div>")) {
+      return rawContent;
+    }
+    try {
+      const parsed = JSON.parse(rawContent) as Record<string, unknown>;
+      if (typeof parsed === "object" && parsed !== null && (parsed.type === "doc" || Array.isArray(parsed.content))) {
+        return tiptapNodeToHtml(parsed as TiptapNode);
+      }
+    } catch {
+      // plain text
+    }
+    return parseTxtToNote(rawContent, "nota").body;
+  }
+  return "<p></p>";
+}
+
+/** Parses JSON file content (including backup JSON exports with notes and folders) into ParsedNote objects. */
+export function parseJsonToNotes(content: string, fileName: string): ParsedNote[] {
+  const baseTitle = fileName.replace(/\.json$/i, "").replace(/\.md$/i, "").trim() || "Nova nota";
+  const notes: ParsedNote[] = [];
+  const folderMap = new Map<string, string>();
+
+  // Extract folders array if present in JSON text
+  const foldersMatch = content.match(/"folders"\s*:\s*(\[[^\]]*\])/);
+  if (foldersMatch) {
+    try {
+      const folders = JSON.parse(foldersMatch[1]);
+      if (Array.isArray(folders)) {
+        folders.forEach((f: Record<string, unknown>) => {
+          if (typeof f.id === "string" && typeof f.name === "string") {
+            folderMap.set(f.id, f.name);
+          }
+        });
+      }
+    } catch {}
+  }
+
+  let parsed: unknown = null;
+  try {
+    const clean = sanitizeJsonContent(content);
+    parsed = JSON.parse(clean);
+  } catch {}
+
+  if (parsed && typeof parsed === "object") {
+    const parsedObj = parsed as Record<string, unknown>;
+    const rawNotes: unknown[] = Array.isArray(parsed)
+      ? (parsed as unknown[])
+      : Array.isArray(parsedObj.notes)
+      ? (parsedObj.notes as unknown[])
+      : parsedObj.title || parsedObj.content || parsedObj.body || parsedObj.text
+      ? [parsedObj]
+      : [];
+
+    let folderCounter = 1;
+
+    for (const rawItem of rawNotes) {
+      if (!rawItem || typeof rawItem !== "object") continue;
+      const item = rawItem as Record<string, unknown>;
+      const title =
+        typeof item.title === "string"
+          ? item.title
+          : typeof item.name === "string"
+          ? item.name
+          : `${baseTitle} (${notes.length + 1})`;
+      const folderId = typeof item.folderId === "string" ? item.folderId : undefined;
+      if (folderId && !folderMap.has(folderId)) {
+        folderMap.set(folderId, `Pasta ${folderCounter++}`);
+      }
+      const folderName = folderId ? folderMap.get(folderId) : undefined;
+      const body = parseNoteContent(item.content || item.body || item.text);
+
+      notes.push({
+        title,
+        body,
+        folderPath: folderName ? [folderName] : undefined,
+      });
+    }
+
+    if (notes.length > 0) return notes;
+  }
+
+  // Resilient fallback for broken or partially truncated backup JSON files
+  const matches = [...content.matchAll(/"title"\s*:\s*"([^"]+)"/g)];
+  let folderCounter = 1;
+
+  for (let i = 0; i < matches.length; i++) {
+    const title = matches[i][1];
+    const startIdx = matches[i].index || 0;
+    const nextStart = i + 1 < matches.length ? matches[i + 1].index || content.length : content.length;
+    const chunk = content.slice(startIdx, nextStart);
+
+    const folderMatch = chunk.match(/"folderId"\s*:\s*"([^"]+)"/);
+    const folderId = folderMatch ? folderMatch[1] : undefined;
+
+    if (folderId && !folderMap.has(folderId)) {
+      folderMap.set(folderId, `Pasta ${folderCounter++}`);
+    }
+    const folderName = folderId ? folderMap.get(folderId) : undefined;
+
+    let body = "";
+    const contentIdx = chunk.indexOf('"content":');
+    if (contentIdx !== -1) {
+      const objStart = chunk.indexOf("{", contentIdx);
+      if (objStart !== -1) {
+        let depth = 0;
+        let objEnd = objStart;
+        for (let j = objStart; j < chunk.length; j++) {
+          if (chunk[j] === "{") depth++;
+          else if (chunk[j] === "}") {
+            depth--;
+            if (depth === 0) {
+              objEnd = j + 1;
+              break;
+            }
+          }
+        }
+        if (objEnd > objStart) {
+          try {
+            const docStr = sanitizeJsonContent(chunk.slice(objStart, objEnd));
+            const docObj = JSON.parse(docStr);
+            if (docObj.type === "doc" || Array.isArray(docObj.content)) {
+              body = tiptapNodeToHtml(docObj);
+            }
+          } catch {}
         }
       }
-      if (notes.length > 0) return notes;
     }
 
-    // Single note object { title, body }
-    if (typeof parsed === "object" && parsed !== null) {
-      if (parsed.title || parsed.body || parsed.content || parsed.text) {
-        const title = parsed.title || parsed.name || baseTitle;
-        const rawBody = parsed.body || parsed.content || parsed.text || JSON.stringify(parsed, null, 2);
-        const body =
-          typeof rawBody === "string" && (rawBody.includes("<p>") || rawBody.includes("<h1>"))
-            ? rawBody
-            : parseTxtToNote(typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody, null, 2), title).body;
-        return [{ title, body }];
-      }
+    if (!body) {
+      const texts = [...chunk.matchAll(/"text"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+      body = texts.map((t) => `<p>${escapeHtml(t)}</p>`).join("");
     }
 
-    // Generic JSON fallback: format neatly as a code block
-    const formatted = JSON.stringify(parsed, null, 2);
-    return [
-      {
-        title: baseTitle,
-        body: `<pre><code class="language-json">${escapeHtml(formatted)}</code></pre>`,
-      },
-    ];
-  } catch {
-    return [
-      {
-        title: baseTitle,
-        body: `<pre><code class="language-json">${escapeHtml(content)}</code></pre>`,
-      },
-    ];
+    notes.push({
+      title,
+      body: body || "<p></p>",
+      folderPath: folderName ? [folderName] : undefined,
+    });
   }
+
+  if (notes.length > 0) return notes;
+
+  // Generic JSON fallback: format neatly as code block
+  return [
+    {
+      title: baseTitle,
+      body: `<pre><code class="language-json">${escapeHtml(content)}</code></pre>`,
+    },
+  ];
 }
 
 /** Check whether a file is a text/document format that should be converted to a note. */
@@ -267,9 +480,18 @@ export async function parseFileToNotes(file: File): Promise<ParsedNote[]> {
   const content = await readFileAsText(file);
 
   if (ext === "md") {
+    // If the .md file actually contains JSON backup content, route to JSON backup parser!
+    const trimmed = content.trim();
+    if (trimmed.startsWith("{") && (trimmed.includes('"notes"') || trimmed.includes('"content"'))) {
+      return parseJsonToNotes(content, file.name);
+    }
     return [parseMdToNote(content, file.name)];
   }
   if (ext === "txt") {
+    const trimmed = content.trim();
+    if (trimmed.startsWith("{") && (trimmed.includes('"notes"') || trimmed.includes('"content"'))) {
+      return parseJsonToNotes(content, file.name);
+    }
     return [parseTxtToNote(content, file.name)];
   }
   if (ext === "json") {
@@ -341,7 +563,6 @@ export async function extractDiscoveredItems(dataTransfer: DataTransfer): Promis
     }
   }
 
-  // Fallback for standard file drop without webkitGetAsEntry
   return Array.from(dataTransfer.files).map((file) => ({
     file,
     relativePath: file.name,
