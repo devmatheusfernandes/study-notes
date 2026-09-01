@@ -323,6 +323,137 @@ function parseNoteContent(rawContent: unknown): string {
   return "<p></p>";
 }
 
+/** "structured-backup.json" shape: flat `folders`/`notes` arrays, folders linked by parentId. */
+export interface FolderStructured {
+  id: string;
+  title: string;
+  parentId?: string;
+  parentTitle?: string;
+}
+
+export interface NoteStructured {
+  id: string;
+  title: string;
+  content: unknown;
+  createdAt?: string;
+  updatedAt?: string;
+  type?: string;
+  folderId?: string;
+  /** Human-readable path like "Escolas / Visitas" — used as a fallback when folderId can't be resolved. */
+  folderPath?: string;
+}
+
+export interface StructuredBackup {
+  folders: FolderStructured[];
+  notes: NoteStructured[];
+}
+
+function isStructuredBackup(value: unknown): value is StructuredBackup {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return Array.isArray(obj.folders) && Array.isArray(obj.notes);
+}
+
+/** Walks each folder's parentId chain into a root→leaf name path, memoized and cycle-safe. */
+function buildFolderPathMap(folders: FolderStructured[]): Map<string, string[]> {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const cache = new Map<string, string[]>();
+
+  function resolve(id: string, seen: Set<string>): string[] {
+    if (cache.has(id)) return cache.get(id)!;
+    const folder = byId.get(id);
+    if (!folder) return [];
+    if (seen.has(id)) return [folder.title]; // cyclic parentId in the source data — stop recursing
+    seen.add(id);
+    const parentPath = folder.parentId ? resolve(folder.parentId, seen) : [];
+    const path = [...parentPath, folder.title];
+    cache.set(id, path);
+    return path;
+  }
+
+  for (const folder of folders) resolve(folder.id, new Set());
+  return cache;
+}
+
+function parseStructuredBackup(backup: StructuredBackup): ParsedNote[] {
+  const pathMap = buildFolderPathMap(backup.folders);
+
+  return backup.notes.map((note, index) => {
+    let folderPath = note.folderId ? pathMap.get(note.folderId) : undefined;
+    // folderId didn't resolve (missing/renamed folder entry) — fall back to the note's own recorded path string.
+    if ((!folderPath || folderPath.length === 0) && note.folderPath) {
+      folderPath = note.folderPath
+        .split("/")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    return {
+      title: note.title?.trim() || `Nota importada ${index + 1}`,
+      body: parseNoteContent(note.content),
+      folderPath: folderPath && folderPath.length > 0 ? folderPath : undefined,
+    };
+  });
+}
+
+/** "backup.json" shape: a nested tree — folders carry their own subtree in `children`. */
+interface TreeFolder {
+  id: string;
+  title: string;
+  type: "folder";
+  parentId?: string;
+  children: TreeItem[];
+  trashed?: boolean;
+}
+
+interface TreeNote {
+  id: string;
+  type: string; // "note" | "pdf" | ...
+  title: string;
+  content: unknown;
+}
+
+type TreeItem = TreeFolder | TreeNote;
+
+function isTreeFolder(item: TreeItem): item is TreeFolder {
+  return (item as TreeFolder).type === "folder" && Array.isArray((item as TreeFolder).children);
+}
+
+function isTreeFormat(value: unknown): value is TreeItem[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every(
+    (item) =>
+      !!item &&
+      typeof item === "object" &&
+      typeof (item as Record<string, unknown>).type === "string" &&
+      typeof (item as Record<string, unknown>).title === "string"
+  );
+}
+
+/**
+ * Flattens the folder tree into notes, threading each folder's title onto its
+ * descendants' `folderPath`. Trashed folders (and everything under them) are
+ * skipped — restoring a backup shouldn't resurrect things the user deleted.
+ */
+function flattenTree(items: TreeItem[], parentPath: string[] = []): ParsedNote[] {
+  const notes: ParsedNote[] = [];
+
+  for (const item of items) {
+    if (isTreeFolder(item)) {
+      if (item.trashed) continue;
+      notes.push(...flattenTree(item.children ?? [], [...parentPath, item.title]));
+    } else {
+      notes.push({
+        title: item.title?.trim() || "Nota importada",
+        body: parseNoteContent(item.content),
+        folderPath: parentPath.length > 0 ? parentPath : undefined,
+      });
+    }
+  }
+
+  return notes;
+}
+
 /** Parses JSON file content (including backup JSON exports with notes and folders) into ParsedNote objects. */
 export function parseJsonToNotes(content: string, fileName: string): ParsedNote[] {
   const baseTitle = fileName.replace(/\.json$/i, "").replace(/\.md$/i, "").trim() || "Nova nota";
@@ -336,8 +467,9 @@ export function parseJsonToNotes(content: string, fileName: string): ParsedNote[
       const folders = JSON.parse(foldersMatch[1]);
       if (Array.isArray(folders)) {
         folders.forEach((f: Record<string, unknown>) => {
-          if (typeof f.id === "string" && typeof f.name === "string") {
-            folderMap.set(f.id, f.name);
+          const name = typeof f.name === "string" ? f.name : typeof f.title === "string" ? f.title : undefined;
+          if (typeof f.id === "string" && name) {
+            folderMap.set(f.id, name);
           }
         });
       }
@@ -349,6 +481,18 @@ export function parseJsonToNotes(content: string, fileName: string): ParsedNote[
     const clean = sanitizeJsonContent(content);
     parsed = JSON.parse(clean);
   } catch {}
+
+  // Two known backup shapes, checked before the generic heuristics below so
+  // real folder nesting (parentId chains / tree children) is preserved
+  // instead of falling back to made-up "Pasta 1", "Pasta 2" placeholders.
+  if (isStructuredBackup(parsed)) {
+    const structured = parseStructuredBackup(parsed);
+    if (structured.length > 0) return structured;
+  }
+  if (isTreeFormat(parsed)) {
+    const fromTree = flattenTree(parsed);
+    if (fromTree.length > 0) return fromTree;
+  }
 
   if (parsed && typeof parsed === "object") {
     const parsedObj = parsed as Record<string, unknown>;
