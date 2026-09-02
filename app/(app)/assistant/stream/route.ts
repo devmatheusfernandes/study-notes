@@ -249,11 +249,21 @@ export async function POST(request: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const body = await request.json();
-  const question = (body.question as string)?.trim();
+  // Parsed once — a Request body stream can only be consumed once, so a
+  // second `request.json()` later (there used to be one inside the
+  // ReadableStream below) throws and gets silently swallowed, leaving every
+  // question empty. Reuse this same parsed object instead.
+  const body = (await request.json().catch(() => ({}))) as {
+    question?: string;
+    allowedSourceTypes?: string[];
+  };
+  const question = body.question?.trim() ?? "";
   if (!question) {
     return new Response("Empty question", { status: 400 });
   }
+  const allowedSourceTypes = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
+    ? body.allowedSourceTypes
+    : ["nota", "pdf", "jwpub", "video"];
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -269,12 +279,6 @@ export async function POST(request: Request) {
       }
 
       try {
-        const body = (await request.json().catch(() => ({}))) as { question?: string; allowedSourceTypes?: string[] };
-        const question = body.question?.trim() || "";
-        const allowedSourceTypes = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
-          ? body.allowedSourceTypes
-          : ["nota", "pdf", "jwpub", "video"];
-
         // 1. Generate query embedding for similarity search
         const { embedding, tokens: queryTokens, cost: queryCost } =
           await generateSingleEmbedding(question);
