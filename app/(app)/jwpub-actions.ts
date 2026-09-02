@@ -2,6 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { updateNoteRow } from "@/app/(app)/notes-actions";
+import { encryptText, decryptText } from "@/lib/encryption";
 import {
   ALLOWED_IMAGE_EXTENSIONS,
   JWPUB_MEDIA_BUCKET,
@@ -79,6 +81,14 @@ export async function savePublication(
     .single();
 
   if (error || !publication) return { error: "Não foi possível registrar a publicação." };
+
+  // The note row was created with the raw filename as its title (before
+  // parsing knew any better) — swap in the publication's real title now that
+  // we have it. Best-effort: a failure here shouldn't fail the whole ingest,
+  // it just leaves the filename as the title.
+  if (input.title.trim() !== "") {
+    await updateNoteRow(input.noteId, { title: input.title }).catch(() => {});
+  }
 
   if (input.chapters.length > 0) {
     const { error: chaptersError } = await supabase.from("jwpub_chapters").insert(
@@ -307,4 +317,56 @@ export async function deletePublicationMediaForNote(noteId: string): Promise<{ e
     .remove(objects.map((object) => `${prefix}/${object.name}`));
 
   return error ? { error: "Não foi possível remover as imagens da publicação." } : {};
+}
+
+/**
+ * All saved "Your answer" fields for a publication, keyed `"<documentId>:<pid>"` —
+ * a field's own `id`/`name` attributes repeat across documents (verified
+ * against a real archive), so `data-pid` scoped to its document is the only
+ * stable key. Fetched once per publication (not per chapter) since it's cheap
+ * and every chapter switch would otherwise re-fetch.
+ */
+export async function getAnswers(
+  publicationId: string
+): Promise<{ answers?: Record<string, string>; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("jwpub_answers")
+    .select("document_id, pid, answer")
+    .eq("publication_id", publicationId);
+
+  if (error) return { error: "Não foi possível carregar as respostas." };
+
+  const answers: Record<string, string> = {};
+  for (const row of data ?? []) {
+    answers[`${row.document_id}:${row.pid}`] = decryptText(row.answer) ?? "";
+  }
+  return { answers };
+}
+
+/** Upserts one "Your answer" field's text, debounced/triggered client-side — see jwpub-chapter-view.tsx. */
+export async function saveAnswer(
+  publicationId: string,
+  documentId: number,
+  pid: string,
+  answer: string
+): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  if (!(await ownedPublication(supabase, publicationId))) return { error: "Acesso negado." };
+
+  const { error } = await supabase.from("jwpub_answers").upsert(
+    {
+      user_id: user.id,
+      publication_id: publicationId,
+      document_id: documentId,
+      pid,
+      answer: encryptText(answer),
+    },
+    { onConflict: "publication_id,document_id,pid" }
+  );
+
+  return error ? { error: "Não foi possível salvar a resposta." } : {};
 }

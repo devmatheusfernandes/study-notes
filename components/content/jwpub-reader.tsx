@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
-import { getChapter, getFootnote, getPublication } from "@/app/(app)/jwpub-actions";
+import { getChapter, getFootnote, getPublication, getAnswers } from "@/app/(app)/jwpub-actions";
 import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
@@ -32,6 +32,7 @@ export function JwpubReader({
   initialDocParam,
 }: JwpubReaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const notes = useNotesStore((s) => s.notes);
   const note = notes.find((n) => n.id === noteId);
@@ -120,6 +121,26 @@ export function JwpubReader({
       });
     }
   }, [searchParams, resolveChapterIndex, activeIndex]);
+
+  // Moving between chapters (prev/next, the chapter list) also writes `?doc=`
+  // to the URL — otherwise a reload always lands back on the first chapter.
+  // `replace` (not `push`) so flipping through chapters doesn't pile up
+  // browser-history entries; the URL→state effect above is a no-op once this
+  // runs since targetIdx already matches the index we just set.
+  const navigateToIndex = useCallback(
+    (index: number) => {
+      setActiveIndex(index);
+      const chapter = chapters[index];
+      if (!chapter) return;
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("doc", String(chapter.documentId));
+      params.delete("chapter");
+      params.delete("text");
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [chapters, pathname, router, searchParams]
+  );
+
   const [html, setHtml] = useState<string | null>(null);
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
@@ -133,6 +154,19 @@ export function JwpubReader({
   const [bibleVerses, setBibleVerses] = useState<BibleVerseRow[] | null>(null);
   const [bibleError, setBibleError] = useState<string | null>(null);
   const [isLoadingBible, setIsLoadingBible] = useState(false);
+
+  // Fetched once per publication (not per chapter) — cheap, and every
+  // chapter switch would otherwise re-fetch the whole set.
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void getAnswers(publication.id).then((result) => {
+      if (!cancelled) setAnswers(result.answers ?? {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [publication.id]);
 
   const activeChapter = chapters[activeIndex];
 
@@ -285,6 +319,9 @@ export function JwpubReader({
               ) : (
                 <JwpubChapterView
                   html={html ?? ""}
+                  publicationId={publication.id}
+                  documentId={activeChapter.documentId}
+                  answers={answers}
                   onFootnote={handleFootnote}
                   onBibleRef={handleBibleRef}
                 />
@@ -297,7 +334,7 @@ export function JwpubReader({
                 size="sm"
                 leftIcon={<ChevronLeft />}
                 disabled={activeIndex === 0}
-                onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
+                onClick={() => navigateToIndex(Math.max(0, activeIndex - 1))}
               >
                 Anterior
               </Button>
@@ -309,7 +346,7 @@ export function JwpubReader({
                 size="sm"
                 rightIcon={<ChevronRight />}
                 disabled={activeIndex >= chapters.length - 1}
-                onClick={() => setActiveIndex((i) => Math.min(chapters.length - 1, i + 1))}
+                onClick={() => navigateToIndex(Math.min(chapters.length - 1, activeIndex + 1))}
               >
                 Próximo
               </Button>
@@ -353,7 +390,7 @@ export function JwpubReader({
                       <button
                         type="button"
                         onClick={() => {
-                          setActiveIndex(index);
+                          navigateToIndex(index);
                           setShowChapters(false);
                         }}
                         className={cn(

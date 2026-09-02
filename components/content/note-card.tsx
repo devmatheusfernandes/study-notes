@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   File,
@@ -39,7 +39,7 @@ const TYPE_CONFIG: Record<ContentType, { label: string; icon: LucideIcon; classN
   pdf: { label: "PDF", icon: FileText, className: "bg-foreground/10 text-foreground/80" },
   docx: { label: "DOCX", icon: FileType, className: "bg-foreground/10 text-foreground/80" },
   xlsx: { label: "XLSX", icon: FileSpreadsheet, className: "bg-foreground/10 text-foreground/80" },
-  jwpub: { label: "JWPUB", icon: FileText, className: "bg-success/20 text-success" },
+  jwpub: { label: "JWPUB", icon: FileText, className: "bg-[#8B5CF6]/20 text-[#8B5CF6]" },
   arquivo: { label: "ARQUIVO", icon: File, className: "bg-foreground/10 text-foreground/80" },
 };
 
@@ -69,6 +69,8 @@ export interface NoteCardProps {
   meta: string;
   syncStatus?: SyncStatus;
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
+  /** Still uploading or (for .jwpub) being ingested — not clickable, shows a "Processando…" badge, and flashes once when it flips back to false. */
+  processing?: boolean;
   pinned?: boolean;
   variant?: "grid" | "list";
   /** Whether `onDelete` removes the item for good (trash screen) vs. moves it to the trash. */
@@ -99,6 +101,7 @@ export function NoteCard({
   meta,
   syncStatus,
   vectorStatus = "none",
+  processing = false,
   pinned = false,
   variant = "grid",
   permanentDelete = false,
@@ -143,6 +146,7 @@ export function NoteCard({
   }
 
   function handlePointerDown() {
+    if (processing) return;
     if (selectionMode) return; // already in selection mode — a plain click toggles.
     longPressFired.current = false;
     clearLongPress();
@@ -153,6 +157,7 @@ export function NoteCard({
   }
 
   function handleOpen() {
+    if (processing) return;
     // Swallow the click that fires right after a long-press triggers selection.
     if (longPressFired.current) {
       longPressFired.current = false;
@@ -161,6 +166,20 @@ export function NoteCard({
     if (selectionMode) onToggleSelect?.(id);
     else onOpen?.();
   }
+
+  // Flashes once when `processing` flips from true to false — i.e. the
+  // upload/ingest that was gating this card just finished.
+  const wasProcessing = useRef(processing);
+  const [justReady, setJustReady] = useState(false);
+  useEffect(() => {
+    if (wasProcessing.current && !processing) {
+      setJustReady(true);
+      const timer = setTimeout(() => setJustReady(false), 900);
+      wasProcessing.current = processing;
+      return () => clearTimeout(timer);
+    }
+    wasProcessing.current = processing;
+  }, [processing]);
 
   const openButtonProps = onToggleSelect
     ? {
@@ -203,7 +222,10 @@ export function NoteCard({
     </span>
   );
 
-  const menu = (
+  const hasMenuItems = Boolean(
+    (onToggleSelect && !selected) || onTogglePin || onRename || onManageTags || onArchive || onRestore || onDelete
+  );
+  const menu = hasMenuItems && (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
@@ -281,8 +303,10 @@ export function NoteCard({
     return (
       <div
         className={cn(
-          "group flex items-center gap-3 rounded-2xl px-4 py-3 transition-colors",
-          pinned ? "bg-primary/[0.12] ring-1 ring-primary/25" : "bg-secondary hover:bg-surface"
+          "group flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-700",
+          pinned ? "bg-primary/[0.12] ring-1 ring-primary/25" : "bg-secondary hover:bg-surface",
+          processing && "opacity-60",
+          justReady && "ring-2 ring-accent shadow-[0_0_20px_-4px_var(--accent)]"
         )}
       >
         {checkbox}
@@ -298,8 +322,13 @@ export function NoteCard({
         <button
           type="button"
           onClick={handleOpen}
+          disabled={processing}
+          aria-disabled={processing}
           {...openButtonProps}
-          className="group/open flex min-w-0 flex-1 flex-col text-left"
+          className={cn(
+            "group/open flex min-w-0 flex-1 flex-col text-left",
+            processing && "cursor-progress"
+          )}
           style={{ touchAction: "manipulation" }}
         >
           <span className="truncate font-heading text-[15px] transition-colors group-hover/open:text-accent">
@@ -328,13 +357,22 @@ export function NoteCard({
           </span>
         )}
         <span className="hidden shrink-0 text-[11.5px] text-muted-foreground sm:block">{meta}</span>
-        {vectorStatus === "completed" && (
+        {processing && (
+          <span
+            title="Processando…"
+            className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25 sm:inline-flex"
+          >
+            <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+            Processando…
+          </span>
+        )}
+        {!processing && vectorStatus === "completed" && (
           <span title="Vetorizado com IA" className="hidden shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25 sm:inline-flex">
             <Sparkles className="size-2.5" />
             Vetorizado
           </span>
         )}
-        {(vectorStatus === "pending" || vectorStatus === "processing") && (
+        {!processing && (vectorStatus === "pending" || vectorStatus === "processing") && (
           <span title="Vetorização em andamento" className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25 sm:inline-flex">
             <Sparkles className="size-2.5 animate-pulse" />
             Vetorizando…
@@ -350,10 +388,12 @@ export function NoteCard({
   return (
     <div
       className={cn(
-        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-colors",
+        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-all duration-700",
         pinned
           ? "border-transparent bg-primary/[0.12] ring-1 ring-primary/25"
-          : "border-transparent bg-secondary hover:border-accent/40"
+          : "border-transparent bg-secondary hover:border-accent/40",
+        processing && "opacity-60",
+        justReady && "ring-2 ring-accent shadow-[0_0_24px_-4px_var(--accent)]"
       )}
     >
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -367,7 +407,16 @@ export function NoteCard({
           <config.icon className="size-2.5" />
           {config.label}
         </span>
-        {vectorStatus === "completed" && (
+        {processing && (
+          <span
+            title="Processando…"
+            className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25"
+          >
+            <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+            Processando…
+          </span>
+        )}
+        {!processing && vectorStatus === "completed" && (
           <span
             title="Vetorizado com IA"
             className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25"
@@ -376,7 +425,7 @@ export function NoteCard({
             Vetorizado
           </span>
         )}
-        {(vectorStatus === "pending" || vectorStatus === "processing") && (
+        {!processing && (vectorStatus === "pending" || vectorStatus === "processing") && (
           <span
             title="Vetorização em andamento"
             className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25"
@@ -385,7 +434,7 @@ export function NoteCard({
             Vetorizando…
           </span>
         )}
-        {vectorStatus === "failed" && (
+        {!processing && vectorStatus === "failed" && (
           <span
             title="Falha ao vetorizar"
             className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-destructive border border-destructive/25"
@@ -402,8 +451,13 @@ export function NoteCard({
       <button
         type="button"
         onClick={handleOpen}
+        disabled={processing}
+        aria-disabled={processing}
         {...openButtonProps}
-        className="group/open flex flex-col gap-1.5 text-left cursor-pointer"
+        className={cn(
+          "group/open flex flex-col gap-1.5 text-left",
+          processing ? "cursor-progress" : "cursor-pointer"
+        )}
         style={{ touchAction: "manipulation" }}
       >
         <span className="font-heading text-[17px] leading-tight text-balance transition-colors group-hover/open:text-accent">

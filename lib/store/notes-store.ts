@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { SyncStatus } from "@/components/content/sync-status";
-import type { NoteType } from "@/lib/file-types";
+import { typeFromFileName, formatFileSize, type NoteType } from "@/lib/file-types";
 import { formatRelativeMeta } from "@/lib/format-date";
 import { notify } from "@/components/ui/toaster";
 import type { UploadedFile } from "@/app/(app)/files-actions";
@@ -53,6 +53,10 @@ export interface Note {
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
   /** Tag ids assigned to this note — the `note_tags` join table, denormalized client-side. */
   tagIds: string[];
+  /** True while a just-picked/dropped file is uploading or (for .jwpub) still being ingested — not clickable to open yet, see hooks/use-file-upload.ts. */
+  processing?: boolean;
+  /** Stable React key across the optimistic→real id swap in resolveOptimisticFile — falls back to `id` when absent. */
+  clientKey?: string;
 }
 
 export interface Folder {
@@ -135,8 +139,16 @@ interface NotesStore {
   deleteFolder: (id: string) => void;
   /** Settings "danger zone" — removes every folder and moves their notes to the root. */
   deleteAllFolders: () => void;
-  /** Files are already uploaded and indexed server-side by the time this runs — see hooks/use-file-upload.ts. */
-  addFiles: (files: UploadedFile[], folderId?: string) => void;
+  /** Optimistic placeholder shown the instant a file is picked/dropped, before the upload request even resolves. Returns the temp id used to resolve/fail it later. */
+  addOptimisticFile: (file: { name: string; size: number }, folderId?: string) => string;
+  /** Replaces a temp placeholder with its real server row once uploaded. `stillProcessing` keeps it non-clickable a bit longer for types (like .jwpub) that need further server-side processing before they're readable. */
+  resolveOptimisticFile: (tempId: string, file: UploadedFile, stillProcessing: boolean) => void;
+  /** Drops a placeholder whose upload failed outright. */
+  failOptimisticFile: (tempId: string) => void;
+  /** Flips a note's processing flag once its post-upload work (e.g. jwpub ingest) finishes. */
+  setNoteProcessing: (id: string, processing: boolean) => void;
+  /** Local-only title swap (no server round trip — the caller already wrote it server-side, e.g. jwpub ingest resolving the publication's real title). */
+  setNoteTitle: (id: string, title: string) => void;
 
   createTag: (name: string, color: string) => string;
   updateTag: (id: string, patch: { name?: string; color?: string }) => void;
@@ -514,29 +526,60 @@ export const useNotesStore = create<NotesStore>()(
           });
       },
 
-      addFiles: (files, folderId) =>
+      addOptimisticFile: (file, folderId) => {
+        const tempId = `optimistic:${crypto.randomUUID()}`;
         set((s) => ({
           notes: [
-            ...files.map(
-              (file): Note => ({
-                id: file.id,
-                type: file.type,
-                title: file.title,
-                body: file.body,
-                meta: formatRelativeMeta(file.updatedAt),
-                pinned: false,
-                status: "active",
-                syncStatus: "synced",
-                updatedAt: file.updatedAt,
-                folderId,
-                storagePath: file.storagePath,
-                vectorStatus: "pending",
-                tagIds: [],
-              })
-            ),
+            {
+              id: tempId,
+              clientKey: tempId,
+              type: typeFromFileName(file.name),
+              title: file.name,
+              body: formatFileSize(file.size),
+              meta: "Enviando…",
+              pinned: false,
+              status: "active",
+              syncStatus: "local",
+              updatedAt: Date.now(),
+              folderId,
+              processing: true,
+              tagIds: [],
+            },
             ...s.notes,
           ],
+        }));
+        return tempId;
+      },
+
+      resolveOptimisticFile: (tempId, file, stillProcessing) =>
+        set((s) => ({
+          notes: s.notes.map((n) =>
+            n.id === tempId
+              ? {
+                  ...n,
+                  id: file.id,
+                  type: file.type,
+                  title: file.title,
+                  body: file.body,
+                  meta: formatRelativeMeta(file.updatedAt),
+                  syncStatus: "synced" as const,
+                  updatedAt: file.updatedAt,
+                  storagePath: file.storagePath,
+                  vectorStatus: "pending" as const,
+                  processing: stillProcessing,
+                }
+              : n
+          ),
         })),
+
+      failOptimisticFile: (tempId) =>
+        set((s) => ({ notes: s.notes.filter((n) => n.id !== tempId) })),
+
+      setNoteProcessing: (id, processing) =>
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, processing } : n)) })),
+
+      setNoteTitle: (id, title) =>
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, title } : n)) })),
 
       togglePin: (id) => {
         const note = get().notes.find((n) => n.id === id);

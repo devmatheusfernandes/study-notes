@@ -13,21 +13,37 @@ import {
 
 /**
  * Matches each just-uploaded `.jwpub` back to its new note row (by filename,
- * which `uploadFiles` echoes back) and kicks off parsing.
+ * which `uploadFiles` echoes back), kicks off parsing, and flips the card's
+ * `processing` flag off once ingest settles — that's what makes it clickable
+ * and triggers the card's "just ready" flash. Also swaps the card's title
+ * from the raw filename to the publication's real title, once known —
+ * ingestJwpub already wrote it server-side, this just mirrors it locally so
+ * the card doesn't wait for a full reload to show it.
  */
-async function ingestUploadedPublications(originals: File[], uploaded: UploadedFile[]) {
+async function ingestUploadedPublications(
+  originals: File[],
+  uploaded: UploadedFile[],
+  setNoteProcessing: (id: string, processing: boolean) => void,
+  setNoteTitle: (id: string, title: string) => void
+) {
   for (const file of originals) {
     if (!file.name.toLowerCase().endsWith(".jwpub")) continue;
     const row = uploaded.find((u) => u.title === file.name);
     if (!row) continue;
-    await ingestJwpubWithFeedback(file, row.id, file.name);
+    const result = await ingestJwpubWithFeedback(file, row.id, file.name);
+    if (result.title) setNoteTitle(row.id, result.title);
+    setNoteProcessing(row.id, false);
   }
 }
 
 /** Shared upload & note import flow for header button, drop zone, and folder cards. */
 export function useFileUpload() {
   const [isUploading, setIsUploading] = useState(false);
-  const addFiles = useNotesStore((s) => s.addFiles);
+  const addOptimisticFile = useNotesStore((s) => s.addOptimisticFile);
+  const resolveOptimisticFile = useNotesStore((s) => s.resolveOptimisticFile);
+  const failOptimisticFile = useNotesStore((s) => s.failOptimisticFile);
+  const setNoteProcessing = useNotesStore((s) => s.setNoteProcessing);
+  const setNoteTitle = useNotesStore((s) => s.setNoteTitle);
   const addNote = useNotesStore((s) => s.addNote);
   const createFolder = useNotesStore((s) => s.createFolder);
 
@@ -118,14 +134,33 @@ export function useFileUpload() {
 
       for (const { folderId, files } of binaryFilesByFolder.values()) {
         if (files.length === 0) continue;
+
+        // Optimistic cards appear the instant the batch is about to be sent —
+        // not clickable yet (see NoteCard's `processing` prop) — so the user
+        // sees the file land immediately instead of waiting on the round trip.
+        const tempIdByFile = new Map(files.map((file) => [file, addOptimisticFile(file, folderId)]));
+
         const formData = new FormData();
         files.forEach((file) => formData.append("files", file));
 
         const result = await uploadFiles(formData, folderId);
+
+        for (const file of files) {
+          const tempId = tempIdByFile.get(file)!;
+          const uploaded = result.files.find((u) => u.title === file.name);
+          if (!uploaded) {
+            failOptimisticFile(tempId);
+            continue;
+          }
+          // .jwpub needs a further parse-and-persist pass before it's readable;
+          // everything else is ready to open as soon as the upload lands.
+          const stillProcessing = file.name.toLowerCase().endsWith(".jwpub");
+          resolveOptimisticFile(tempId, uploaded, stillProcessing);
+        }
+
         if (result.files.length > 0) {
-          addFiles(result.files, folderId);
           totalUploadedFiles += result.files.length;
-          void ingestUploadedPublications(files, result.files);
+          void ingestUploadedPublications(files, result.files, setNoteProcessing, setNoteTitle);
         }
         if (result.error) {
           notify.error("Não foi possível concluir o envio de alguns arquivos", result.error);

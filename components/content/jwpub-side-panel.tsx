@@ -21,6 +21,12 @@ interface JwpubSidePanelProps {
  * `JwpubReader`'s main column (not `fixed`), so animating its width is what
  * makes the reader content shrink alongside it instead of the panel floating
  * over it.
+ *
+ * `sticky top-0 h-dvh` pins it to the viewport (same pattern as the app's own
+ * left sidebar, components/layout/sidebar.tsx) — the reader has no internal
+ * scroll container of its own (the page itself scrolls, see JwpubReader's
+ * `min-h-dvh`), so without this the panel would scroll away with the chapter
+ * text instead of staying in view.
  */
 export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
@@ -44,7 +50,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: 
           animate={{ width, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: "spring", stiffness: 320, damping: 34 }}
-          className="hidden shrink-0 overflow-hidden border-l border-border bg-[#161413] md:block"
+          className="sticky top-0 hidden h-dvh shrink-0 overflow-hidden border-l border-border bg-[#161413] md:block"
         >
           <div className="flex h-full flex-col" style={{ width }}>
             <header className="flex items-center gap-2.5 border-b border-border px-5 py-4">

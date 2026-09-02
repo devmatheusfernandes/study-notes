@@ -156,9 +156,6 @@ export function InlineVideoCard({
           line at the card's narrower mobile width. */}
       <div className="flex flex-col gap-1.5 border-b border-border/60 bg-secondary/30 px-3.5 py-2.5 text-xs">
         <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-          <Badge variant="outline" className="h-auto shrink-0 px-2 py-0.5 font-mono text-[9.5px] uppercase">
-            Vídeo JW
-          </Badge>
           <span className="truncate font-medium text-foreground/90">{videoData.title}</span>
         </div>
 

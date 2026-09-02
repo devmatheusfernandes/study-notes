@@ -153,6 +153,7 @@ export function NotesCollection({
   const foldersVisible = childFolders.length > 0;
 
   async function openNote(note: Note) {
+    if (note.processing) return; // still uploading/ingesting — NoteCard already blocks the click, this is belt-and-suspenders.
     if (!note.storagePath) {
       // Text notes (and legacy seed/demo file cards with no real upload) use the editor.
       router.push(`/notes/${note.id}`);
@@ -179,32 +180,41 @@ export function NotesCollection({
     else window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  const renderCard = (note: Note) => (
-    <NoteCard
-      key={note.id}
-      id={note.id}
-      type={note.type}
-      title={note.title}
-      body={note.body}
-      meta={note.meta}
-      syncStatus={note.syncStatus}
-      vectorStatus={note.vectorStatus}
-      pinned={note.pinned}
-      variant={viewMode}
-      permanentDelete={isTrashed}
-      selectionMode={selectionMode}
-      selected={isSelected(note.id)}
-      tags={note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
-      onToggleSelect={toggleSelect}
-      onOpen={() => void openNote(note)}
-      onTogglePin={status === "active" ? () => togglePin(note.id) : undefined}
-      onArchive={status === "active" ? () => archive(note.id) : undefined}
-      onRestore={status !== "active" ? () => restore(note.id) : undefined}
-      onDelete={isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
-      onManageTags={() => setManageTagsNoteId(note.id)}
-      onToggleChecklistItem={(index) => toggleChecklistItem(note.id, index)}
-    />
-  );
+  const renderCard = (note: Note) => {
+    // A temp id (no server row yet) can't be pinned/archived/tagged/deleted —
+    // see addOptimisticFile in the store. Once resolved to a real id the row
+    // exists even if still `processing` (e.g. a .jwpub still being ingested),
+    // so only the open-to-read action stays gated at that point.
+    const isOptimistic = note.id.startsWith("optimistic:");
+
+    return (
+      <NoteCard
+        key={note.clientKey ?? note.id}
+        id={note.id}
+        type={note.type}
+        title={note.title}
+        body={note.body}
+        meta={note.meta}
+        syncStatus={note.syncStatus}
+        vectorStatus={note.vectorStatus}
+        processing={note.processing}
+        pinned={note.pinned}
+        variant={viewMode}
+        permanentDelete={isTrashed}
+        selectionMode={selectionMode}
+        selected={isSelected(note.id)}
+        tags={note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
+        onToggleSelect={isOptimistic ? undefined : toggleSelect}
+        onOpen={() => void openNote(note)}
+        onTogglePin={!isOptimistic && status === "active" ? () => togglePin(note.id) : undefined}
+        onArchive={!isOptimistic && status === "active" ? () => archive(note.id) : undefined}
+        onRestore={!isOptimistic && status !== "active" ? () => restore(note.id) : undefined}
+        onDelete={isOptimistic ? undefined : isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
+        onManageTags={isOptimistic ? undefined : () => setManageTagsNoteId(note.id)}
+        onToggleChecklistItem={(index) => toggleChecklistItem(note.id, index)}
+      />
+    );
+  };
 
   const itemsSection = (label: string, items: Note[]) => {
     if (items.length === 0) return null;

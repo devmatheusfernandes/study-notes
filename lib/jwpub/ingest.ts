@@ -17,7 +17,7 @@ export async function ingestJwpub(
   file: Blob,
   noteId: string,
   onProgress?: (stage: string) => void
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; title?: string }> {
   try {
     const parsed = await parseJwpub(file, (stage, current, total) => {
       onProgress?.(total ? `${stage} (${current}/${total})` : stage);
@@ -72,7 +72,7 @@ export async function ingestJwpub(
       }
     }
 
-    return { ok: true };
+    return { ok: true, title: parsed.title.trim() !== "" ? parsed.title : undefined };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido.";
     await markPublicationFailed(noteId).catch(() => {});

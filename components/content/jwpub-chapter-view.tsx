@@ -4,14 +4,32 @@ import { useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
+import { saveAnswer } from "@/app/(app)/jwpub-actions";
 
 interface JwpubChapterViewProps {
   html: string;
+  publicationId: string;
+  documentId: number;
+  /** Saved "Your answer" text, keyed `"<documentId>:<pid>"` — see getAnswers in jwpub-actions.ts. */
+  answers: Record<string, string>;
   onFootnote: (footnoteId: number) => void;
   onBibleRef: (firstVerseId: number, lastVerseId: number) => void;
 }
 
-export function JwpubChapterView({ html, onFootnote, onBibleRef }: JwpubChapterViewProps) {
+const ANSWER_BASE_CLASS =
+  "field-sizing-content min-h-16 w-full min-w-0 rounded-2xl border bg-secondary px-4 py-3 text-[13.5px] text-foreground placeholder:text-muted-foreground outline-none transition-colors duration-300";
+const ANSWER_IDLE_CLASS = "border-border";
+const ANSWER_TYPING_CLASS = "border-accent ring-1 ring-accent/40";
+const ANSWER_SAVED_CLASS = "border-success ring-1 ring-success/40";
+
+export function JwpubChapterView({
+  html,
+  publicationId,
+  documentId,
+  answers,
+  onFootnote,
+  onBibleRef,
+}: JwpubChapterViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const highlightText = searchParams.get("text");
@@ -44,6 +62,70 @@ export function JwpubChapterView({ html, onFootnote, onBibleRef }: JwpubChapterV
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
   }, [onFootnote, onBibleRef]);
+
+  // Progressively enhances the archive's own "Your answer" fields
+  // (`<div class="gen-field" data-pid="…"><textarea>`) — restyles them to
+  // match the app's Textarea primitive, fills in any previously saved value,
+  // and wires up debounced autosave with the orange(typing)/green(saved)
+  // border. A field's own id/name repeat across documents (verified against
+  // a real archive), so `data-pid` scoped to the current documentId is the
+  // only stable save key — see getAnswers/saveAnswer in jwpub-actions.ts.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const fields = container.querySelectorAll<HTMLElement>(".gen-field[data-pid]");
+    const cleanups: Array<() => void> = [];
+
+    fields.forEach((field) => {
+      const pid = field.dataset.pid;
+      const textarea = field.querySelector("textarea");
+      if (!pid || !textarea) return;
+
+      const label = field.querySelector("label");
+      if (label) {
+        label.className = "mb-1.5 block text-[11.5px] font-medium text-muted-foreground";
+      }
+      field.classList.add("my-4");
+
+      const savedValue = answers[`${documentId}:${pid}`] ?? "";
+      textarea.value = savedValue;
+      textarea.rows = 2;
+      textarea.placeholder = "Escreva sua resposta…";
+      textarea.className = `${ANSWER_BASE_CLASS} ${savedValue ? ANSWER_SAVED_CLASS : ANSWER_IDLE_CLASS}`;
+
+      let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+      async function persist() {
+        const result = await saveAnswer(publicationId, documentId, pid!, textarea!.value);
+        textarea!.className = `${ANSWER_BASE_CLASS} ${result.error ? ANSWER_TYPING_CLASS : ANSWER_SAVED_CLASS}`;
+      }
+
+      function handleInput() {
+        textarea!.className = `${ANSWER_BASE_CLASS} ${ANSWER_TYPING_CLASS}`;
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => void persist(), 800);
+      }
+
+      function handleBlur() {
+        if (saveTimer) {
+          clearTimeout(saveTimer);
+          saveTimer = null;
+          void persist();
+        }
+      }
+
+      textarea.addEventListener("input", handleInput);
+      textarea.addEventListener("blur", handleBlur);
+      cleanups.push(() => {
+        textarea.removeEventListener("input", handleInput);
+        textarea.removeEventListener("blur", handleBlur);
+        if (saveTimer) clearTimeout(saveTimer);
+      });
+    });
+
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [html, publicationId, documentId, answers]);
 
   // Auto-scroll & Highlight matching snippet from chat RAG source
   useEffect(() => {
