@@ -4,26 +4,33 @@ import { useEffect, useRef } from "react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import type { NoteRow, FolderRow } from "@/app/(app)/notes-actions";
+import type { UserPreferencesData } from "@/app/(app)/preferences-actions";
 
 interface StoreHydrationProps {
   /** Server-fetched (RLS-scoped) — see the async (app) layout that renders this. */
   initialNotes: NoteRow[];
   initialFolders: FolderRow[];
+  initialPreferences?: UserPreferencesData;
 }
 
 /**
  * Seeds the notes store from data fetched server-side, and rehydrates the
- * (still localStorage-backed) preferences store. Both only run client-side —
- * the server and first client render intentionally start from the same empty
- * store state, so there's no hydration mismatch, just a one-frame gap that
- * `useHydrated()` gates the content behind.
+ * preferences store. Both only run client-side — the server and first client
+ * render intentionally start from the same state, so there's no hydration mismatch.
  */
-export function StoreHydration({ initialNotes, initialFolders }: StoreHydrationProps) {
+export function StoreHydration({
+  initialNotes,
+  initialFolders,
+  initialPreferences,
+}: StoreHydrationProps) {
   const seeded = useRef(false);
 
   useEffect(() => {
     if (!seeded.current) {
       seeded.current = true;
+      if (initialPreferences) {
+        usePreferencesStore.getState().hydratePreferences(initialPreferences);
+      }
       // Load whatever was persisted locally (including any still-unsynced
       // drafts and their pending outbox entries) before merging in the
       // server-fetched rows, so `hydrate()` knows which ids to keep local.
@@ -33,7 +40,7 @@ export function StoreHydration({ initialNotes, initialFolders }: StoreHydrationP
       });
     }
     void usePreferencesStore.persist.rehydrate();
-  }, [initialNotes, initialFolders]);
+  }, [initialNotes, initialFolders, initialPreferences]);
 
   return null;
 }

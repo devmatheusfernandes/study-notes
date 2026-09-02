@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { useAssistantStore, type AssistantSource } from "@/lib/store/assistant-store";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useFileUpload } from "@/hooks/use-file-upload";
 
 // ─── Drag-to-create-note constants ────────────────────────────────────────────
@@ -32,9 +33,7 @@ const SOURCE_FILTERS = [
   { id: "pdf", label: "PDFs", icon: FileText },
   { id: "jwpub", label: "JWPUB", icon: BookOpen },
   { id: "video", label: "Vídeos", icon: Video },
-] as const;
-
-const STORAGE_KEY = "study-notes-source-filters";
+] as const;;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Ripple {
@@ -107,27 +106,9 @@ export function SmartComposer(props: SmartComposerProps) {
   const [dragY, setDragY] = useState(0);
   const [ripples, setRipples] = useState<Ripple[]>([]);
 
-  // Chat source filters
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([
-    "nota",
-    "pdf",
-    "jwpub",
-    "video",
-  ]);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed: unknown = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setSelectedFilters(parsed as string[]);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+  // Chat source filters (persisted in Zustand store + synced to Supabase DB)
+  const selectedFilters = usePreferencesStore((s) => s.selectedSourceFilters);
+  const setSelectedFilters = usePreferencesStore((s) => s.setSelectedSourceFilters);
 
   const open = useAssistantStore((s) => s.open);
   const start = useAssistantStore((s) => s.start);
@@ -195,21 +176,14 @@ export function SmartComposer(props: SmartComposerProps) {
 
   // ── Source filter toggle ──────────────────────────────────────────────────
   function toggleFilter(id: string) {
-    setSelectedFilters((prev) => {
-      let next: string[];
-      if (prev.includes(id)) {
-        next = prev.filter((item) => item !== id);
-        if (next.length === 0) next = ["nota", "pdf", "jwpub", "video"];
-      } else {
-        next = [...prev, id];
-      }
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    let next: string[];
+    if (selectedFilters.includes(id)) {
+      next = selectedFilters.filter((item) => item !== id);
+      if (next.length === 0) next = ["nota", "pdf", "jwpub", "video"];
+    } else {
+      next = [...selectedFilters, id];
+    }
+    setSelectedFilters(next);
   }
 
   // ── Assistant submit (notes/panel variants) ───────────────────────────────
