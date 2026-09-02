@@ -27,26 +27,15 @@ export function ChatView({ conversationId }: ChatViewProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = useCallback(
-    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video"]) => {
-      // 1. Optimistic user message
-      addUserMsg(content);
-
-      // 2. Persist user message server-side
-      const result = await addUserMessageAction(conversationId, content);
-      if (result.error) {
-        failStream(result.error);
-        return;
-      }
-
-      // 3. Start streaming assistant response
+  const streamResponse = useCallback(
+    async (questionText: string, allowedSourceTypes: string[]) => {
       startStream();
 
       try {
         const response = await fetch(`/chats/${conversationId}/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: content, allowedSourceTypes }),
+          body: JSON.stringify({ message: questionText, allowedSourceTypes }),
         });
 
         if (!response.ok || !response.body) {
@@ -93,7 +82,6 @@ export function ChatView({ conversationId }: ChatViewProps) {
           }
         }
 
-        // If stream ended without a "done" event
         if (useChatStore.getState().isStreaming) {
           finishStream(sources);
         }
@@ -101,8 +89,47 @@ export function ChatView({ conversationId }: ChatViewProps) {
         failStream("Falha na conexão com o assistente.");
       }
     },
-    [conversationId, addUserMsg, startStream, appendDelta, finishStream, failStream]
+    [conversationId, startStream, appendDelta, finishStream, failStream]
   );
+
+  const sendMessage = useCallback(
+    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video"]) => {
+      // 1. Optimistic user message
+      addUserMsg(content);
+
+      // 2. Persist user message server-side
+      const result = await addUserMessageAction(conversationId, content);
+      if (result.error) {
+        failStream(result.error);
+        return;
+      }
+
+      // 3. Start streaming assistant response
+      await streamResponse(content, allowedSourceTypes);
+    },
+    [conversationId, addUserMsg, failStream, streamResponse]
+  );
+
+  // Auto-send initial question if navigated with ?q= (e.g. from ChatsDock or start page)
+  const initialQueryFired = useRef(false);
+
+  useEffect(() => {
+    if (initialQueryFired.current) return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const initialQuery = searchParams.get("q")?.trim();
+    if (!initialQuery) return;
+
+    initialQueryFired.current = true;
+    const sourcesParam = searchParams.get("sources");
+    const allowedSourceTypes = sourcesParam
+      ? sourcesParam.split(",")
+      : ["nota", "pdf", "jwpub", "video"];
+
+    // Clean URL without triggering page reload
+    window.history.replaceState(null, "", window.location.pathname);
+
+    void sendMessage(initialQuery, allowedSourceTypes);
+  }, [sendMessage]);
 
   return (
     <div className="relative flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">

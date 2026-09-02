@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function TrashPage() {
   return (
     <>
-      <Header variant="search" showActions searchPlaceholder="Buscar na lixeira…" />
+      <Header variant="search" searchPlaceholder="Buscar na lixeira…" />
       <NotesCollection
         status="trashed"
         emptyIcon={<Trash2 />}

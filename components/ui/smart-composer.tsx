@@ -108,19 +108,26 @@ export function SmartComposer(props: SmartComposerProps) {
   const [ripples, setRipples] = useState<Ripple[]>([]);
 
   // Chat source filters
-  const [selectedFilters, setSelectedFilters] = useState<string[]>(() => {
-    if (typeof window === "undefined") return ["nota", "pdf", "jwpub", "video"];
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([
+    "nota",
+    "pdf",
+    "jwpub",
+    "video",
+  ]);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed as string[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSelectedFilters(parsed as string[]);
+        }
       }
     } catch {
       // ignore
     }
-    return ["nota", "pdf", "jwpub", "video"];
-  });
+  }, []);
 
   const open = useAssistantStore((s) => s.open);
   const start = useAssistantStore((s) => s.start);
@@ -626,13 +633,11 @@ export function SmartComposer(props: SmartComposerProps) {
       {/* Sparkles drawer — notes quick-actions or chat filters */}
       {isNotes ? notesActionsContent : chatFiltersContent}
 
-      {/* Main input row:
-           - chat: items-end so the send button sits at the baseline when textarea grows
-           - notes/panel: items-center for proper single-line centering */}
+      {/* Main input row — items-center works for all variants:
+           single-line (notes/panel) and growing textarea (chat) alike. */}
       <div
         className={cn(
-          "relative z-10 flex gap-3",
-          isChat ? "items-end" : "items-center",
+          "relative z-10 flex items-center gap-3",
           isPanel ? "px-4 py-2.5" : "px-4 py-3 sm:px-5 sm:py-3.5"
         )}
       >
@@ -654,7 +659,6 @@ export function SmartComposer(props: SmartComposerProps) {
             aria-expanded={drawerOpen}
             className={cn(
               "relative size-7 shrink-0 rounded-full text-accent transition-colors flex items-center justify-center",
-              isChat && "mb-1",
               noActions && isNotes
                 ? "cursor-default opacity-40"
                 : drawerOpen
@@ -733,7 +737,6 @@ export function SmartComposer(props: SmartComposerProps) {
           aria-label="Enviar"
           className={cn(
             "flex size-9 shrink-0 items-center justify-center rounded-full transition-all duration-200",
-            isChat && "mb-1",
             value.trim() &&
               !(props.variant === "chat" && props.disabled)
               ? "bg-primary text-primary-foreground shadow-md hover:bg-accent hover:scale-105 active:scale-95"

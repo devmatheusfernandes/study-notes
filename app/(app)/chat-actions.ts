@@ -70,15 +70,6 @@ export async function createConversation(
 
   if (convError || !conversation) return { error: "Não foi possível criar a conversa." };
 
-  const { error: msgError } = await supabase.from("chat_messages").insert({
-    conversation_id: conversation.id,
-    user_id: user.id,
-    role: "user",
-    content: firstMessage.trim(),
-  });
-
-  if (msgError) return { error: "Não foi possível salvar a mensagem." };
-
   return { conversationId: conversation.id };
 }
 

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Archive, ArchiveRestore, MessageSquare, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, MessageSquare, MoreHorizontal, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { notify } from "@/components/ui/toaster";
+import { SmartComposer } from "@/components/ui/smart-composer";
 import { useChatStore, type ChatConversation } from "@/lib/store/chat-store";
 import {
   createConversation,
@@ -62,21 +63,30 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
     ? activeConversations.slice(0, maxItems ?? 3)
     : activeConversations;
 
-  async function handleNew() {
+  async function handleStartNewChat(message: string, allowedSourceTypes: string[]) {
+    if (isCreating) return;
     setIsCreating(true);
     try {
-      const result = await createConversation("Nova conversa");
+      const result = await createConversation(message);
       if (result.error || !result.conversationId) {
         notify.error("Não foi possível criar a conversa.");
         return;
       }
       addConv({
         id: result.conversationId,
-        title: "Nova conversa",
+        title: message.trim().slice(0, 60) || "Nova conversa",
         status: "active",
         updatedAt: Date.now(),
       });
-      router.push(`/chats/${result.conversationId}`);
+      const query = new URLSearchParams();
+      if (allowedSourceTypes.length < 4) {
+        query.set("sources", allowedSourceTypes.join(","));
+      }
+      const qs = query.toString();
+      const targetUrl = qs
+        ? `/chats/${result.conversationId}?${qs}`
+        : `/chats/${result.conversationId}`;
+      router.push(targetUrl);
     } finally {
       setIsCreating(false);
     }
@@ -226,20 +236,11 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-heading text-lg">Conversas</h2>
-        <button
-          type="button"
-          onClick={() => void handleNew()}
-          disabled={isCreating}
-          className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 font-heading text-[12.5px] text-primary-foreground transition-opacity disabled:opacity-50"
-        >
-          <Plus className="size-3.5" />
-          Nova conversa
-        </button>
       </div>
 
       {displayItems.length === 0 && archivedConversations.length === 0 && (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          Nenhuma conversa ainda. Crie uma para começar.
+          Nenhuma conversa ainda. Digite sua pergunta abaixo para começar.
         </p>
       )}
 

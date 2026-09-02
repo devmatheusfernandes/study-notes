@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function NotesPage() {
   return (
     <>
-      <Header variant="search" showActions searchPlaceholder="Buscar em suas notas…" />
+      <Header variant="search" searchPlaceholder="Buscar em suas notas…" />
       <NotesCollection
         status="active"
         showFolders

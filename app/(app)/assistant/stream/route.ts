@@ -76,15 +76,17 @@ export async function POST(request: Request) {
         }
 
         // 2. Perform vector search RPC (hybrid: personal notes + global videos)
+        const RAG_THRESHOLD = 0.35;
         const { data: matches } = await supabase.rpc("match_hybrid_embeddings", {
           query_embedding: embedding,
           user_id_param: user.id,
-          match_threshold: 0.15,
+          match_threshold: RAG_THRESHOLD,
           match_count: 6,
           allowed_types: allowedSourceTypes,
         });
 
-        const matchRows = (matches ?? []) as MatchResult[];
+        const rawMatches = (matches ?? []) as MatchResult[];
+        const matchRows = rawMatches.filter((m) => m.similarity >= RAG_THRESHOLD);
 
         // Extract unique sources with noteId, videoId & chapter info
         interface SourceItem {
@@ -102,52 +104,54 @@ export async function POST(request: Request) {
         }
 
         const sourcesMap = new Map<string, SourceItem>();
-        for (const match of matchRows) {
-          let meta: Record<string, unknown> = {};
-          if (typeof match.metadata === "string") {
-            try {
-              meta = JSON.parse(match.metadata) as Record<string, unknown>;
-            } catch {
-              meta = {};
+        if (matchRows.length > 0) {
+          for (const match of matchRows) {
+            let meta: Record<string, unknown> = {};
+            if (typeof match.metadata === "string") {
+              try {
+                meta = JSON.parse(match.metadata) as Record<string, unknown>;
+              } catch {
+                meta = {};
+              }
+            } else if (typeof match.metadata === "object" && match.metadata !== null) {
+              meta = match.metadata as Record<string, unknown>;
             }
-          } else if (typeof match.metadata === "object" && match.metadata !== null) {
-            meta = match.metadata as Record<string, unknown>;
-          }
 
-          const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
-          const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
+            const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
+            const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
 
-          const chapterTitle = meta.chapterTitle as string | undefined;
-          const documentId = meta.documentId as number | undefined;
+            const chapterTitle = meta.chapterTitle as string | undefined;
+            const documentId = meta.documentId as number | undefined;
 
-          let type = (meta.type as string | undefined) || match.source_type || "nota";
-          if (chapterTitle || documentId || type === "jwpub") {
-            type = "jwpub";
-          }
+            let type = (meta.type as string | undefined) || match.source_type || "nota";
+            if (chapterTitle || documentId || type === "jwpub") {
+              type = "jwpub";
+            }
 
-          const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
+            const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
 
-          const videoUrl = meta.videoUrl as string | undefined;
-          const coverImage = meta.coverImage as string | undefined;
-          const durationFormatted = meta.durationFormatted as string | undefined;
-          const subtitlesUrl = meta.subtitlesUrl as string | undefined;
-          const snippet = match.content ? match.content.trim() : undefined;
+            const videoUrl = meta.videoUrl as string | undefined;
+            const coverImage = meta.coverImage as string | undefined;
+            const durationFormatted = meta.durationFormatted as string | undefined;
+            const subtitlesUrl = meta.subtitlesUrl as string | undefined;
+            const snippet = match.content ? match.content.trim() : undefined;
 
-          const key = videoId ? `video:${videoId}` : `${noteId}:${chapterTitle ?? ""}`;
-          if (!sourcesMap.has(key)) {
-            sourcesMap.set(key, {
-              ...(noteId ? { noteId } : {}),
-              ...(videoId ? { videoId } : {}),
-              type,
-              title,
-              ...(chapterTitle ? { chapterTitle } : {}),
-              ...(documentId ? { documentId } : {}),
-              ...(snippet ? { snippet } : {}),
-              ...(videoUrl ? { videoUrl } : {}),
-              ...(coverImage ? { coverImage } : {}),
-              ...(durationFormatted ? { durationFormatted } : {}),
-              ...(subtitlesUrl ? { subtitlesUrl } : {}),
-            });
+            const key = videoId ? `video:${videoId}` : `${noteId}:${chapterTitle ?? ""}`;
+            if (!sourcesMap.has(key)) {
+              sourcesMap.set(key, {
+                ...(noteId ? { noteId } : {}),
+                ...(videoId ? { videoId } : {}),
+                type,
+                title,
+                ...(chapterTitle ? { chapterTitle } : {}),
+                ...(documentId ? { documentId } : {}),
+                ...(snippet ? { snippet } : {}),
+                ...(videoUrl ? { videoUrl } : {}),
+                ...(coverImage ? { coverImage } : {}),
+                ...(durationFormatted ? { durationFormatted } : {}),
+                ...(subtitlesUrl ? { subtitlesUrl } : {}),
+              });
+            }
           }
         }
         const sources = Array.from(sourcesMap.values());

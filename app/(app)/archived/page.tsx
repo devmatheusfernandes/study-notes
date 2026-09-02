@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function ArchivedPage() {
   return (
     <>
-      <Header variant="search" showActions searchPlaceholder="Buscar em arquivados…" />
+      <Header variant="search" searchPlaceholder="Buscar em arquivados…" />
       <NotesCollection
         status="archived"
         emptyIcon={<Archive />}

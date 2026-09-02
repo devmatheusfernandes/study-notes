@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header";
 import { listConversations } from "@/app/(app)/chat-actions";
 import { ChatList } from "@/components/chat/chat-list";
 import { ChatHydration } from "@/components/chat/chat-hydration";
+import { ChatsDock } from "@/components/chat/chats-dock";
 
 export const metadata: Metadata = {
   title: "Chats — Study Notes",
@@ -22,11 +23,12 @@ export default async function ChatsPage() {
     <>
       <ChatHydration conversations={conversations} />
       <Header variant="title" title="Chats" />
-      <main className="flex flex-1 flex-col px-4 py-6 sm:px-6">
+      <main className="flex flex-1 flex-col px-4 pt-6 pb-28 sm:px-6">
         <div className="mx-auto w-full max-w-2xl">
           <ChatList />
         </div>
       </main>
+      <ChatsDock />
     </>
   );
 }
