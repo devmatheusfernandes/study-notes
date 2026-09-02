@@ -200,28 +200,13 @@ export function NotesCollection({
 
   const itemsSection = (label: string, items: Note[]) => {
     if (items.length === 0) return null;
-    return (
-      <section className="flex flex-col gap-3">
-        <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
-          {label}
-        </span>
-        {viewMode === "grid" ? (
-          // CSS multi-column masonry — cards keep their natural height and
-          // `break-inside-avoid` stops them being split across columns.
-          <div className="columns-2 gap-3 md:columns-3 xl:columns-4 [&>*]:mb-3 [&>*]:break-inside-avoid">
-            {items.map((note) => (
-              <motion.div
-                key={note.id}
-                layout
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
-              >
-                {renderCard(note)}
-              </motion.div>
-            ))}
-          </div>
-        ) : (
+
+    if (viewMode === "list") {
+      return (
+        <section className="flex flex-col gap-3">
+          <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
+            {label}
+          </span>
           <div className="flex flex-col gap-2">
             {items.map((note) => (
               <motion.div
@@ -235,7 +220,84 @@ export function NotesCollection({
               </motion.div>
             ))}
           </div>
-        )}
+        </section>
+      );
+    }
+
+    // Single item in grid mode: expand to full width (100%) so single pinned/other notes fill the space nicely
+    if (items.length === 1) {
+      return (
+        <section className="flex flex-col gap-3">
+          <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
+            {label}
+          </span>
+          <div className="w-full">
+            <motion.div
+              key={items[0].id}
+              layout
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+            >
+              {renderCard(items[0])}
+            </motion.div>
+          </div>
+        </section>
+      );
+    }
+
+    // Multi-item balanced grid: alternate items into 2 columns for mobile/tablet to balance height perfectly
+    const col1 = items.filter((_, i) => i % 2 === 0);
+    const col2 = items.filter((_, i) => i % 2 === 1);
+
+    return (
+      <section className="flex flex-col gap-3">
+        <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
+          {label}
+        </span>
+        <div className="grid grid-cols-2 gap-3 md:hidden">
+          <div className="flex flex-col gap-3">
+            {col1.map((note) => (
+              <motion.div
+                key={note.id}
+                layout
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+              >
+                {renderCard(note)}
+              </motion.div>
+            ))}
+          </div>
+          <div className="flex flex-col gap-3">
+            {col2.map((note) => (
+              <motion.div
+                key={note.id}
+                layout
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+              >
+                {renderCard(note)}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        {/* Desktop grid (3 columns on md, 4 on xl) */}
+        <div className="hidden md:columns-3 xl:columns-4 [&>*]:mb-3 [&>*]:break-inside-avoid md:block">
+          {items.map((note) => (
+            <motion.div
+              key={note.id}
+              layout
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+            >
+              {renderCard(note)}
+            </motion.div>
+          ))}
+        </div>
       </section>
     );
   };
