@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useChatStore, type ChatSource } from "@/lib/store/chat-store";
 import { addUserMessage as addUserMessageAction } from "@/app/(app)/chat-actions";
 import { ChatMessage } from "./chat-message";
-import { ChatComposer } from "./chat-composer";
+import { SmartComposer } from "@/components/ui/smart-composer";
 
 interface ChatViewProps {
   conversationId: string;
@@ -135,7 +135,8 @@ export function ChatView({ conversationId }: ChatViewProps) {
       {/* Floating ChatGPT-style capsule input bar */}
       <div className="pointer-events-none absolute bottom-4 left-0 right-0 z-20 px-4 sm:px-6">
         <div className="pointer-events-auto mx-auto max-w-2xl sm:max-w-3xl">
-          <ChatComposer
+          <SmartComposer
+            variant="chat"
             onSend={sendMessage}
             disabled={isStreaming}
             placeholder={isStreaming ? "Gerando resposta…" : "Pergunte às suas notas ou vídeos…"}

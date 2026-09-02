@@ -6,7 +6,7 @@ import { ExternalLink, X } from "lucide-react";
 import { useDevice } from "@/hooks/ui/use-device";
 import { useAssistantStore, type AssistantSource } from "@/lib/store/assistant-store";
 import { Vault, VaultContent, VaultTitle } from "@/components/ui/vault";
-import { AssistantDock } from "./assistant-dock";
+import { SmartComposer } from "@/components/ui/smart-composer";
 import { cn } from "@/lib/utils";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
 
@@ -210,9 +210,14 @@ export function AssistantSurface() {
 
           <Conversation />
 
-          <div className="sticky bottom-0 -mx-6 mt-4 border-t border-border bg-background px-4 pb-1 pt-3">
-            <AssistantDock variant="panel" />
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.12, duration: 0.26, ease: "easeOut" }}
+            className="sticky bottom-0 -mx-6 mt-4 border-t border-border bg-background px-4 pb-1 pt-3"
+          >
+            <SmartComposer variant="panel" />
+          </motion.div>
         </VaultContent>
       </Vault>
     );
@@ -251,9 +256,14 @@ export function AssistantSurface() {
             <div className="flex-1 overflow-y-auto p-5">
               <Conversation />
             </div>
-            <div className="border-t border-border p-4">
-              <AssistantDock variant="panel" />
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              className="border-t border-border p-4"
+            >
+              <SmartComposer variant="panel" />
+            </motion.div>
           </div>
         </motion.aside>
       )}
