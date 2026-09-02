@@ -38,6 +38,6 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
     return <PdfReader noteId={id} initialNote={note} />;
   }
 
-  return <NoteEditor noteId={id} />;
+  return <NoteEditor noteId={id} initialNote={note} />;
 }
 

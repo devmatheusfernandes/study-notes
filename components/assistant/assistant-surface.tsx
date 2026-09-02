@@ -21,9 +21,15 @@ function extractExactPhrase(snippet?: string): string | undefined {
 function sourceHref(source: AssistantSource): string {
   if (source.type === "video" || source.videoId) {
     if (source.videoId) {
-      return `https://www.jw.org/finder?lank=${source.videoId}&wtlocale=P`;
+      if (source.videoId.startsWith("docid-")) {
+        const cleanDocId = source.videoId.replace(/^docid-/, "").replace(/_T_.*$/, "");
+        return `https://www.jw.org/finder?docid=${cleanDocId}&wtlocale=T`;
+      }
+      return `https://www.jw.org/finder?lank=${source.videoId}&wtlocale=T`;
     }
-    if (source.videoUrl) return source.videoUrl;
+    if (source.videoUrl && !source.videoUrl.match(/\.(mp4|m4v|webm|m3u8)(\?.*)?$/i)) {
+      return source.videoUrl;
+    }
     return "https://www.jw.org";
   }
 

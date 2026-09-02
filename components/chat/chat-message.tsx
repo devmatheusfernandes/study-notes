@@ -29,9 +29,15 @@ function extractExactPhrase(snippet?: string): string | undefined {
 function sourceHref(source: ChatSource): string {
   if (source.type === "video" || source.videoId) {
     if (source.videoId) {
-      return `https://www.jw.org/finder?lank=${source.videoId}&wtlocale=P`;
+      if (source.videoId.startsWith("docid-")) {
+        const cleanDocId = source.videoId.replace(/^docid-/, "").replace(/_T_.*$/, "");
+        return `https://www.jw.org/finder?docid=${cleanDocId}&wtlocale=T`;
+      }
+      return `https://www.jw.org/finder?lank=${source.videoId}&wtlocale=T`;
     }
-    if (source.videoUrl) return source.videoUrl;
+    if (source.videoUrl && !source.videoUrl.match(/\.(mp4|m4v|webm|m3u8)(\?.*)?$/i)) {
+      return source.videoUrl;
+    }
     return "https://www.jw.org";
   }
 
@@ -112,22 +118,58 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
       className="flex flex-col gap-2"
     >
       <div className="flex items-start gap-2.5 max-w-[92%]">
-        <span className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-accent/20">
-          <Sparkles className="size-3 text-accent" />
+        <span
+          className={cn(
+            "mt-1 flex size-6 shrink-0 items-center justify-center rounded-full transition-all",
+            isStreaming
+              ? "bg-accent/25 text-accent shadow-[0_0_12px_rgba(246,160,107,0.4)] ring-2 ring-accent/40"
+              : "bg-accent/20 text-accent"
+          )}
+        >
+          <Sparkles className={cn("size-3", isStreaming && "animate-pulse")} />
         </span>
-        <div className="flex-1 rounded-[20px_20px_20px_6px] bg-secondary px-4 py-3.5 text-[13.5px] leading-relaxed text-foreground/90">
+        <div
+          className={cn(
+            "flex-1 rounded-[20px_20px_20px_6px] px-4 py-3.5 text-[13.5px] leading-relaxed transition-all",
+            isStreaming && !content
+              ? "border border-accent/30 bg-gradient-to-r from-secondary via-secondary/90 to-accent/10 shadow-[0_0_20px_rgba(246,160,107,0.12)]"
+              : "bg-secondary text-foreground/90"
+          )}
+        >
           {content ? (
             <div
               className="prose-chat"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
             />
           ) : isStreaming ? (
-            <span className="inline-block animate-pulse text-muted-foreground">…</span>
+            <div className="flex items-center gap-2 py-0.5">
+              <div className="flex items-center gap-1.5">
+                <motion.span
+                  animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
+                  className="size-2 rounded-full bg-accent"
+                />
+                <motion.span
+                  animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 0.8, repeat: Infinity, delay: 0.2, ease: "easeInOut" }}
+                  className="size-2 rounded-full bg-accent"
+                />
+                <motion.span
+                  animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 0.8, repeat: Infinity, delay: 0.4, ease: "easeInOut" }}
+                  className="size-2 rounded-full bg-accent"
+                />
+              </div>
+              <span className="font-mono text-xs text-muted-foreground animate-pulse ml-1">
+                Analisando fontes e gerando resposta…
+              </span>
+            </div>
           ) : null}
           {isStreaming && content && (
             <motion.span
@@ -185,12 +227,12 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
             );
           })()}
 
-          {/* Render regular source pill links */}
-          <div className="flex flex-col gap-1.5">
+          {/* Render regular source pill links in a horizontal scrollable row */}
+          <div className="flex flex-col gap-1.5 w-full overflow-hidden">
             <span className="font-mono text-[9.5px] font-medium tracking-[0.09em] text-muted-foreground">
-              FONTES
+              FONTES ({sources.length})
             </span>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex w-full overflow-x-auto gap-2 pb-1 scrollbar-none whitespace-nowrap">
               {sources.map((source, idx) => {
                 const isVideo = source.type === "video" || Boolean(source.videoId);
                 const Icon = isVideo ? Video : sourceIcon(source.type);
@@ -206,12 +248,12 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
                     target={isVideo ? "_blank" : undefined}
                     rel={isVideo ? "noopener noreferrer" : undefined}
                     className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11.5px] text-accent",
+                      "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-[11.5px] text-accent",
                       "transition-colors hover:bg-accent/20 hover:border-accent/50"
                     )}
                   >
                     <Icon className="size-3 shrink-0" />
-                    <span className="truncate max-w-[180px]">
+                    <span className="truncate max-w-[220px]">
                       {source.chapterTitle
                         ? `${source.title} — ${source.chapterTitle}`
                         : source.title}

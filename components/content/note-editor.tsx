@@ -14,9 +14,14 @@ import { useHydrated } from "@/components/providers/store-hydration";
 interface NoteEditorProps {
   /** Existing note id, or undefined for a brand-new note. */
   noteId?: string;
+  initialNote?: {
+    id: string;
+    title: string;
+    body: string;
+  } | null;
 }
 
-export function NoteEditor({ noteId }: NoteEditorProps) {
+export function NoteEditor({ noteId, initialNote }: NoteEditorProps) {
   const router = useRouter();
   const hydrated = useHydrated();
   // Read client-side (not as server searchParams) so /notes/new stays a
@@ -30,22 +35,27 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const updateNote = useNotesStore((s) => s.updateNote);
   const togglePin = useNotesStore((s) => s.togglePin);
 
-  const existing = noteId ? notes.find((n) => n.id === noteId) : undefined;
+  const existing = noteId ? (notes.find((n) => n.id === noteId) ?? initialNote) : undefined;
 
-  const [title, setTitle] = useState(existing?.title ?? "");
-  const [body, setBody] = useState(existing?.body ?? initialBody);
+  const effectiveTitle =
+    existing?.title && existing.title.trim().length > 0
+      ? existing.title
+      : initialNote?.title && initialNote.title.trim().length > 0
+      ? initialNote.title
+      : "";
+
+  const effectiveBody =
+    existing?.body && existing.body.trim().length > 0
+      ? existing.body
+      : initialNote?.body && initialNote.body.trim().length > 0
+      ? initialNote.body
+      : initialBody;
+
+  const [title, setTitle] = useState(effectiveTitle);
+  const [body, setBody] = useState(effectiveBody);
   // Once a new note is persisted we keep writing to that same id.
   const [createdId, setCreatedId] = useState<string | null>(noteId ?? null);
-  const seeded = useRef(false);
   const editorRef = useRef<RichTextEditorHandle>(null);
-
-  // Adopt the persisted note once localStorage rehydrates.
-  useEffect(() => {
-    if (!hydrated || seeded.current || !existing) return;
-    seeded.current = true;
-    setTitle(existing.title);
-    setBody(existing.body);
-  }, [hydrated, existing]);
 
   // Debounced autosave.
   useEffect(() => {

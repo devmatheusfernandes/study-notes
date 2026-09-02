@@ -119,6 +119,7 @@ interface NotesStore {
   bulkTrash: (ids: string[]) => void;
   bulkDeletePermanently: (ids: string[]) => void;
   addNote: (note: { title: string; body: string; folderId?: string }) => string;
+  upsertNoteFromDb: (note: { id: string; title: string; body: string; type?: NoteType }) => void;
   updateNote: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
   /** Flips one checklist item's checked state directly from a card preview, by its index among all task items in the note. */
   toggleChecklistItem: (id: string, itemIndex: number) => void;
@@ -412,6 +413,45 @@ export const useNotesStore = create<NotesStore>()(
         });
 
         return id;
+      },
+
+      upsertNoteFromDb: (rawNote) => {
+        const now = Date.now();
+        set((s) => {
+          const exists = s.notes.some((n) => n.id === rawNote.id);
+          if (exists) {
+            return {
+              notes: s.notes.map((n) =>
+                n.id === rawNote.id
+                  ? {
+                      ...n,
+                      title: rawNote.title,
+                      body: rawNote.body,
+                      updatedAt: now,
+                      meta: formatRelativeMeta(now),
+                    }
+                  : n
+              ),
+            };
+          }
+          return {
+            notes: [
+              {
+                id: rawNote.id,
+                type: (rawNote.type as NoteType) || "nota",
+                title: rawNote.title,
+                body: rawNote.body,
+                meta: formatRelativeMeta(now),
+                pinned: false,
+                status: "active",
+                syncStatus: "synced",
+                updatedAt: now,
+                vectorStatus: "pending",
+              },
+              ...s.notes,
+            ],
+          };
+        });
       },
 
       updateNote: (id, patch) => {

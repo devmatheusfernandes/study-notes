@@ -18,6 +18,7 @@ import { createNoteFromVideo } from "@/app/(app)/convert-video-to-note";
 import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
 import { parseVttToSegments } from "@/lib/video/video-utils";
 import type { TranscriptSegment } from "@/lib/video/video-types";
+import { useNotesStore } from "@/lib/store/notes-store";
 
 export interface InlineVideoCardProps {
   videoId: string;
@@ -128,7 +129,14 @@ export function InlineVideoCard({
     try {
       const res = await createNoteFromVideo(videoId);
       if (res.ok && res.noteId) {
-        notify.success("Nota criada a partir da transcrição!");
+        if (res.note) {
+          useNotesStore.getState().upsertNoteFromDb(res.note);
+        }
+        if (res.alreadyExisted) {
+          notify.info("Nota já existente para este vídeo. Redirecionando…");
+        } else {
+          notify.success("Nota criada a partir da transcrição!");
+        }
         router.push(`/notes/${res.noteId}`);
       } else {
         notify.error(res.error ?? "Não foi possível criar a nota.");

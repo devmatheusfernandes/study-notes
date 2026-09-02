@@ -22,6 +22,217 @@ interface MatchResult {
   similarity: number;
 }
 
+interface QueryConstraints {
+  targetYear: number | null;
+  targetNum: number | null;
+}
+
+function parseQueryConstraints(query: string): QueryConstraints {
+  const norm = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // 1. Extract 4-digit year (e.g. 2024, 2026, 2022)
+  let targetYear: number | null = null;
+  const yearMatch = norm.match(/\b(20[0-9]{2}|19[0-9]{2})\b/);
+  if (yearMatch) {
+    targetYear = parseInt(yearMatch[1], 10);
+  }
+
+  // Remove the year to avoid confusing bulletin number extraction
+  const queryWithoutYear = targetYear ? norm.replace(String(targetYear), "") : norm;
+
+  // 2. Extract bulletin / item number (e.g. "numero 2", "nº 2", "n.º 2", "n2", "boletim 2")
+  let targetNum: number | null = null;
+  const numMatch =
+    queryWithoutYear.match(/(?:numero|num|n[.\sº°o]*|boletim|capitulo|parte|edicao)\s*(\d+)/i) ??
+    queryWithoutYear.match(/\b(\d{1,2})\b/);
+
+  if (numMatch) {
+    const num = parseInt(numMatch[1], 10);
+    if (!isNaN(num) && num > 0 && num < 200) {
+      targetNum = num;
+    }
+  }
+
+  return { targetYear, targetNum };
+}
+
+function rerankMatches(query: string, matches: MatchResult[]): MatchResult[] {
+  const { targetYear, targetNum } = parseQueryConstraints(query);
+  if (targetYear === null && targetNum === null) return matches;
+
+  const reranked: MatchResult[] = [];
+
+  for (const m of matches) {
+    const metaStr = typeof m.metadata === "string" ? m.metadata : JSON.stringify(m.metadata ?? {});
+    const textToSearch = `${m.content} ${metaStr}`.toLowerCase();
+    const itemConstraints = parseQueryConstraints(textToSearch);
+
+    let scoreModifier = 0;
+    let isYearConflicting = false;
+    let isNumConflicting = false;
+
+    // Check Year
+    if (targetYear !== null) {
+      if (textToSearch.includes(String(targetYear))) {
+        scoreModifier += 0.4;
+      } else if (itemConstraints.targetYear !== null && itemConstraints.targetYear !== targetYear) {
+        isYearConflicting = true;
+        scoreModifier -= 0.6;
+      }
+    }
+
+    // Check Bulletin / Item Number
+    if (targetNum !== null) {
+      const numPatterns = [
+        `n.º ${targetNum}`,
+        `nº ${targetNum}`,
+        `n.º${targetNum}`,
+        `n. ${targetNum}`,
+        `n ${targetNum}`,
+        `numero ${targetNum}`,
+        `nº${targetNum}`,
+        `boletim ${targetNum}`,
+        `— ${targetNum}`,
+      ];
+
+      const matchesNumPattern =
+        numPatterns.some((pat) => textToSearch.includes(pat)) ||
+        itemConstraints.targetNum === targetNum;
+
+      if (matchesNumPattern) {
+        scoreModifier += 0.5;
+      } else if (itemConstraints.targetNum !== null && itemConstraints.targetNum !== targetNum) {
+        isNumConflicting = true;
+      }
+    }
+
+    // Severe penalty if bulletin number conflicts (e.g. n.º 5 when asking for n.º 2)
+    if (isNumConflicting) {
+      scoreModifier -= 0.8;
+    }
+
+    // Severe penalty if year conflicts (e.g. 2024 when asking for 2026)
+    if (isYearConflicting) {
+      scoreModifier -= 0.8;
+    }
+
+    // Double penalty if both conflict
+    if (isYearConflicting && isNumConflicting) {
+      scoreModifier -= 1.0;
+    }
+
+    reranked.push({
+      ...m,
+      similarity: m.similarity + scoreModifier,
+    });
+  }
+
+  // If we have an exact metadata match (similarity >= 0.95), filter strictly for exact matches (similarity >= 0.85)
+  const hasExactMatch = reranked.some((m) => m.similarity >= 0.95);
+  if (hasExactMatch) {
+    return reranked
+      .filter((m) => m.similarity >= 0.85)
+      .sort((a, b) => b.similarity - a.similarity);
+  }
+
+  // Filter out matches whose penalized similarity dropped below 0.35 threshold
+  const validMatches = reranked.filter((m) => m.similarity >= 0.35);
+  return validMatches.sort((a, b) => b.similarity - a.similarity);
+}
+
+function formatAllowedSourcesLabel(allowedSourceTypes: string[]): string {
+  const typeMap: Record<string, string> = {
+    nota: "suas notas",
+    pdf: "seus PDFs/arquivos",
+    jwpub: "suas publicações JWPUB",
+    video: "seus vídeos JW",
+  };
+
+  const labels = allowedSourceTypes.map((t) => typeMap[t] || t);
+  if (labels.length === 0 || labels.length === 4) {
+    return "suas notas, publicações e vídeos";
+  }
+  if (labels.length === 1) {
+    return labels[0];
+  }
+  return `seus conteúdos (${labels.join(", ")})`;
+}
+
+async function fetchExactMetadataMatches(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  query: string,
+  allowedTypes: string[]
+): Promise<MatchResult[]> {
+  const { targetYear, targetNum } = parseQueryConstraints(query);
+  const norm = query.toLowerCase();
+  const isBoletimSearch = norm.includes("boletim");
+
+  if (!isBoletimSearch && targetYear === null && targetNum === null) {
+    return [];
+  }
+
+  const results: MatchResult[] = [];
+
+  if (allowedTypes.includes("video")) {
+    let videoQuery = supabase
+      .from("global_videos")
+      .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url");
+
+    if (isBoletimSearch) {
+      videoQuery = videoQuery.ilike("title", "%Boletim%");
+    }
+    if (targetYear !== null) {
+      videoQuery = videoQuery.ilike("title", `%${targetYear}%`);
+    }
+
+    const { data: vids } = await videoQuery.limit(30);
+
+    if (vids && vids.length > 0) {
+      for (const v of vids) {
+        const titleLower = v.title.toLowerCase();
+        const vConstraints = parseQueryConstraints(titleLower);
+
+        let isMatch = true;
+        if (targetNum !== null && vConstraints.targetNum !== targetNum) {
+          const numPats = [
+            `n.º ${targetNum}`,
+            `nº ${targetNum}`,
+            `n.º${targetNum}`,
+            `n. ${targetNum}`,
+            `n ${targetNum}`,
+            `— ${targetNum}`,
+          ];
+          if (!numPats.some((p) => titleLower.includes(p))) {
+            isMatch = false;
+          }
+        }
+
+        if (isMatch) {
+          results.push({
+            id: `exact-vid-${v.id}`,
+            note_id: null,
+            video_id: v.id,
+            source_type: "video",
+            content: v.content_text || `Vídeo: ${v.title}`,
+            similarity: 0.99,
+            metadata: {
+              title: v.title,
+              type: "video",
+              videoId: v.id,
+              videoUrl: v.video_url,
+              coverImage: v.cover_image,
+              durationFormatted: v.duration_formatted,
+              subtitlesUrl: v.subtitles_url,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -112,8 +323,11 @@ export async function POST(
           allowed_types: allowedSourceTypes,
         });
 
-        const rawMatches = (matches ?? []) as MatchResult[];
-        const matchRows = rawMatches.filter((m) => m.similarity >= RAG_THRESHOLD);
+        const exactMatches = await fetchExactMetadataMatches(supabase, message, allowedSourceTypes);
+        const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
+        const matchRows = rerankMatches(message, rawMatches)
+          .filter((m) => allowedSourceTypes.includes(m.source_type))
+          .filter((m) => m.similarity >= RAG_THRESHOLD);
 
         // 3. Build sources array with note & video IDs for linking
         interface SourceItem {
@@ -184,30 +398,30 @@ export async function POST(
 
         // 4. Build system prompt — RAG-only, no hallucination
         let systemPrompt: string;
+        const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
 
         if (matchRows.length > 0) {
           const contextText = matchRows
             .map((m, idx) => {
               const label = m.metadata?.chapterTitle
                 ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
-                : m.metadata?.title || "Nota";
+                : m.metadata?.title || "Conteúdo";
               return `[Fonte ${idx + 1}: ${label}]\n${m.content}`;
             })
             .join("\n\n---\n\n");
 
           systemPrompt =
-            "Você é o assistente inteligente do Study Notes. Responda APENAS com base nos trechos de contexto fornecidos abaixo, " +
-            "extraídos das notas e documentos do usuário. NÃO invente informações que não estejam nos trechos. " +
-            "Se os trechos não contiverem a resposta exata, diga que a informação não foi encontrada nas notas. " +
-            "Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado.\n\n" +
-            "CONTEXTO DAS NOTAS DO USUÁRIO:\n\n" +
+            `Você é o assistente inteligente do Study Notes. Responda APENAS com base nos trechos de contexto fornecidos abaixo, ` +
+            `extraídos de ${sourcesLabel}. NÃO invente informações que não estejam nos trechos. ` +
+            `Se os trechos não contiverem a resposta exata para a pergunta, diga especificamente que a informação não foi encontrada em ${sourcesLabel}. ` +
+            `Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado.\n\n` +
+            `CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n` +
             contextText;
         } else {
           systemPrompt =
-            "Você é o assistente inteligente do Study Notes. O usuário fez uma pergunta, " +
-            "mas NÃO foi encontrado nenhum trecho relevante nos documentos e notas vetorizados dele. " +
-            "Responda educadamente informando que não encontrou informações relevantes nas notas do usuário " +
-            "e sugira que ele verifique se o conteúdo desejado foi vetorizado na página de Configurações.";
+            `Você é o assistente inteligente do Study Notes. O usuário pesquisou especificamente em ${sourcesLabel}, ` +
+            `mas NÃO foi encontrado nenhum trecho relevante para a pergunta dele. ` +
+            `Responda educadamente informando especificamente que não encontrou informações relevantes em ${sourcesLabel}.`;
         }
 
         // 5. Build messages with history
