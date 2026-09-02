@@ -32,6 +32,7 @@ export interface ChatConversation {
 
 interface ChatStore {
   conversations: ChatConversation[];
+  isLoaded: boolean;
   messages: ChatMessage[];
   isStreaming: boolean;
   activeConversationId: string | null;
@@ -53,11 +54,12 @@ interface ChatStore {
 
 export const useChatStore = create<ChatStore>((set) => ({
   conversations: [],
+  isLoaded: false,
   messages: [],
   isStreaming: false,
   activeConversationId: null,
 
-  setConversations: (conversations) => set({ conversations }),
+  setConversations: (conversations) => set({ conversations, isLoaded: true }),
 
   addConversation: (conversation) =>
     set((s) => ({

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, MessageSquare, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import {
@@ -46,6 +47,7 @@ interface ChatListProps {
 export function ChatList({ compact = false, maxItems }: ChatListProps) {
   const router = useRouter();
   const conversations = useChatStore((s) => s.conversations);
+  const isLoaded = useChatStore((s) => s.isLoaded);
   const removeConversation = useChatStore((s) => s.removeConversation);
   const updateConversation = useChatStore((s) => s.updateConversation);
   const addConv = useChatStore((s) => s.addConversation);
@@ -187,6 +189,22 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
   }
 
   if (compact) {
+    if (!isLoaded) {
+      return (
+        <div className="flex flex-col gap-1 py-0.5">
+          {Array.from({ length: maxItems ?? 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2.5 rounded-2xl px-3 py-2">
+              <Skeleton className="size-7 shrink-0 rounded-xl" />
+              <div className="flex flex-1 flex-col gap-1.5 min-w-0">
+                <Skeleton className="h-3.5 w-24 rounded-md" />
+                <Skeleton className="h-2.5 w-10 rounded-md" />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col gap-0.5">
         {displayItems.map((conv) => (
