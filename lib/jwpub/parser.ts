@@ -1,7 +1,13 @@
 "use client";
 
 import { deriveJwpubKeys, decodeJwpubContent } from "./crypto";
-import type { JwpubChapter, JwpubFootnote, ParsedJwpub, JwpubPublicationMeta } from "./types";
+import type {
+  JwpubChapter,
+  JwpubFootnote,
+  JwpubBibleCitation,
+  ParsedJwpub,
+  JwpubPublicationMeta,
+} from "./types";
 
 /** `SQLite format 3\0` — how the inner database is identified, rather than trusting a filename. */
 const SQLITE_MAGIC = [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00];
@@ -96,11 +102,12 @@ export async function parseJwpub(file: Blob, onProgress?: ParseProgress): Promis
 
     const chapters = await readChapters(db, keys, inflate, onProgress);
     const footnotes = await readFootnotes(db, keys, inflate);
+    const bibleCitations = readBibleCitations(db);
 
     onProgress?.("Extraindo imagens");
     const media = await extractMedia(entries, chapters);
 
-    return { ...meta, chapters, footnotes, media };
+    return { ...meta, chapters, footnotes, media, bibleCitations };
   } finally {
     db.close();
   }
@@ -182,6 +189,45 @@ async function readFootnotes(
     footnotes.push({ footnoteId: Number(footnoteId), html });
   }
   return footnotes;
+}
+
+/**
+ * Optional in the archive — only publications that actually cite scripture
+ * carry a `BibleCitation` table. Verified against a real `.jwpub` (not
+ * guessed): `Document.Content` anchors look like
+ * `<a href="jwpub://b/NWTR/19:40:8-19:40:8" data-bid="1-1">` — the href
+ * itself is just the human-readable book:chapter:verse range, informational
+ * only. The actual join key back to `BibleCitation` is `data-bid="<BlockNumber>-<ElementNumber>"`
+ * scoped to the *current* `DocumentId`, since block/element numbers repeat
+ * across documents.
+ *
+ * `First`/`LastBibleVerseId` are the `BibleVerseId` scheme documented in
+ * data/NWT_structure.md — they map onto `public.bible_verses.id` with zero
+ * conversion. Keyed as `"<documentId>:<blockNumber>:<elementNumber>"`.
+ */
+function readBibleCitations(db: import("sql.js").Database): Map<string, JwpubBibleCitation> {
+  const citations = new Map<string, JwpubBibleCitation>();
+
+  let res;
+  try {
+    res = db.exec(
+      "SELECT DocumentId, BlockNumber, ElementNumber, FirstBibleVerseId, LastBibleVerseId FROM BibleCitation"
+    );
+  } catch {
+    return citations; // Table doesn't exist in this archive.
+  }
+  if (res.length === 0) return citations;
+
+  for (const [documentId, blockNumber, elementNumber, first, last] of res[0].values) {
+    if (documentId === null || blockNumber === null || elementNumber === null) continue;
+    if (first === null || last === null) continue;
+    citations.set(`${documentId}:${blockNumber}:${elementNumber}`, {
+      firstVerseId: Number(first),
+      lastVerseId: Number(last),
+    });
+  }
+
+  return citations;
 }
 
 /** Only pulls out images the chapters actually reference — an archive carries plenty that nothing links to. */

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migrate": "node scripts/db-migrate.mjs"
+    "migrate": "node scripts/db-migrate.mjs",
+    "seed:bible": "node scripts/seed-bible.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

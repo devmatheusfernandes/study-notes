@@ -8,11 +8,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
 import { getChapter, getFootnote, getPublication } from "@/app/(app)/jwpub-actions";
+import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
+import { JwpubBibleSurface } from "./jwpub-bible-surface";
 
 interface JwpubReaderProps {
   noteId: string;
@@ -127,6 +129,11 @@ export function JwpubReader({
   const [footnoteHtml, setFootnoteHtml] = useState<string | null>(null);
   const [isLoadingFootnote, setIsLoadingFootnote] = useState(false);
 
+  const [bibleOpen, setBibleOpen] = useState(false);
+  const [bibleVerses, setBibleVerses] = useState<BibleVerseRow[] | null>(null);
+  const [bibleError, setBibleError] = useState<string | null>(null);
+  const [isLoadingBible, setIsLoadingBible] = useState(false);
+
   const activeChapter = chapters[activeIndex];
 
   useEffect(() => {
@@ -161,6 +168,18 @@ export function JwpubReader({
     },
     [publication.id]
   );
+
+  const handleBibleRef = useCallback((firstVerseId: number, lastVerseId: number) => {
+    setBibleOpen(true);
+    setBibleVerses(null);
+    setBibleError(null);
+    setIsLoadingBible(true);
+    void getBibleVerses(firstVerseId, lastVerseId).then((result) => {
+      setBibleVerses(result.verses ?? null);
+      setBibleError(result.error ?? null);
+      setIsLoadingBible(false);
+    });
+  }, []);
 
   /** Recovery path: re-download the original from Storage and parse it again. */
   async function reprocess() {
@@ -264,7 +283,11 @@ export function JwpubReader({
               {isLoadingChapter ? (
                 <p className="mx-auto max-w-2xl text-[13px] text-muted-foreground">carregando…</p>
               ) : (
-                <JwpubChapterView html={html ?? ""} onFootnote={handleFootnote} />
+                <JwpubChapterView
+                  html={html ?? ""}
+                  onFootnote={handleFootnote}
+                  onBibleRef={handleBibleRef}
+                />
               )}
             </div>
 
@@ -356,6 +379,14 @@ export function JwpubReader({
         html={footnoteHtml}
         isLoading={isLoadingFootnote}
         onClose={() => setFootnoteOpen(false)}
+      />
+
+      <JwpubBibleSurface
+        open={bibleOpen}
+        verses={bibleVerses}
+        error={bibleError}
+        isLoading={isLoadingBible}
+        onClose={() => setBibleOpen(false)}
       />
     </div>
   );

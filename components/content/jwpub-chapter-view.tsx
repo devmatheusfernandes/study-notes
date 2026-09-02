@@ -8,31 +8,42 @@ import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 interface JwpubChapterViewProps {
   html: string;
   onFootnote: (footnoteId: number) => void;
+  onBibleRef: (firstVerseId: number, lastVerseId: number) => void;
 }
 
-export function JwpubChapterView({ html, onFootnote }: JwpubChapterViewProps) {
+export function JwpubChapterView({ html, onFootnote, onBibleRef }: JwpubChapterViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const highlightText = searchParams.get("text");
 
-  // Footnote click listener
+  // Footnote + bible reference click listener
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     function handleClick(event: MouseEvent) {
-      const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(
-        "[data-jwpub-footnote]"
-      );
-      if (!target) return;
-      event.preventDefault();
-      const id = Number(target.dataset.jwpubFootnote);
-      if (Number.isFinite(id)) onFootnote(id);
+      const el = event.target as HTMLElement | null;
+
+      const footnote = el?.closest<HTMLElement>("[data-jwpub-footnote]");
+      if (footnote) {
+        event.preventDefault();
+        const id = Number(footnote.dataset.jwpubFootnote);
+        if (Number.isFinite(id)) onFootnote(id);
+        return;
+      }
+
+      const bible = el?.closest<HTMLElement>("[data-jwpub-bible-first]");
+      if (bible) {
+        event.preventDefault();
+        const first = Number(bible.dataset.jwpubBibleFirst);
+        const last = Number(bible.dataset.jwpubBibleLast);
+        if (Number.isFinite(first) && Number.isFinite(last)) onBibleRef(first, last);
+      }
     }
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [onFootnote]);
+  }, [onFootnote, onBibleRef]);
 
   // Auto-scroll & Highlight matching snippet from chat RAG source
   useEffect(() => {
@@ -73,8 +84,9 @@ export function JwpubChapterView({ html, onFootnote }: JwpubChapterViewProps) {
         "[&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground",
         "[&_img]:my-4 [&_img]:max-w-full [&_img]:rounded-2xl",
         "[&_table]:my-4 [&_table]:w-full [&_table]:text-[13.5px] [&_td]:border [&_td]:border-border [&_td]:p-2",
-        // Footnote markers read as tappable, inline references stay inert.
+        // Footnote markers and resolved bible refs read as tappable; unresolved inline references stay inert.
         "[&_[data-jwpub-footnote]]:cursor-pointer [&_[data-jwpub-footnote]]:text-accent [&_[data-jwpub-footnote]]:underline [&_[data-jwpub-footnote]]:underline-offset-2",
+        "[&_[data-jwpub-bible-first]]:cursor-pointer [&_[data-jwpub-bible-first]]:text-accent [&_[data-jwpub-bible-first]]:underline [&_[data-jwpub-bible-first]]:underline-offset-2",
         "[&_[data-jwpub-ref]]:text-foreground/80",
       ].join(" ")}
       dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(html) }}

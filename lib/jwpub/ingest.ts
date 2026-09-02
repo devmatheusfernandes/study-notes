@@ -49,7 +49,11 @@ export async function ingestJwpub(
     for (const [index, chapter] of parsed.chapters.entries()) {
       onProgress?.(`Salvando capítulos (${index + 1}/${parsed.chapters.length})`);
       const html = sanitizeChapterHtml(
-        rewriteJwpubLinks(rewriteMediaUrls(chapter.html, mediaUrls))
+        rewriteJwpubLinks(
+          rewriteMediaUrls(chapter.html, mediaUrls),
+          parsed.bibleCitations,
+          chapter.documentId
+        )
       );
       await saveChapterContent(publicationId, chapter.documentId, html);
     }
@@ -58,7 +62,9 @@ export async function ingestJwpub(
       onProgress?.("Salvando notas de rodapé");
       const cleaned = parsed.footnotes.map((footnote) => ({
         footnoteId: footnote.footnoteId,
-        html: sanitizeChapterHtml(rewriteJwpubLinks(rewriteMediaUrls(footnote.html, mediaUrls))),
+        html: sanitizeChapterHtml(
+          rewriteJwpubLinks(rewriteMediaUrls(footnote.html, mediaUrls), parsed.bibleCitations)
+        ),
       }));
       // Chunked for the same payload reason as chapters.
       for (let i = 0; i < cleaned.length; i += 100) {

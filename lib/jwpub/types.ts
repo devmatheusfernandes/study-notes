@@ -15,6 +15,18 @@ export interface JwpubFootnote {
   html: string;
 }
 
+/**
+ * A resolved `BibleCitation` row from the archive's own SQLite, keyed by
+ * `"<documentId>:<blockNumber>:<elementNumber>"` — see readBibleCitations in
+ * parser.ts for why (the href itself doesn't carry a usable id). `firstVerseId`/
+ * `lastVerseId` match `BibleVerseId` in data/NWT_structure.md (public.bible_verses.id),
+ * so they need zero conversion at render time.
+ */
+export interface JwpubBibleCitation {
+  firstVerseId: number;
+  lastVerseId: number;
+}
+
 export interface JwpubPublicationMeta {
   symbol: string;
   title: string;
@@ -28,6 +40,8 @@ export interface ParsedJwpub extends JwpubPublicationMeta {
   footnotes: JwpubFootnote[];
   /** Media filename → the raw bytes pulled out of the archive, only for files actually referenced. */
   media: Map<string, Blob>;
+  /** "<documentId>:<blockNumber>:<elementNumber>" → verse range. Empty when the archive has no BibleCitation table. */
+  bibleCitations: Map<string, JwpubBibleCitation>;
 }
 
 /** What the reader needs to render its chapter list — deliberately without the HTML. */
