@@ -15,12 +15,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { signOut } from "@/app/login/actions";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { ViewModeToggle } from "@/components/content/view-mode-toggle";
 import { AiUsageCard } from "@/components/settings/ai-usage-card";
 import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
+import { BackupExportCard } from "@/components/settings/backup-export-card";
 
 interface SettingsViewProps {
   userEmail: string;
@@ -33,8 +33,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
 
   const filterTabs = [
-    { id: "all", label: "Visão Geral (Bento)", icon: Sliders },
-    { id: "ai", label: "IA & Vetorização", icon: Sparkles },
+    { id: "all", label: "Visão Geral", icon: Sliders },
+    { id: "ai", label: "IA", icon: Sparkles },
     { id: "appearance", label: "Aparência", icon: Palette },
     { id: "account", label: "Conta & Segurança", icon: User },
   ] as const;
@@ -53,9 +53,6 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                 <span className="truncate text-base font-semibold text-foreground">
                   {userEmail}
                 </span>
-                <Badge variant="success" className="h-auto rounded-full px-2.5 py-0.5 font-mono text-[10px]">
-                  Ativo
-                </Badge>
               </div>
               <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
                 <Lock className="size-3.5 text-success" />
@@ -159,17 +156,6 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                       </div>
                     </div>
                   </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    leftIcon={<LogOut className="size-3.5 text-destructive" />}
-                    onClick={() => setConfirmSignOut(true)}
-                    fullWidth
-                    className="rounded-full text-[12.5px]"
-                  >
-                    Sair da conta
-                  </Button>
                 </div>
               </div>
 
@@ -178,6 +164,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
               {/* Row 3: Full Width Global Video Sync Card */}
               <GlobalVideoSyncCard />
+
+              {/* Row 4: Full Width Backup Export Card */}
+              <BackupExportCard />
             </div>
           )}
 
@@ -210,8 +199,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
           )}
 
           {activeSection === "account" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <section className="flex flex-col gap-5 rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+              <section className="flex flex-col gap-5 rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm justify-between">
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="size-4 text-success" />
@@ -239,16 +228,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                     </span>
                   </div>
                 </div>
-
-                <Button
-                  variant="outline"
-                  leftIcon={<LogOut className="size-4 text-destructive" />}
-                  onClick={() => setConfirmSignOut(true)}
-                  fullWidth
-                >
-                  Sair da conta
-                </Button>
               </section>
+
+              <BackupExportCard />
             </div>
           )}
         </motion.div>

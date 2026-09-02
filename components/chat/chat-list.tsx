@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, MessageSquare, MoreHorizontal, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -16,10 +15,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { notify } from "@/components/ui/toaster";
-import { SmartComposer } from "@/components/ui/smart-composer";
 import { useChatStore, type ChatConversation } from "@/lib/store/chat-store";
 import {
-  createConversation,
   archiveConversation,
   restoreConversation,
   deleteConversation,
@@ -46,15 +43,12 @@ interface ChatListProps {
 }
 
 export function ChatList({ compact = false, maxItems }: ChatListProps) {
-  const router = useRouter();
   const conversations = useChatStore((s) => s.conversations);
   const isLoaded = useChatStore((s) => s.isLoaded);
   const removeConversation = useChatStore((s) => s.removeConversation);
   const updateConversation = useChatStore((s) => s.updateConversation);
-  const addConv = useChatStore((s) => s.addConversation);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
 
   const activeConversations = conversations.filter((c) => c.status === "active");
   const archivedConversations = conversations.filter((c) => c.status === "archived");
@@ -62,35 +56,6 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
   const displayItems = compact
     ? activeConversations.slice(0, maxItems ?? 3)
     : activeConversations;
-
-  async function handleStartNewChat(message: string, allowedSourceTypes: string[]) {
-    if (isCreating) return;
-    setIsCreating(true);
-    try {
-      const result = await createConversation(message);
-      if (result.error || !result.conversationId) {
-        notify.error("Não foi possível criar a conversa.");
-        return;
-      }
-      addConv({
-        id: result.conversationId,
-        title: message.trim().slice(0, 60) || "Nova conversa",
-        status: "active",
-        updatedAt: Date.now(),
-      });
-      const query = new URLSearchParams();
-      if (allowedSourceTypes.length < 4) {
-        query.set("sources", allowedSourceTypes.join(","));
-      }
-      const qs = query.toString();
-      const targetUrl = qs
-        ? `/chats/${result.conversationId}?${qs}`
-        : `/chats/${result.conversationId}`;
-      router.push(targetUrl);
-    } finally {
-      setIsCreating(false);
-    }
-  }
 
   async function handleArchive(conv: ChatConversation) {
     const res = await archiveConversation(conv.id);
