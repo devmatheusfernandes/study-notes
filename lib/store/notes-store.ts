@@ -16,8 +16,15 @@ import {
   createFolderRow,
   renameFolderRow,
   deleteFolderRow,
+  createTagRow,
+  updateTagRow,
+  deleteTagRow,
+  addTagToNote as addTagToNoteRow,
+  removeTagFromNote as removeTagFromNoteRow,
+  assignTagsToNotes,
   type NoteRow,
   type FolderRow,
+  type TagRow,
 } from "@/app/(app)/notes-actions";
 import { toggleChecklistItemInHtml } from "@/lib/note-preview";
 import { removedNoteImagePaths } from "@/lib/note-images";
@@ -42,6 +49,8 @@ export interface Note {
   storagePath?: string;
   /** Status of OpenAI vector embedding for RAG search. */
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
+  /** Tag ids assigned to this note — the `note_tags` join table, denormalized client-side. */
+  tagIds: string[];
 }
 
 export interface Folder {
@@ -49,6 +58,12 @@ export interface Folder {
   name: string;
   /** Parent folder, for folders nested inside other folders. Root folders omit this. */
   parentId?: string;
+}
+
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
 }
 
 function toNote(row: NoteRow): Note {
@@ -65,11 +80,16 @@ function toNote(row: NoteRow): Note {
     folderId: row.folderId,
     storagePath: row.storagePath,
     vectorStatus: row.vectorStatus,
+    tagIds: row.tagIds,
   };
 }
 
 function toFolder(row: FolderRow): Folder {
   return { id: row.id, name: row.name, parentId: row.parentId };
+}
+
+function toTag(row: TagRow): Tag {
+  return { id: row.id, name: row.name, color: row.color };
 }
 
 /**
@@ -88,17 +108,23 @@ type PendingOp =
   | { key: string; entityId: string; kind: "deleteNote"; payload: { id: string } }
   | { key: string; entityId: string; kind: "createFolder"; payload: { id: string; name: string; parentId?: string } }
   | { key: string; entityId: string; kind: "renameFolder"; payload: { id: string; name: string } }
-  | { key: string; entityId: string; kind: "deleteFolder"; payload: { id: string } };
+  | { key: string; entityId: string; kind: "deleteFolder"; payload: { id: string } }
+  | { key: string; entityId: string; kind: "createTag"; payload: { id: string; name: string; color: string } }
+  | { key: string; entityId: string; kind: "updateTag"; payload: { id: string; patch: { name?: string; color?: string } } }
+  | { key: string; entityId: string; kind: "deleteTag"; payload: { id: string } }
+  | { key: string; entityId: string; kind: "addTagToNote"; payload: { noteId: string; tagId: string } }
+  | { key: string; entityId: string; kind: "removeTagFromNote"; payload: { noteId: string; tagId: string } };
 
 interface NotesStore {
   notes: Note[];
   folders: Folder[];
+  tags: Tag[];
   /** False until `hydrate` runs — gate rendering on this, not on "has some component mounted". */
   hydrated: boolean;
   /** Mutations that failed to reach the server (offline) and are waiting for reconnection, keyed so retries coalesce. */
   pendingOps: Record<string, PendingOp>;
   /** Seeds the store from the server-fetched rows — see components/providers/store-hydration.tsx. */
-  hydrate: (notes: NoteRow[], folders: FolderRow[]) => void;
+  hydrate: (notes: NoteRow[], folders: FolderRow[], tags: TagRow[]) => void;
   /** Replays every queued op in order; stops at the first one that still can't reach the server. */
   syncPendingOps: () => Promise<void>;
 
@@ -107,6 +133,15 @@ interface NotesStore {
   deleteFolder: (id: string) => void;
   /** Files are already uploaded and indexed server-side by the time this runs — see hooks/use-file-upload.ts. */
   addFiles: (files: UploadedFile[], folderId?: string) => void;
+
+  createTag: (name: string, color: string) => string;
+  updateTag: (id: string, patch: { name?: string; color?: string }) => void;
+  /** Also strips the tag from every note that had it, client-side (the DB cascade won't be reflected until the next hydrate). */
+  deleteTag: (id: string) => void;
+  addTagToNote: (noteId: string, tagId: string) => void;
+  removeTagFromNote: (noteId: string, tagId: string) => void;
+  /** Additive-only: unions the given tags into each note's existing tagIds, never removes any. */
+  bulkAssignTags: (noteIds: string[], tagIds: string[]) => void;
 
   togglePin: (id: string) => void;
   archive: (id: string) => void;
@@ -151,8 +186,8 @@ async function runOrQueue(
 function enqueueOp(set: SetFn, op: PendingOp) {
   set((s) => {
     const next = { ...s.pendingOps };
-    if (op.kind === "deleteNote" || op.kind === "deleteFolder") {
-      const createKind = op.kind === "deleteNote" ? "createNote" : "createFolder";
+    if (op.kind === "deleteNote" || op.kind === "deleteFolder" || op.kind === "deleteTag") {
+      const createKind = op.kind === "deleteNote" ? "createNote" : op.kind === "deleteFolder" ? "createFolder" : "createTag";
       const hadUnsyncedCreate = Object.values(next).some((p) => p.kind === createKind && p.entityId === op.entityId);
       for (const key of Object.keys(next)) {
         if (next[key].entityId === op.entityId) delete next[key];
@@ -182,6 +217,16 @@ function opAction(op: PendingOp): () => Promise<{ error?: string }> {
       return () => renameFolderRow(op.payload.id, op.payload.name);
     case "deleteFolder":
       return () => deleteFolderRow(op.payload.id);
+    case "createTag":
+      return () => createTagRow(op.payload);
+    case "updateTag":
+      return () => updateTagRow(op.payload.id, op.payload.patch);
+    case "deleteTag":
+      return () => deleteTagRow(op.payload.id);
+    case "addTagToNote":
+      return () => addTagToNoteRow(op.payload.noteId, op.payload.tagId);
+    case "removeTagFromNote":
+      return () => removeTagFromNoteRow(op.payload.noteId, op.payload.tagId);
   }
 }
 
@@ -190,21 +235,24 @@ export const useNotesStore = create<NotesStore>()(
     (set, get) => ({
       notes: [],
       folders: [],
+      tags: [],
       hydrated: false,
       pendingOps: {},
 
-      hydrate: (rows, folderRows) =>
+      hydrate: (rows, folderRows, tagRows) =>
         set((s) => {
           const pendingByEntity = new Map(Object.values(s.pendingOps).map((op) => [op.entityId, op.kind]));
           const isDeletedLocally = (id: string) => {
             const kind = pendingByEntity.get(id);
-            return kind === "deleteNote" || kind === "deleteFolder";
+            return kind === "deleteNote" || kind === "deleteFolder" || kind === "deleteTag";
           };
           const localNotes = new Map(s.notes.map((n) => [n.id, n]));
           const localFolders = new Map(s.folders.map((f) => [f.id, f]));
+          const localTags = new Map(s.tags.map((t) => [t.id, t]));
 
           const serverIds = new Set(rows.map((r) => r.id));
           const serverFolderIds = new Set(folderRows.map((f) => f.id));
+          const serverTagIds = new Set(tagRows.map((t) => t.id));
 
           const mergedNotes = rows
             .filter((row) => !isDeletedLocally(row.id))
@@ -216,9 +264,15 @@ export const useNotesStore = create<NotesStore>()(
             .map((row) => (pendingByEntity.has(row.id) && localFolders.has(row.id) ? localFolders.get(row.id)! : toFolder(row)));
           const localOnlyFolders = s.folders.filter((f) => pendingByEntity.has(f.id) && !serverFolderIds.has(f.id) && !isDeletedLocally(f.id));
 
+          const mergedTags = tagRows
+            .filter((row) => !isDeletedLocally(row.id))
+            .map((row) => (pendingByEntity.has(row.id) && localTags.has(row.id) ? localTags.get(row.id)! : toTag(row)));
+          const localOnlyTags = s.tags.filter((t) => pendingByEntity.has(t.id) && !serverTagIds.has(t.id) && !isDeletedLocally(t.id));
+
           return {
             notes: [...localOnlyNotes, ...mergedNotes],
             folders: [...localOnlyFolders, ...mergedFolders],
+            tags: [...localOnlyTags, ...mergedTags],
             hydrated: true,
           };
         }),
@@ -296,6 +350,115 @@ export const useNotesStore = create<NotesStore>()(
         });
       },
 
+      createTag: (name, color) => {
+        const id = crypto.randomUUID();
+        set((s) => ({ tags: [...s.tags, { id, name, color }] }));
+
+        const op: PendingOp = { key: `tag:${id}`, entityId: id, kind: "createTag", payload: { id, name, color } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ tags: s.tags.filter((t) => t.id !== id) }));
+            notify.error("Não foi possível criar a tag");
+          }
+        });
+
+        return id;
+      },
+
+      updateTag: (id, patch) => {
+        const previous = get().tags.find((t) => t.id === id);
+        set((s) => ({ tags: s.tags.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+
+        const op: PendingOp = { key: `tag:${id}`, entityId: id, kind: "updateTag", payload: { id, patch } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected" && previous) {
+            set((s) => ({ tags: s.tags.map((t) => (t.id === id ? previous : t)) }));
+            notify.error("Não foi possível atualizar a tag");
+          }
+        });
+      },
+
+      deleteTag: (id) => {
+        const prevTags = get().tags;
+        const prevNotes = get().notes;
+
+        set((s) => ({
+          tags: s.tags.filter((t) => t.id !== id),
+          notes: s.notes.map((n) => (n.tagIds.includes(id) ? { ...n, tagIds: n.tagIds.filter((t) => t !== id) } : n)),
+        }));
+
+        const op: PendingOp = { key: `tag:${id}`, entityId: id, kind: "deleteTag", payload: { id } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set({ tags: prevTags, notes: prevNotes });
+            notify.error("Não foi possível excluir a tag");
+          }
+        });
+      },
+
+      addTagToNote: (noteId, tagId) => {
+        set((s) => ({
+          notes: s.notes.map((n) => (n.id === noteId && !n.tagIds.includes(tagId) ? { ...n, tagIds: [...n.tagIds, tagId] } : n)),
+        }));
+
+        const op: PendingOp = { key: `note:${noteId}:tag:${tagId}`, entityId: noteId, kind: "addTagToNote", payload: { noteId, tagId } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({
+              notes: s.notes.map((n) => (n.id === noteId ? { ...n, tagIds: n.tagIds.filter((t) => t !== tagId) } : n)),
+            }));
+            notify.error("Não foi possível aplicar a tag");
+          }
+        });
+      },
+
+      removeTagFromNote: (noteId, tagId) => {
+        set((s) => ({
+          notes: s.notes.map((n) => (n.id === noteId ? { ...n, tagIds: n.tagIds.filter((t) => t !== tagId) } : n)),
+        }));
+
+        const op: PendingOp = { key: `note:${noteId}:tag:${tagId}`, entityId: noteId, kind: "removeTagFromNote", payload: { noteId, tagId } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({
+              notes: s.notes.map((n) => (n.id === noteId && !n.tagIds.includes(tagId) ? { ...n, tagIds: [...n.tagIds, tagId] } : n)),
+            }));
+            notify.error("Não foi possível remover a tag");
+          }
+        });
+      },
+
+      bulkAssignTags: (noteIds, tagIds) => {
+        const idSet = new Set(noteIds);
+        const previous = get().notes;
+
+        set((s) => ({
+          notes: s.notes.map((n) =>
+            idSet.has(n.id) ? { ...n, tagIds: Array.from(new Set([...n.tagIds, ...tagIds])) } : n
+          ),
+        }));
+
+        void assignTagsToNotes(noteIds, tagIds)
+          .then((res) => {
+            if (res.error) {
+              set({ notes: previous });
+              notify.error("Não foi possível aplicar as tags", res.error);
+            }
+          })
+          .catch(() => {
+            // Offline: queue one op per note×tag pair that isn't already applied
+            // locally, so the batch still syncs individually once reconnected.
+            const previousById = new Map(previous.map((n) => [n.id, n]));
+            for (const noteId of noteIds) {
+              const hadTags = previousById.get(noteId)?.tagIds ?? [];
+              for (const tagId of tagIds) {
+                if (hadTags.includes(tagId)) continue;
+                enqueueOp(set, { key: `note:${noteId}:tag:${tagId}`, entityId: noteId, kind: "addTagToNote", payload: { noteId, tagId } });
+              }
+            }
+          });
+      },
+
       addFiles: (files, folderId) =>
         set((s) => ({
           notes: [
@@ -313,6 +476,7 @@ export const useNotesStore = create<NotesStore>()(
                 folderId,
                 storagePath: file.storagePath,
                 vectorStatus: "pending",
+                tagIds: [],
               })
             ),
             ...s.notes,
@@ -395,6 +559,7 @@ export const useNotesStore = create<NotesStore>()(
               updatedAt: now,
               folderId,
               vectorStatus: "pending",
+              tagIds: [],
             },
             ...s.notes,
           ],
@@ -447,6 +612,7 @@ export const useNotesStore = create<NotesStore>()(
                 syncStatus: "synced",
                 updatedAt: now,
                 vectorStatus: "pending",
+                tagIds: [],
               },
               ...s.notes,
             ],
@@ -506,7 +672,7 @@ export const useNotesStore = create<NotesStore>()(
     {
       name: "study-notes:notes",
       skipHydration: true,
-      partialize: (s) => ({ notes: s.notes, folders: s.folders, pendingOps: s.pendingOps }),
+      partialize: (s) => ({ notes: s.notes, folders: s.folders, tags: s.tags, pendingOps: s.pendingOps }),
     }
   )
 );

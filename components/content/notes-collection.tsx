@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
@@ -17,6 +17,7 @@ import { useSearchStore } from "@/lib/store/search-store";
 import { matchesSearch } from "@/lib/search";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { FileDropZone } from "./file-drop-zone";
+import { TagPickerVault } from "./tag-picker-vault";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { getFileUrl } from "@/app/(app)/files-actions";
 
@@ -109,6 +110,8 @@ export function NotesCollection({
 
   const notes = useNotesStore((s) => s.notes);
   const folders = useNotesStore((s) => s.folders);
+  const tags = useNotesStore((s) => s.tags);
+  const [manageTagsNoteId, setManageTagsNoteId] = useState<string | null>(null);
   const renameFolder = useNotesStore((s) => s.renameFolder);
   const deleteFolder = useNotesStore((s) => s.deleteFolder);
   const togglePin = useNotesStore((s) => s.togglePin);
@@ -122,13 +125,16 @@ export function NotesCollection({
 
   const isTrashed = status === "trashed";
   const query = useSearchStore((s) => s.query);
+  const selectedTagIds = useSearchStore((s) => s.selectedTagIds);
   const isSearching = query.trim().length > 0;
   const { pinned: allPinned, others: allOthers } = selectByStatus(
     notes,
     status,
     showFolders ? { folderId: activeFolder } : undefined
   );
-  const matchesNote = (note: Note) => matchesSearch(query, note.title, note.body);
+  const matchesNote = (note: Note) =>
+    matchesSearch(query, note.title, note.body) &&
+    (selectedTagIds.length === 0 || selectedTagIds.some((id) => note.tagIds.includes(id)));
   const pinned = allPinned.filter(matchesNote);
   const others = allOthers.filter(matchesNote);
   const isEmpty = pinned.length === 0 && others.length === 0;
@@ -188,12 +194,14 @@ export function NotesCollection({
       permanentDelete={isTrashed}
       selectionMode={selectionMode}
       selected={isSelected(note.id)}
+      tags={note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
       onToggleSelect={toggleSelect}
       onOpen={() => void openNote(note)}
       onTogglePin={status === "active" ? () => togglePin(note.id) : undefined}
       onArchive={status === "active" ? () => archive(note.id) : undefined}
       onRestore={status !== "active" ? () => restore(note.id) : undefined}
       onDelete={isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
+      onManageTags={() => setManageTagsNoteId(note.id)}
       onToggleChecklistItem={(index) => toggleChecklistItem(note.id, index)}
     />
   );
@@ -309,6 +317,7 @@ export function NotesCollection({
   }
 
   return (
+    <>
     <FileDropZone>
       <div className="flex flex-1 flex-col gap-7 px-4 py-6 sm:px-6">
         {openFolder && (
@@ -371,5 +380,13 @@ export function NotesCollection({
         )}
       </div>
     </FileDropZone>
+    <TagPickerVault
+      open={manageTagsNoteId !== null}
+      onOpenChange={(open) => {
+        if (!open) setManageTagsNoteId(null);
+      }}
+      noteIds={manageTagsNoteId ? [manageTagsNoteId] : []}
+    />
+    </>
   );
 }

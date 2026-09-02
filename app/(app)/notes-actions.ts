@@ -20,12 +20,19 @@ export interface NoteRow {
   folderId?: string;
   updatedAt: number;
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
+  tagIds: string[];
 }
 
 export interface FolderRow {
   id: string;
   name: string;
   parentId?: string;
+}
+
+export interface TagRow {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface DbNoteRow {
@@ -46,7 +53,13 @@ interface DbFolderRow {
   parent_id: string | null;
 }
 
-function mapNote(row: DbNoteRow, vectorStatus?: NoteRow["vectorStatus"]): NoteRow {
+interface DbTagRow {
+  id: string;
+  name: string;
+  color: string;
+}
+
+function mapNote(row: DbNoteRow, vectorStatus?: NoteRow["vectorStatus"], tagIds: string[] = []): NoteRow {
   return {
     id: row.id,
     type: row.type as NoteType,
@@ -58,11 +71,16 @@ function mapNote(row: DbNoteRow, vectorStatus?: NoteRow["vectorStatus"]): NoteRo
     folderId: row.folder_id ?? undefined,
     updatedAt: new Date(row.updated_at).getTime(),
     vectorStatus,
+    tagIds,
   };
 }
 
 function mapFolder(row: DbFolderRow): FolderRow {
   return { id: row.id, name: row.name, parentId: row.parent_id ?? undefined };
+}
+
+function mapTag(row: DbTagRow): TagRow {
+  return { id: row.id, name: row.name, color: row.color };
 }
 
 async function requireUser() {
@@ -73,19 +91,28 @@ async function requireUser() {
   return { supabase, user };
 }
 
-export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: FolderRow[] }> {
+export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: FolderRow[]; tags: TagRow[] }> {
   const { supabase, user } = await requireUser();
-  if (!user) return { notes: [], folders: [] };
+  if (!user) return { notes: [], folders: [], tags: [] };
 
-  const [notesRes, foldersRes, queueRes, embeddingsRes] = await Promise.all([
+  const [notesRes, foldersRes, queueRes, embeddingsRes, tagsRes, noteTagsRes] = await Promise.all([
     supabase.from("notes").select("*").order("updated_at", { ascending: false }),
     supabase.from("folders").select("*").order("created_at", { ascending: true }),
     supabase.from("vectorization_queue").select("note_id, status"),
     supabase.from("note_embeddings").select("note_id"),
+    supabase.from("tags").select("*").order("created_at", { ascending: true }),
+    supabase.from("note_tags").select("note_id, tag_id"),
   ]);
 
   const queueMap = new Map((queueRes.data ?? []).map((q) => [q.note_id, q.status]));
   const embeddedNoteIds = new Set((embeddingsRes.data ?? []).map((e) => e.note_id));
+
+  const tagsByNote = new Map<string, string[]>();
+  for (const row of noteTagsRes.data ?? []) {
+    const list = tagsByNote.get(row.note_id) ?? [];
+    list.push(row.tag_id);
+    tagsByNote.set(row.note_id, list);
+  }
 
   return {
     notes: (notesRes.data ?? []).map((row) => {
@@ -98,9 +125,10 @@ export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: Fo
         else if (qStatus === "failed") vectorStatus = "failed";
         else vectorStatus = "pending";
       }
-      return mapNote(row, vectorStatus);
+      return mapNote(row, vectorStatus, tagsByNote.get(row.id) ?? []);
     }),
     folders: (foldersRes.data ?? []).map(mapFolder),
+    tags: (tagsRes.data ?? []).map(mapTag),
   };
 }
 
@@ -108,14 +136,13 @@ export async function getNoteRow(id: string): Promise<NoteRow | null> {
   const { supabase, user } = await requireUser();
   if (!user) return null;
 
-  const { data, error } = await supabase
-    .from("notes")
-    .select("*")
-    .eq("id", id)
-    .single();
+  const [{ data, error }, { data: noteTags }] = await Promise.all([
+    supabase.from("notes").select("*").eq("id", id).single(),
+    supabase.from("note_tags").select("tag_id").eq("note_id", id),
+  ]);
 
   if (error || !data) return null;
-  return mapNote(data);
+  return mapNote(data, undefined, (noteTags ?? []).map((t) => t.tag_id));
 }
 
 export async function createNoteRow(input: {
@@ -272,4 +299,69 @@ export async function deleteFolderRow(id: string): Promise<{ error?: string }> {
 
   const { error } = await supabase.from("folders").delete().eq("id", id);
   return error ? { error: "Não foi possível excluir a pasta." } : {};
+}
+
+export async function createTagRow(input: { id: string; name: string; color: string }): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("tags").insert({
+    id: input.id,
+    user_id: user.id,
+    name: input.name,
+    color: input.color,
+  });
+
+  if (error?.code === "23505") return { error: "Já existe uma tag com esse nome." };
+  return error ? { error: "Não foi possível criar a tag." } : {};
+}
+
+export async function updateTagRow(id: string, patch: { name?: string; color?: string }): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("tags").update(patch).eq("id", id);
+  if (error?.code === "23505") return { error: "Já existe uma tag com esse nome." };
+  return error ? { error: "Não foi possível atualizar a tag." } : {};
+}
+
+/** `note_tags` rows for this tag cascade automatically via the FK. */
+export async function deleteTagRow(id: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("tags").delete().eq("id", id);
+  return error ? { error: "Não foi possível excluir a tag." } : {};
+}
+
+export async function addTagToNote(noteId: string, tagId: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase
+    .from("note_tags")
+    .upsert({ note_id: noteId, tag_id: tagId, user_id: user.id }, { onConflict: "note_id,tag_id" });
+  return error ? { error: "Não foi possível aplicar a tag." } : {};
+}
+
+export async function removeTagFromNote(noteId: string, tagId: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("note_tags").delete().eq("note_id", noteId).eq("tag_id", tagId);
+  return error ? { error: "Não foi possível remover a tag." } : {};
+}
+
+/** Additive-only bulk assignment — never removes a tag a note already has. */
+export async function assignTagsToNotes(noteIds: string[], tagIds: string[]): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const rows = noteIds.flatMap((noteId) =>
+    tagIds.map((tagId) => ({ note_id: noteId, tag_id: tagId, user_id: user.id }))
+  );
+  if (rows.length === 0) return {};
+
+  const { error } = await supabase.from("note_tags").upsert(rows, { onConflict: "note_id,tag_id" });
+  return error ? { error: "Não foi possível aplicar as tags." } : {};
 }

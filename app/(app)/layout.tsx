@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Fetched once per entry into this section (layouts persist across the
   // client-side navigations between /notes, /archived, /trash, …) — RLS
   // scopes this to the signed-in user, same as every other query here.
-  const [{ notes, folders }, conversationRows, initialPreferences] = await Promise.all([
+  const [{ notes, folders, tags }, conversationRows, initialPreferences] = await Promise.all([
     listUserContent(),
     listConversations(),
     getUserPreferences(),
@@ -28,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <StoreHydration
         initialNotes={notes}
         initialFolders={folders}
+        initialTags={tags}
         initialPreferences={initialPreferences}
       />
       <ChatHydration conversations={conversations} />

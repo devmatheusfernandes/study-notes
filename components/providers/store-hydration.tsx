@@ -3,13 +3,14 @@
 import { useEffect, useRef } from "react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
-import type { NoteRow, FolderRow } from "@/app/(app)/notes-actions";
+import type { NoteRow, FolderRow, TagRow } from "@/app/(app)/notes-actions";
 import type { UserPreferencesData } from "@/app/(app)/preferences-actions";
 
 interface StoreHydrationProps {
   /** Server-fetched (RLS-scoped) — see the async (app) layout that renders this. */
   initialNotes: NoteRow[];
   initialFolders: FolderRow[];
+  initialTags: TagRow[];
   initialPreferences?: UserPreferencesData;
 }
 
@@ -21,6 +22,7 @@ interface StoreHydrationProps {
 export function StoreHydration({
   initialNotes,
   initialFolders,
+  initialTags,
   initialPreferences,
 }: StoreHydrationProps) {
   const seeded = useRef(false);
@@ -35,12 +37,12 @@ export function StoreHydration({
       // drafts and their pending outbox entries) before merging in the
       // server-fetched rows, so `hydrate()` knows which ids to keep local.
       void useNotesStore.persist.rehydrate()?.then(() => {
-        useNotesStore.getState().hydrate(initialNotes, initialFolders);
+        useNotesStore.getState().hydrate(initialNotes, initialFolders, initialTags);
         void useNotesStore.getState().syncPendingOps();
       });
     }
     void usePreferencesStore.persist.rehydrate();
-  }, [initialNotes, initialFolders, initialPreferences]);
+  }, [initialNotes, initialFolders, initialTags, initialPreferences]);
 
   return null;
 }

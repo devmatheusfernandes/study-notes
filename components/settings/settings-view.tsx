@@ -21,6 +21,7 @@ import { AiUsageCard } from "@/components/settings/ai-usage-card";
 import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
+import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 
 interface SettingsViewProps {
   userEmail: string;
@@ -165,7 +166,10 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               {/* Row 3: Full Width Global Video Sync Card */}
               <GlobalVideoSyncCard />
 
-              {/* Row 4: Full Width Backup Export Card */}
+              {/* Row 4: Full Width Tags Card */}
+              <TagsSettingsCard />
+
+              {/* Row 5: Full Width Backup Export Card */}
               <BackupExportCard />
             </div>
           )}
@@ -179,7 +183,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
           )}
 
           {activeSection === "appearance" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
               <section className="flex flex-col gap-4 rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm">
                 <div className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
@@ -195,6 +199,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                   <ViewModeToggle />
                 </div>
               </section>
+
+              <TagsSettingsCard />
             </div>
           )}
 

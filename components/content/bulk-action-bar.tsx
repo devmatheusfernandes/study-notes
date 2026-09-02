@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Archive, CheckCheck, RotateCcw, Trash2, X } from "lucide-react";
+import { Archive, CheckCheck, RotateCcw, Tags, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { useSelectionStore } from "@/lib/store/selection-store";
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { NoteStatus } from "@/lib/store/notes-store";
+import { TagPickerVault } from "./tag-picker-vault";
 
 interface BulkActionBarProps {
   /** Which screen this is — decides whether "Arquivar" or "Restaurar" applies. */
@@ -16,6 +17,7 @@ interface BulkActionBarProps {
 
 export function BulkActionBar({ status }: BulkActionBarProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const visibleIds = useSelectionStore((s) => s.visibleIds);
   const selectAll = useSelectionStore((s) => s.selectAll);
@@ -93,6 +95,14 @@ export function BulkActionBar({ status }: BulkActionBarProps) {
             <Button
               variant="ghost"
               size="sm"
+              leftIcon={<Tags />}
+              onClick={() => setTagPickerOpen(true)}
+            >
+              Aplicar tags
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               leftIcon={<Trash2 />}
               onClick={() => setConfirmOpen(true)}
             >
@@ -100,6 +110,8 @@ export function BulkActionBar({ status }: BulkActionBarProps) {
             </Button>
             </div>
           </div>
+
+          <TagPickerVault open={tagPickerOpen} onOpenChange={setTagPickerOpen} noteIds={selectedIds} />
 
           <ConfirmVault
             open={confirmOpen}

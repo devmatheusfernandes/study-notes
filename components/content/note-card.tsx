@@ -12,6 +12,7 @@ import {
   Pin,
   PinOff,
   Sparkles,
+  Tags,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,11 @@ import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SyncStatusIndicator, type SyncStatus } from "./sync-status";
 import { parseNotePreview } from "@/lib/note-preview";
+import { TagDot, TagPill } from "./tag-pill";
+import type { Tag } from "@/lib/store/notes-store";
+
+/** Cards only render a handful of tag pills before collapsing the rest into "+N". */
+const MAX_TAG_PILLS = 3;
 
 export type ContentType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "arquivo";
 
@@ -70,6 +76,8 @@ export interface NoteCardProps {
   /** Bulk-selection state, driven by the parent from `useSelectionStore`. */
   selectionMode?: boolean;
   selected?: boolean;
+  /** Resolved tag objects assigned to this item — passed pre-mapped by the parent, which already holds the full tag list. */
+  tags?: Tag[];
   onToggleSelect?: (id: string) => void;
   onOpen?: () => void;
   onTogglePin?: () => void;
@@ -77,6 +85,7 @@ export interface NoteCardProps {
   onArchive?: () => void;
   onRestore?: () => void;
   onDelete?: () => void;
+  onManageTags?: () => void;
   /** Checks/unchecks one of the checklist items shown in the preview, by its index among all of them. */
   onToggleChecklistItem?: (index: number) => void;
 }
@@ -95,6 +104,7 @@ export function NoteCard({
   permanentDelete = false,
   selectionMode = false,
   selected = false,
+  tags = [],
   onToggleSelect,
   onOpen,
   onTogglePin,
@@ -102,6 +112,7 @@ export function NoteCard({
   onArchive,
   onRestore,
   onDelete,
+  onManageTags,
   onToggleChecklistItem,
 }: NoteCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -117,6 +128,9 @@ export function NoteCard({
   const checklist = preview?.checklist;
   const checklistRemaining = preview?.checklistRemaining ?? 0;
   const previewImageUrl = checklist ? undefined : preview?.imageUrl;
+
+  const visibleTags = tags.slice(0, MAX_TAG_PILLS);
+  const overflowTagCount = tags.length - visibleTags.length;
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFired = useRef(false);
@@ -214,6 +228,12 @@ export function NoteCard({
           </DropdownMenuItem>
         )}
         {onRename && <DropdownMenuItem onSelect={onRename}>Renomear</DropdownMenuItem>}
+        {onManageTags && (
+          <DropdownMenuItem onSelect={onManageTags}>
+            <Tags className="size-4" />
+            Gerenciar tags
+          </DropdownMenuItem>
+        )}
         {onArchive && <DropdownMenuItem onSelect={onArchive}>Arquivar</DropdownMenuItem>}
         {onRestore && <DropdownMenuItem onSelect={onRestore}>Restaurar</DropdownMenuItem>}
         {onDelete && (
@@ -300,6 +320,13 @@ export function NoteCard({
           )}
         </button>
 
+        {tags.length > 0 && (
+          <span className="hidden shrink-0 items-center gap-1 sm:flex" title={tags.map((t) => t.name).join(", ")}>
+            {tags.slice(0, 5).map((tag) => (
+              <TagDot key={tag.id} color={tag.color} />
+            ))}
+          </span>
+        )}
         <span className="hidden shrink-0 text-[11.5px] text-muted-foreground sm:block">{meta}</span>
         {vectorStatus === "completed" && (
           <span title="Vetorizado com IA" className="hidden shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25 sm:inline-flex">
@@ -441,6 +468,17 @@ export function NoteCard({
             <li className="pl-[26px] text-[12px] text-muted-foreground/70">+{checklistRemaining} mais</li>
           )}
         </ul>
+      )}
+
+      {tags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {visibleTags.map((tag) => (
+            <TagPill key={tag.id} tag={tag} />
+          ))}
+          {overflowTagCount > 0 && (
+            <span className="text-[11px] text-muted-foreground/70">+{overflowTagCount} mais</span>
+          )}
+        </div>
       )}
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-1 text-[11px] text-muted-foreground/70">
