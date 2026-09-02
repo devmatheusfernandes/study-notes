@@ -167,7 +167,13 @@ async function fetchExactMetadataMatches(
   const norm = query.toLowerCase();
   const isBoletimSearch = norm.includes("boletim");
 
-  if (!isBoletimSearch && targetYear === null && targetNum === null) {
+  // A bare "boletim" mention with no year or number is too vague to justify
+  // forcing every bulletin video in as a fake "exact" match (similarity
+  // 0.99) — that's what turned a follow-up like "qual boletim especificamente
+  // falou sobre isso" (no year/number of its own) into ~30 unrelated video
+  // sources. Semantic vector search (match_hybrid_embeddings, called by the
+  // caller) already ranks by actual content relevance for that case.
+  if (targetYear === null && targetNum === null) {
     return [];
   }
 
