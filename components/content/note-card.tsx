@@ -421,12 +421,12 @@ export function NoteCard({
 
         {!checklist && previewHtml && (
           <span
-            className="text-[12.5px] leading-relaxed text-muted-foreground text-pretty"
+            className="line-clamp-3 text-[12.5px] leading-relaxed text-muted-foreground text-pretty"
             dangerouslySetInnerHTML={{ __html: previewHtml }}
           />
         )}
         {!checklist && plainText && (
-          <span className="text-[12.5px] leading-relaxed text-muted-foreground text-pretty">
+          <span className="line-clamp-3 text-[12.5px] leading-relaxed text-muted-foreground text-pretty">
             {plainText}
           </span>
         )}

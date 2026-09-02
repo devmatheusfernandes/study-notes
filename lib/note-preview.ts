@@ -1,5 +1,5 @@
-/** Cards are previews — long notes would otherwise blow out a masonry column. */
-const MAX_PREVIEW_CHARS = 220;
+/** Cards are previews — long notes would otherwise blow out a masonry column, especially on narrow mobile columns. */
+const MAX_PREVIEW_CHARS = 120;
 /** Keep-style cards show a handful of checklist items, not the whole list. */
 const MAX_CHECKLIST_ITEMS = 5;
 
