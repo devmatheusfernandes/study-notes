@@ -16,9 +16,11 @@ import {
   createFolderRow,
   renameFolderRow,
   deleteFolderRow,
+  deleteAllFoldersRows,
   createTagRow,
   updateTagRow,
   deleteTagRow,
+  deleteAllTagsRows,
   addTagToNote as addTagToNoteRow,
   removeTagFromNote as removeTagFromNoteRow,
   assignTagsToNotes,
@@ -131,6 +133,8 @@ interface NotesStore {
   createFolder: (name: string, parentId?: string) => string;
   renameFolder: (id: string, name: string) => void;
   deleteFolder: (id: string) => void;
+  /** Settings "danger zone" — removes every folder and moves their notes to the root. */
+  deleteAllFolders: () => void;
   /** Files are already uploaded and indexed server-side by the time this runs — see hooks/use-file-upload.ts. */
   addFiles: (files: UploadedFile[], folderId?: string) => void;
 
@@ -138,6 +142,8 @@ interface NotesStore {
   updateTag: (id: string, patch: { name?: string; color?: string }) => void;
   /** Also strips the tag from every note that had it, client-side (the DB cascade won't be reflected until the next hydrate). */
   deleteTag: (id: string) => void;
+  /** Settings "danger zone" — removes every tag and strips it from every note that had one. */
+  deleteAllTags: () => void;
   addTagToNote: (noteId: string, tagId: string) => void;
   removeTagFromNote: (noteId: string, tagId: string) => void;
   /** Additive-only: unions the given tags into each note's existing tagIds, never removes any. */
@@ -350,6 +356,32 @@ export const useNotesStore = create<NotesStore>()(
         });
       },
 
+      // A rare, explicit "danger zone" action — not folded into the offline
+      // outbox (unlike single-folder ops above): if the request never reaches
+      // the server, the user just sees the error toast and can retry once
+      // back online, rather than this pending silently in the background.
+      deleteAllFolders: () => {
+        const prevFolders = get().folders;
+        const prevNotes = get().notes;
+
+        set((s) => ({
+          folders: [],
+          notes: s.notes.map((n) => (n.folderId ? { ...n, folderId: undefined } : n)),
+        }));
+
+        void deleteAllFoldersRows()
+          .then((res) => {
+            if (res.error) {
+              set({ folders: prevFolders, notes: prevNotes });
+              notify.error("Não foi possível excluir as pastas", res.error);
+            }
+          })
+          .catch(() => {
+            set({ folders: prevFolders, notes: prevNotes });
+            notify.error("Não foi possível excluir as pastas");
+          });
+      },
+
       createTag: (name, color) => {
         const id = crypto.randomUUID();
         set((s) => ({ tags: [...s.tags, { id, name, color }] }));
@@ -394,6 +426,29 @@ export const useNotesStore = create<NotesStore>()(
             notify.error("Não foi possível excluir a tag");
           }
         });
+      },
+
+      // Same "danger zone" reasoning as deleteAllFolders above — not queued offline.
+      deleteAllTags: () => {
+        const prevTags = get().tags;
+        const prevNotes = get().notes;
+
+        set((s) => ({
+          tags: [],
+          notes: s.notes.map((n) => (n.tagIds.length > 0 ? { ...n, tagIds: [] } : n)),
+        }));
+
+        void deleteAllTagsRows()
+          .then((res) => {
+            if (res.error) {
+              set({ tags: prevTags, notes: prevNotes });
+              notify.error("Não foi possível excluir as tags", res.error);
+            }
+          })
+          .catch(() => {
+            set({ tags: prevTags, notes: prevNotes });
+            notify.error("Não foi possível excluir as tags");
+          });
       },
 
       addTagToNote: (noteId, tagId) => {

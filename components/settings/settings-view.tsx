@@ -22,6 +22,7 @@ import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
+import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 
 interface SettingsViewProps {
   userEmail: string;
@@ -171,6 +172,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
               {/* Row 5: Full Width Backup Export Card */}
               <BackupExportCard />
+
+              {/* Row 6: Full Width Danger Zone Card */}
+              <DangerZoneCard />
             </div>
           )}
 
@@ -205,6 +209,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
           )}
 
           {activeSection === "account" && (
+            <div className="flex flex-col gap-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
               <section className="flex flex-col gap-5 rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm justify-between">
                 <div className="flex flex-col gap-1">
@@ -237,6 +242,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               </section>
 
               <BackupExportCard />
+            </div>
+
+            <DangerZoneCard />
             </div>
           )}
         </motion.div>

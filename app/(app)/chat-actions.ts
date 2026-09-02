@@ -176,6 +176,15 @@ export async function deleteConversation(id: string): Promise<{ error?: string }
   return error ? { error: "Não foi possível excluir." } : {};
 }
 
+/** Settings "danger zone" — removes every conversation for this user (all statuses); `chat_messages` rows cascade via the FK. */
+export async function deleteAllConversations(): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("chat_conversations").delete().not("id", "is", null);
+  return error ? { error: "Não foi possível excluir as conversas." } : {};
+}
+
 export async function renameConversation(
   id: string,
   title: string

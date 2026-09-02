@@ -352,6 +352,25 @@ export async function removeTagFromNote(noteId: string, tagId: string): Promise<
   return error ? { error: "Não foi possível remover a tag." } : {};
 }
 
+/** Settings "danger zone" — promotes every note out of its folder, then removes every folder for this user (all statuses, RLS-scoped). */
+export async function deleteAllFoldersRows(): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  await supabase.from("notes").update({ folder_id: null }).not("folder_id", "is", null);
+  const { error } = await supabase.from("folders").delete().not("id", "is", null);
+  return error ? { error: "Não foi possível excluir as pastas." } : {};
+}
+
+/** Settings "danger zone" — removes every tag for this user; `note_tags` rows cascade via the FK. */
+export async function deleteAllTagsRows(): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("tags").delete().not("id", "is", null);
+  return error ? { error: "Não foi possível excluir as tags." } : {};
+}
+
 /** Additive-only bulk assignment — never removes a tag a note already has. */
 export async function assignTagsToNotes(noteIds: string[], tagIds: string[]): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();

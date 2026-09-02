@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { deleteAllConversations } from "@/app/(app)/chat-actions";
+import { notify } from "@/components/ui/toaster";
 
 export interface ChatSource {
   noteId?: string;
@@ -41,6 +43,8 @@ interface ChatStore {
   addConversation: (conversation: ChatConversation) => void;
   removeConversation: (id: string) => void;
   updateConversation: (id: string, patch: Partial<ChatConversation>) => void;
+  /** Settings "danger zone" — removes every conversation (all statuses), including any not yet loaded here. */
+  clearAllConversations: () => void;
 
   setMessages: (messages: ChatMessage[]) => void;
   addUserMessage: (content: string) => void;
@@ -52,7 +56,7 @@ interface ChatStore {
   setActiveConversationId: (id: string | null) => void;
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
+export const useChatStore = create<ChatStore>((set, get) => ({
   conversations: [],
   isLoaded: false,
   messages: [],
@@ -77,6 +81,28 @@ export const useChatStore = create<ChatStore>((set) => ({
         c.id === id ? { ...c, ...patch } : c
       ),
     })),
+
+  // A rare, explicit "danger zone" action from Settings, not a routine edit —
+  // no offline outbox here; a failure just rolls back and shows a toast.
+  clearAllConversations: () => {
+    const prevConversations = get().conversations;
+    const prevMessages = get().messages;
+    const prevActiveId = get().activeConversationId;
+
+    set({ conversations: [], messages: [], activeConversationId: null });
+
+    void deleteAllConversations()
+      .then((res) => {
+        if (res.error) {
+          set({ conversations: prevConversations, messages: prevMessages, activeConversationId: prevActiveId });
+          notify.error("Não foi possível excluir as conversas", res.error);
+        }
+      })
+      .catch(() => {
+        set({ conversations: prevConversations, messages: prevMessages, activeConversationId: prevActiveId });
+        notify.error("Não foi possível excluir as conversas");
+      });
+  },
 
   setMessages: (messages) => set({ messages }),
 

@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Vault, VaultContent, VaultHeader, VaultTitle, VaultDescription, VaultIcon } from "@/components/ui/vault";
 
 interface ConfirmVaultProps {
@@ -13,6 +15,8 @@ interface ConfirmVaultProps {
   /** Tints the icon/button red and defaults confirmLabel-adjacent styling for destructive actions. */
   destructive?: boolean;
   onConfirm: () => void;
+  /** When set, the confirm button stays disabled until the user types this exact phrase — extra friction for especially broad/irreversible actions (e.g. "wipe everything" in Settings). */
+  confirmPhrase?: string;
 }
 
 /**
@@ -30,7 +34,27 @@ export function ConfirmVault({
   cancelLabel = "Cancelar",
   destructive = true,
   onConfirm,
+  confirmPhrase,
 }: ConfirmVaultProps) {
+  const [typed, setTyped] = useState("");
+
+  // Reset the typed phrase each time the vault (re-)opens — during render
+  // (React's documented pattern for resetting state on a prop change) rather
+  // than an effect, so a stale phrase from a previous open can't linger.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setTyped("");
+  }
+
+  const canConfirm = !confirmPhrase || typed === confirmPhrase;
+
+  function confirm() {
+    if (!canConfirm) return;
+    onConfirm();
+    onOpenChange(false);
+  }
+
   return (
     <Vault open={open} onOpenChange={onOpenChange}>
       <VaultContent aria-label={title}>
@@ -39,6 +63,27 @@ export function ConfirmVault({
           <VaultTitle>{title}</VaultTitle>
           {description && <VaultDescription>{description}</VaultDescription>}
         </VaultHeader>
+
+        {confirmPhrase && (
+          <div className="flex flex-col gap-1.5 pb-1 pt-2">
+            <label className="text-center text-[12.5px] text-muted-foreground">
+              Digite <span className="font-mono font-semibold text-foreground">{confirmPhrase}</span> para confirmar
+            </label>
+            <Input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  confirm();
+                }
+              }}
+              placeholder={confirmPhrase}
+              autoFocus
+              className="text-center font-mono"
+            />
+          </div>
+        )}
 
         {/* Button carries `shrink-0`, so each needs its own flex-1 wrapper to
             share the row instead of overflowing it. */}
@@ -52,10 +97,8 @@ export function ConfirmVault({
             <Button
               variant={destructive ? "destructive" : "default"}
               fullWidth
-              onClick={() => {
-                onConfirm();
-                onOpenChange(false);
-              }}
+              disabled={!canConfirm}
+              onClick={confirm}
             >
               {confirmLabel}
             </Button>
