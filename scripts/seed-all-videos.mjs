@@ -1,8 +1,29 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import OpenAI from "openai";
 
-const dbUrl = process.env.DATABASE_URL;
-const openaiKey = process.env.OPENAI_API_KEY;
+// This runs outside Next via plain `node`, so .env isn't loaded automatically
+// — same manual read as scripts/db-migrate.mjs.
+function readEnv() {
+  const envPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".env");
+  if (!fs.existsSync(envPath)) return {};
+  return Object.fromEntries(
+    fs
+      .readFileSync(envPath, "utf8")
+      .split("\n")
+      .filter((line) => line.includes("=") && !line.trim().startsWith("#"))
+      .map((line) => {
+        const i = line.indexOf("=");
+        return [line.slice(0, i).trim(), line.slice(i + 1).trim()];
+      })
+  );
+}
+
+const env = { ...readEnv(), ...process.env };
+const dbUrl = env.DATABASE_URL;
+const openaiKey = env.OPENAI_API_KEY;
 
 if (!dbUrl || !openaiKey) {
   console.error("DATABASE_URL ou OPENAI_API_KEY não configuradas no .env");
@@ -132,6 +153,7 @@ async function crawlCategory(key = "VideoOnDemand", visited = new Set()) {
       coverImage,
       videoUrl,
       subtitlesUrl,
+      firstPublished: video.firstPublished || null,
     });
   }
 
@@ -159,13 +181,14 @@ async function processSingleVideo(video) {
     // Upsert into global_videos
     await sql`
       INSERT INTO public.global_videos (
-        id, title, category_key, duration_formatted, duration_seconds, cover_image, video_url, subtitles_url, content_text, metadata
+        id, title, category_key, duration_formatted, duration_seconds, cover_image, video_url, subtitles_url, content_text, metadata, first_published
       ) VALUES (
-        ${video.id}, ${video.title}, ${video.categoryKey}, ${video.durationFormatted}, ${Math.round(Number(video.durationSeconds) || 0)}, ${video.coverImage || null}, ${video.videoUrl || null}, ${video.subtitlesUrl || null}, ${contentText}, ${JSON.stringify({ jwVideoId: video.id, videoUrl: video.videoUrl, coverImage: video.coverImage, durationFormatted: video.durationFormatted })}
+        ${video.id}, ${video.title}, ${video.categoryKey}, ${video.durationFormatted}, ${Math.round(Number(video.durationSeconds) || 0)}, ${video.coverImage || null}, ${video.videoUrl || null}, ${video.subtitlesUrl || null}, ${contentText}, ${JSON.stringify({ jwVideoId: video.id, videoUrl: video.videoUrl, coverImage: video.coverImage, durationFormatted: video.durationFormatted })}, ${video.firstPublished}
       ) ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title,
         video_url = EXCLUDED.video_url,
         content_text = EXCLUDED.content_text,
+        first_published = EXCLUDED.first_published,
         updated_at = NOW();
     `;
 
@@ -217,6 +240,37 @@ async function processSingleVideo(video) {
   }
 }
 
+/**
+ * Cheap, no-OpenAI-cost pass for videos that already have a row: just backs
+ * fills `first_published` from the crawl (which we already paid for) instead
+ * of re-downloading transcripts or re-embedding anything. Batched via
+ * jsonb_to_recordset so it's one round trip per batch, not one per video.
+ */
+async function backfillFirstPublished(videos) {
+  const rows = videos
+    .filter((v) => v.firstPublished)
+    .map((v) => ({ id: v.id, first_published: v.firstPublished }));
+  if (rows.length === 0) return 0;
+
+  const BATCH_SIZE = 500;
+  let updated = 0;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const result = await sql`
+      UPDATE public.global_videos AS g SET
+        first_published = c.first_published
+      FROM (
+        SELECT * FROM jsonb_to_recordset(${sql.json(batch)})
+          AS x(id text, first_published timestamptz)
+      ) AS c
+      WHERE g.id = c.id
+        AND g.first_published IS DISTINCT FROM c.first_published
+    `;
+    updated += result.count ?? 0;
+  }
+  return updated;
+}
+
 async function run() {
   console.log("=================================================");
   console.log("🚀 INICIANDO IMPORTAÇÃO E VETORIZAÇÃO (PARALELA) ");
@@ -241,9 +295,16 @@ async function run() {
 
   const videos = Array.from(uniqueMap.values());
   const pendingVideos = videos.filter((v) => !existingIds.has(v.id));
+  const existingVideos = videos.filter((v) => existingIds.has(v.id));
 
   console.log(`✅ Total de vídeos encontrados com transcrição VTT: ${videos.length}`);
   console.log(`⚡ Novos vídeos pendentes para salvar e vetorizar: ${pendingVideos.length}\n`);
+
+  // Videos already in the DB never get re-downloaded/re-embedded here — just
+  // their first_published backfilled (cheap, already-crawled data, no OpenAI cost).
+  console.log("📅 Atualizando data de publicação dos vídeos já existentes...");
+  const backfilledCount = await backfillFirstPublished(existingVideos);
+  console.log(`   ${backfilledCount} vídeo(s) com data atualizada.\n`);
 
   if (pendingVideos.length === 0) {
     console.log("🎉 Todos os vídeos já estão importados e vetorizados com sucesso!");

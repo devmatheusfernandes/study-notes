@@ -25,6 +25,8 @@ interface MatchResult {
 interface QueryConstraints {
   targetYear: number | null;
   targetNum: number | null;
+  /** e.g. "a ultima adoracao matinal", "o video mais recente" -- no year/number given, just "give me the newest one". */
+  wantsLatest: boolean;
 }
 
 function parseQueryConstraints(query: string): QueryConstraints {
@@ -53,12 +55,27 @@ function parseQueryConstraints(query: string): QueryConstraints {
     }
   }
 
-  return { targetYear, targetNum };
+  // 3. "latest/most recent" -- deliberately a separate signal from year/number,
+  // since a query can say "a ultima" with no digits at all.
+  const wantsLatest = /\b(ultim[ao]s?|mais recente[s]?|mais nov[ao]s?|recentemente)\b/.test(norm);
+
+  return { targetYear, targetNum, wantsLatest };
 }
 
-function rerankMatches(query: string, matches: MatchResult[]): MatchResult[] {
-  const { targetYear, targetNum } = parseQueryConstraints(query);
-  if (targetYear === null && targetNum === null) return matches;
+/**
+ * `supabase` is only needed for the "latest" case -- one extra lookup for
+ * `first_published` on whatever video candidates semantic search already
+ * surfaced (never a fresh broad query), so whichever of those is newest gets
+ * boosted to the top instead of just "whatever's most semantically similar
+ * to the word 'recente'".
+ */
+async function rerankMatches(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  query: string,
+  matches: MatchResult[]
+): Promise<MatchResult[]> {
+  const { targetYear, targetNum, wantsLatest } = parseQueryConstraints(query);
+  if (targetYear === null && targetNum === null && !wantsLatest) return matches;
 
   const reranked: MatchResult[] = [];
 
@@ -127,6 +144,42 @@ function rerankMatches(query: string, matches: MatchResult[]): MatchResult[] {
     });
   }
 
+  if (wantsLatest) {
+    const videoIds = [
+      ...new Set(reranked.filter((m) => m.source_type === "video" && m.video_id).map((m) => m.video_id!)),
+    ];
+    if (videoIds.length > 0) {
+      const { data: videoDates } = await supabase
+        .from("global_videos")
+        .select("id, first_published")
+        .in("id", videoIds);
+      const publishedAt = new Map(
+        (videoDates ?? []).map((v) => [v.id, v.first_published ? new Date(v.first_published).getTime() : 0])
+      );
+
+      let newestIndex = -1;
+      let newestTime = -1;
+      reranked.forEach((m, i) => {
+        if (m.source_type !== "video" || !m.video_id) return;
+        const t = publishedAt.get(m.video_id) ?? 0;
+        if (t > newestTime) {
+          newestTime = t;
+          newestIndex = i;
+        }
+      });
+
+      // Boost just the most recent candidate among the topically-relevant
+      // videos semantic search already found -- enough to outrank same-topic
+      // but older videos, without discarding them as secondary context.
+      if (newestIndex !== -1) {
+        reranked[newestIndex] = {
+          ...reranked[newestIndex],
+          similarity: reranked[newestIndex].similarity + 1.0,
+        };
+      }
+    }
+  }
+
   // If we have an exact metadata match (similarity >= 0.95), filter strictly for exact matches (similarity >= 0.85)
   const hasExactMatch = reranked.some((m) => m.similarity >= 0.95);
   if (hasExactMatch) {
@@ -158,6 +211,29 @@ function formatAllowedSourcesLabel(allowedSourceTypes: string[]): string {
   return `seus conteúdos (${labels.join(", ")})`;
 }
 
+/**
+ * Category names a user might type verbatim, mapped to the `category_key`
+ * JW.org itself assigns (already stored on every `global_videos` row by
+ * scripts/seed-all-videos.mjs, just never queried against before) -- verified
+ * against the live JW.org mediator API and the videos actually in this DB.
+ * Deliberately more liberal than the "boletim" special case below: these
+ * names aren't likely to show up as an incidental word in an unrelated
+ * follow-up question the way "boletim" can, so a bare mention (no year or
+ * "ultima") is still specific enough to justify filtering by it.
+ */
+const CATEGORY_KEYWORDS: { pattern: RegExp; categoryKey: string }[] = [
+  { pattern: /adorac(?:ao|oes) matina(?:l|is)/, categoryKey: "VODPgmEvtMorningWorship" },
+  { pattern: /formaturas? de gilead/, categoryKey: "VODPgmEvtGilead" },
+  { pattern: /\bbroadcasting\b/, categoryKey: "StudioMonthlyPrograms" },
+];
+
+function detectCategoryKey(normalizedAccentStrippedQuery: string): string | null {
+  for (const { pattern, categoryKey } of CATEGORY_KEYWORDS) {
+    if (pattern.test(normalizedAccentStrippedQuery)) return categoryKey;
+  }
+  return null;
+}
+
 async function fetchExactMetadataMatches(
   supabase: Awaited<ReturnType<typeof createClient>>,
   query: string,
@@ -165,15 +241,19 @@ async function fetchExactMetadataMatches(
 ): Promise<MatchResult[]> {
   const { targetYear, targetNum } = parseQueryConstraints(query);
   const norm = query.toLowerCase();
+  const normStripped = norm.normalize("NFD").replace(/[̀-ͯ]/g, "");
   const isBoletimSearch = norm.includes("boletim");
+  const categoryKey = detectCategoryKey(normStripped);
 
   // A bare "boletim" mention with no year or number is too vague to justify
   // forcing every bulletin video in as a fake "exact" match (similarity
   // 0.99) — that's what turned a follow-up like "qual boletim especificamente
   // falou sobre isso" (no year/number of its own) into ~30 unrelated video
   // sources. Semantic vector search (match_hybrid_embeddings, called by the
-  // caller) already ranks by actual content relevance for that case.
-  if (targetYear === null && targetNum === null) {
+  // caller) already ranks by actual content relevance for that case. A named
+  // category match doesn't have that ambiguity, so it's allowed through on
+  // its own below.
+  if (targetYear === null && targetNum === null && !categoryKey) {
     return [];
   }
 
@@ -184,6 +264,9 @@ async function fetchExactMetadataMatches(
       .from("global_videos")
       .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url");
 
+    if (categoryKey) {
+      videoQuery = videoQuery.eq("category_key", categoryKey);
+    }
     if (isBoletimSearch) {
       videoQuery = videoQuery.ilike("title", "%Boletim%");
     }
@@ -308,7 +391,7 @@ export async function POST(request: Request) {
 
         const exactMatches = await fetchExactMetadataMatches(supabase, question, allowedSourceTypes);
         const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
-        const matchRows = rerankMatches(question, rawMatches)
+        const matchRows = (await rerankMatches(supabase, question, rawMatches))
           .filter((m) => allowedSourceTypes.includes(m.source_type))
           .filter((m) => m.similarity >= RAG_THRESHOLD);
 
