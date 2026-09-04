@@ -15,6 +15,7 @@ import { JwlibraryNoteEditorVault } from "./jwlibrary-note-editor-vault";
 import { JwlibraryTagPickerVault } from "./jwlibrary-tag-picker-vault";
 import { JwlibraryTagChip } from "./jwlibrary-tag-chip";
 import { JwlibraryBulkActionBar } from "./jwlibrary-bulk-action-bar";
+import { JwlibraryNotesSkeleton } from "./jwlibrary-notes-skeleton";
 import { ViewModeToggle } from "./view-mode-toggle";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { useSearchStore } from "@/lib/store/search-store";
@@ -263,7 +264,7 @@ export function JwlibraryNotesCollection() {
         {fileInputEl}
         <div className="flex flex-col gap-4 px-4 py-5 sm:px-6">
           {toolbar}
-          <p className="py-10 text-center text-[13px] text-muted-foreground">carregando…</p>
+          <JwlibraryNotesSkeleton />
         </div>
       </FileDropZone>
     );

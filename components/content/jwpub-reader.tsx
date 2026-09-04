@@ -14,6 +14,7 @@ import { getChapterHighlights, type ParagraphHighlight } from "@/app/(app)/jwlib
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
+import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
 import {
@@ -429,7 +430,7 @@ export function JwpubReader({
           <>
             <div className="flex-1 px-4 py-6 sm:px-6">
               {isLoadingChapter ? (
-                <p className="mx-auto max-w-2xl text-[13px] text-muted-foreground">carregando…</p>
+                <JwpubChapterSkeleton />
               ) : (
                 <JwpubChapterView
                   html={html ?? ""}
