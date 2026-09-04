@@ -47,6 +47,8 @@ interface BibleStudyPanelProps {
 
   /** A `data-bible-ref` link inside a study note or footnote was clicked. */
   onOpenBibleRef: (bookOrder: number, chapter: number, verse: number) => void;
+  /** A `data-bible-appendix-ref` link inside a study note was clicked — 422 of them exist. */
+  onOpenAppendix: (mepsDocumentId: number) => void;
 }
 
 /**
@@ -129,19 +131,33 @@ export function BibleStudyPanel({
   studyNotes,
   studyLoading,
   onOpenBibleRef,
+  onOpenAppendix,
 }: BibleStudyPanelProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Delegated click for the `data-bible-ref="book:chapter:verse"` links the
-  // seed left inside study notes and footnotes. One listener on the container
-  // rather than rehydrating every <a> into a React component — the HTML is
-  // injected as a string, so there are no React nodes to attach to.
+  // Delegated click for the `data-bible-ref="book:chapter:verse"` and
+  // `data-bible-appendix-ref` links the seed left inside study notes and
+  // footnotes. One listener on the container rather than rehydrating every
+  // <a> into a React component — the HTML is injected as a string, so there
+  // are no React nodes to attach to.
   useEffect(() => {
     const container = contentRef.current;
     if (!container) return;
 
     function handleClick(event: MouseEvent) {
-      const anchor = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-bible-ref]");
+      const target = event.target as HTMLElement | null;
+
+      const appendixLink = target?.closest<HTMLElement>("[data-bible-appendix-ref]");
+      if (appendixLink) {
+        const id = Number(appendixLink.dataset.bibleAppendixRef);
+        if (Number.isFinite(id)) {
+          event.preventDefault();
+          onOpenAppendix(id);
+        }
+        return;
+      }
+
+      const anchor = target?.closest<HTMLElement>("[data-bible-ref]");
       if (!anchor) return;
       const parts = (anchor.dataset.bibleRef ?? "").split(":").map(Number);
       if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return;
@@ -151,7 +167,7 @@ export function BibleStudyPanel({
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [onOpenBibleRef]);
+  }, [onOpenBibleRef, onOpenAppendix]);
 
   const whole = selectedVerse === null;
   const scopeLabel = whole ? `${bookName} ${chapter}` : `${bookName} ${chapter}:${selectedVerse}`;

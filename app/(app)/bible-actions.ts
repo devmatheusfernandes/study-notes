@@ -489,3 +489,86 @@ export async function getBibleVerseCount(
   if (error || !data) return { error: "Não foi possível carregar os versículos." };
   return { count: data.verse ?? 1 };
 }
+
+export type BibleAppendixLetter = "A" | "B" | "C";
+
+export interface BibleAppendixHeader {
+  mepsDocumentId: number;
+  letter: BibleAppendixLetter;
+  title: string;
+}
+
+/**
+ * The 3 section headers ("Apêndice A/B/C") — the entry point for browsing,
+ * since each header's own contentHtml is already the source's index of that
+ * section's articles (a plain `<ol>` of links). Rendering the header IS the
+ * table of contents; no separate "list of titles" query is needed.
+ */
+export async function listBibleAppendixHeaders(): Promise<{ headers?: BibleAppendixHeader[]; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("bible_appendices")
+    .select("meps_document_id, appendix_letter, title")
+    .eq("section", "header")
+    .order("appendix_letter", { ascending: true });
+
+  if (error) return { error: "Não foi possível carregar os apêndices." };
+
+  return {
+    headers: (data ?? []).map((row) => ({
+      mepsDocumentId: row.meps_document_id,
+      letter: row.appendix_letter as BibleAppendixLetter,
+      title: row.title,
+    })),
+  };
+}
+
+export interface BibleAppendix {
+  mepsDocumentId: number;
+  letter: BibleAppendixLetter;
+  section: "header" | "article";
+  title: string;
+  contentHtml: string;
+}
+
+/**
+ * One appendix (header or article) by its `meps_document_id` — the id
+ * carried in a `data-bible-appendix-ref` link (see
+ * scripts/bible-study-html.mjs's rewrite of `jwpub://p/T:{id}/`), not the
+ * table's own `id`/DocumentId. Resolves both the 422 links already inside
+ * study notes and the ~627 appendix-to-appendix links inside the appendices
+ * themselves (e.g. every article's header links back to its section index).
+ */
+export async function getBibleAppendix(
+  mepsDocumentId: number
+): Promise<{ appendix?: BibleAppendix; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("bible_appendices")
+    .select("meps_document_id, appendix_letter, section, title, content_html")
+    .eq("meps_document_id", mepsDocumentId)
+    .maybeSingle();
+
+  if (error) return { error: "Não foi possível carregar o apêndice." };
+  if (!data) return { error: "Apêndice não encontrado." };
+
+  return {
+    appendix: {
+      mepsDocumentId: data.meps_document_id,
+      letter: data.appendix_letter as BibleAppendixLetter,
+      section: data.section as "header" | "article",
+      title: data.title,
+      contentHtml: data.content_html,
+    },
+  };
+}

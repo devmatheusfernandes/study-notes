@@ -15,18 +15,21 @@ import {
   getVerseCrossReferences,
   getChapterCrossReferences,
   getChapterStudyContent,
+  listBibleAppendixHeaders,
   type BibleBook,
   type BibleVerseRow,
   type CrossReference,
   type CrossReferenceSource,
   type BibleFootnote,
   type BibleStudyNote,
+  type BibleAppendixHeader,
 } from "@/app/(app)/bible-actions";
 import { getBibleChapterHighlights, type BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
 import { BibleStudyPanel, type BibleStudyTab } from "./bible-study-panel";
+import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import {
   JwlibraryNoteEditorVault,
@@ -120,6 +123,16 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   useEffect(() => {
     void listBibleBooks().then((result) => setBooks(result.books ?? []));
   }, []);
+
+  const [appendixHeaders, setAppendixHeaders] = useState<BibleAppendixHeader[] | null>(null);
+  useEffect(() => {
+    void listBibleAppendixHeaders().then((result) => setAppendixHeaders(result.headers ?? []));
+  }, []);
+
+  // Which appendix (by meps_document_id) the appendix reader is showing —
+  // opened either from the book-grid entry point or from a link inside a
+  // study note / another appendix. `null` means the surface is closed.
+  const [openAppendixId, setOpenAppendixId] = useState<number | null>(null);
 
   const [screen, setScreen] = useState<BibleScreen>(
     initialBookOrder !== null && initialChapter !== null ? "reading" : "books"
@@ -386,7 +399,21 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     return (
       <>
         <BibleTopHeader title="Bíblia" userEmail={userEmail} />
-        <BibleBookGrid books={books} onSelectBook={pickBook} />
+        <BibleBookGrid
+          books={books}
+          onSelectBook={pickBook}
+          appendixHeaders={appendixHeaders}
+          onSelectAppendix={setOpenAppendixId}
+        />
+        <BibleAppendixSurface
+          mepsDocumentId={openAppendixId}
+          onClose={() => setOpenAppendixId(null)}
+          onOpenAppendix={setOpenAppendixId}
+          onOpenBibleRef={(refBookOrder, refChapter, refVerse) => {
+            setOpenAppendixId(null);
+            enterReading(refBookOrder, refChapter, refVerse);
+          }}
+        />
       </>
     );
   }
@@ -476,6 +503,17 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         studyNotes={panelStudyNotes}
         studyLoading={isLoadingStudy}
         onOpenBibleRef={enterReading}
+        onOpenAppendix={setOpenAppendixId}
+      />
+
+      <BibleAppendixSurface
+        mepsDocumentId={openAppendixId}
+        onClose={() => setOpenAppendixId(null)}
+        onOpenAppendix={setOpenAppendixId}
+        onOpenBibleRef={(refBookOrder, refChapter, refVerse) => {
+          setOpenAppendixId(null);
+          enterReading(refBookOrder, refChapter, refVerse);
+        }}
       />
 
       <JwlibraryHighlightNotePanel

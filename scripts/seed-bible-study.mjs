@@ -1,15 +1,16 @@
 /**
- * Seed do conteúdo da Bíblia de Estudo (rodapés, notas de estudo, esboço e
- * referências cruzadas oficiais) a partir de data/nwt_st.sqlite — ver
- * data/nwt_st_structure.md para o esquema da fonte e a migração
- * 0020_bible_study_edition.sql para o destino.
+ * Seed do conteúdo da Bíblia de Estudo (rodapés, notas de estudo, esboço,
+ * apêndices e referências cruzadas oficiais) a partir de data/nwt_st.sqlite —
+ * ver data/nwt_st_structure.md para o esquema da fonte e as migrações
+ * 0020_bible_study_edition.sql / 0022_bible_appendices.sql para o destino.
  *
  * Mesma forma dos outros seeds: sql.js para ler o sqlite, `pg` para escrever
  * via DATABASE_URL, tudo numa transação só.
  *
- * Re-rodável. As três tabelas novas são truncadas no início; as referências
- * cruzadas NÃO — elas convivem com as ~687 mil de data/cross_references.sqlite
- * na mesma tabela, então aqui só se apaga e reinsere `source = 'nwt'`.
+ * Re-rodável. Footnotes/study_notes/outline/appendices são truncadas no
+ * início; as referências cruzadas NÃO — elas convivem com as ~687 mil de
+ * data/cross_references.sqlite na mesma tabela, então aqui só se apaga e
+ * reinsere `source = 'nwt'`.
  *
  *   npm run seed:bible-study
  */
@@ -56,6 +57,16 @@ const query = (sql) => {
   return result.length > 0 ? result[0].values : [];
 };
 
+const hasAppendicesTable =
+  query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='appendices'").length > 0;
+if (!hasAppendicesTable) {
+  console.error(
+    "Tabela 'appendices' não encontrada em data/nwt_st.sqlite — arquivo desatualizado. " +
+      "Regenere-o com os apêndices (ver data/nwt_st_structure.md) antes de rodar este seed."
+  );
+  process.exit(1);
+}
+
 // ─── Mapa de versículos da fonte ──────────────────────────────────────────
 const verseById = new Map(
   query("SELECT id, book_order, chapter, verse, is_superscription FROM verses").map((row) => [
@@ -67,10 +78,16 @@ const verseById = new Map(
 // ─── Leitura e preparo (fora da transação: é o passo caro) ────────────────
 console.log("Preparando HTML (reescrita de links jwpub:// + sanitização)…");
 
+// Precisa existir ANTES de preparar qualquer HTML (footnotes, study_notes,
+// outline e os próprios appendices): é o que deixa rewriteBibleStudyLinks
+// distinguir um jwpub://p/T:{id}/ que aponta para um apêndice desta mesma
+// Bíblia de outro que aponta para uma publicação externa de verdade.
+const appendixMepsIds = new Set(query("SELECT meps_document_id FROM appendices").map((row) => row[0]));
+
 const footnotes = query("SELECT id, verse_id, footnote_index, content FROM footnotes ORDER BY id").map(
   ([id, verseId, index, content]) => {
     const v = verseById.get(verseId);
-    return [id, verseId, v.bookOrder, v.chapter, index, prepareStudyHtml(content)];
+    return [id, verseId, v.bookOrder, v.chapter, index, prepareStudyHtml(content, appendixMepsIds)];
   }
 );
 
@@ -83,8 +100,8 @@ const studyNotes = query("SELECT id, verse_id, label, content FROM study_notes O
       v.bookOrder,
       v.chapter,
       v.verse,
-      label ? prepareStudyHtml(label) : null,
-      prepareStudyHtml(content),
+      label ? prepareStudyHtml(label, appendixMepsIds) : null,
+      prepareStudyHtml(content, appendixMepsIds),
     ];
   }
 );
@@ -102,8 +119,25 @@ const outline = query(
   ec,
   ev,
   extractOutlineTitle(content),
-  prepareStudyHtml(content),
+  prepareStudyHtml(content, appendixMepsIds),
 ]);
+
+/**
+ * `appendix_letter` não vem pronta na fonte — derivada pela ORDEM dos ids:
+ * cada linha `section = 'header'` ("Apêndice A/B/C") é seguida pelos artigos
+ * daquela seção até o próximo header. Verificado que essa derivação bate
+ * 100% com o prefixo do próprio título de cada artigo antes de confiar nela
+ * (nenhum dos 59 artigos discorda de qual seção o id-order atribui).
+ */
+let currentLetter = null;
+const appendices = query("SELECT id, meps_document_id, section, title, content FROM appendices ORDER BY id").map(
+  ([id, mepsId, section, title, content]) => {
+    if (section === "header") {
+      currentLetter = /Apêndice ([ABC])/.exec(title)?.[1] ?? currentLetter;
+    }
+    return [id, mepsId, section, currentLetter, title, prepareStudyHtml(content, appendixMepsIds)];
+  }
+);
 
 /**
  * Referências cruzadas: a fonte guarda ids de versículo, a tabela de destino
@@ -163,9 +197,18 @@ for (const [sourceId, targetFirstId, targetLastId, sortOrder] of crossRefsRaw) {
   ]);
 }
 
+const unletteredAppendix = appendices.find((row) => row[3] === null);
+if (unletteredAppendix) {
+  throw new Error(
+    `Apêndice id=${unletteredAppendix[0]} ("${unletteredAppendix[4]}") veio antes de qualquer header ` +
+      `'Apêndice A/B/C' na ordem de id — não foi possível derivar a seção.`
+  );
+}
+
 console.log(
   `${footnotes.length} rodapés, ${studyNotes.length} notas de estudo, ` +
-    `${outline.length} linhas de esboço, ${crossRefs.length} referências cruzadas.`
+    `${outline.length} linhas de esboço, ${appendices.length} apêndices, ` +
+    `${crossRefs.length} referências cruzadas.`
 );
 if (crossChapterRanges > 0) {
   console.log(`  (${crossChapterRanges} faixa(s) atravessando capítulo — guardadas só com o versículo inicial.)`);
@@ -245,6 +288,7 @@ try {
   await client.query("truncate table public.bible_footnotes");
   await client.query("truncate table public.bible_study_notes");
   await client.query("truncate table public.bible_outline");
+  await client.query("truncate table public.bible_appendices");
   // Nunca truncar: as linhas 'extended' da migração 0015 moram aqui também.
   const { rowCount: removed } = await client.query(
     "delete from public.bible_cross_references where source = 'nwt'"
@@ -265,6 +309,11 @@ try {
     "bible_outline",
     ["id", "parent_id", "level", "book_order", "begin_chapter", "begin_verse", "end_chapter", "end_verse", "title", "content_html"],
     outline
+  );
+  await insertBatched(
+    "bible_appendices",
+    ["id", "meps_document_id", "section", "appendix_letter", "title", "content_html"],
+    appendices
   );
   await insertBatched(
     "bible_cross_references",

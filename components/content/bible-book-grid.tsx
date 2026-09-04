@@ -1,6 +1,6 @@
 "use client";
 
-import type { BibleBook } from "@/app/(app)/bible-actions";
+import type { BibleAppendixHeader, BibleBook } from "@/app/(app)/bible-actions";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BIBLE_BOOK_ABBREVIATIONS_PT, OLD_TESTAMENT_MAX_BOOK_ORDER } from "@/lib/bible/book-abbreviations";
@@ -14,6 +14,9 @@ interface BibleBookGridProps {
   /** Fetched once by bible-reader.tsx and shared across all three screens — null while loading. */
   books: BibleBook[] | null;
   onSelectBook: (bookOrder: number) => void;
+  /** Fetched by bible-reader.tsx — null while loading, empty once loaded if data/nwt_st.sqlite predates the appendices table. */
+  appendixHeaders: BibleAppendixHeader[] | null;
+  onSelectAppendix: (mepsDocumentId: number) => void;
 }
 
 function BookButton({ book, onClick }: { book: BibleBook; onClick: () => void }) {
@@ -39,15 +42,37 @@ function BookButton({ book, onClick }: { book: BibleBook; onClick: () => void })
 }
 
 /** Landing screen of /bible — full-page book grid grouped by testament, matching the JW Library app's own Bible navigation (not a Vault/drawer). */
-export function BibleBookGrid({ books, onSelectBook }: BibleBookGridProps) {
+export function BibleBookGrid({ books, onSelectBook, appendixHeaders, onSelectAppendix }: BibleBookGridProps) {
   const oldTestament = (books ?? []).filter((b) => b.bookOrder <= OLD_TESTAMENT_MAX_BOOK_ORDER);
   const newTestament = (books ?? []).filter((b) => b.bookOrder > OLD_TESTAMENT_MAX_BOOK_ORDER);
 
   return (
     <div className="flex flex-col gap-6 px-4 py-6 sm:px-6">
-      <div className="flex flex-col gap-0.5">
-        <span className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">NWT</span>
-        <span className="font-heading text-xl">Bíblia</span>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">NWT</span>
+          <span className="font-heading text-xl">Bíblia</span>
+        </div>
+
+        {/* Same place JW Library puts its own Apêndice A/B/C tabs, next to
+            the book list. Each header's own content is that section's index
+            of articles — see bible-appendix-surface.tsx — so there's nothing
+            else to fetch to render this as a picker. */}
+        {appendixHeaders && appendixHeaders.length > 0 && (
+          <div className="flex shrink-0 gap-1.5">
+            {appendixHeaders.map((header) => (
+              <button
+                key={header.mepsDocumentId}
+                type="button"
+                onClick={() => onSelectAppendix(header.mepsDocumentId)}
+                title={header.title}
+                className="rounded-full bg-secondary px-3 py-1.5 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-surface hover:text-foreground"
+              >
+                {header.letter}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {books === null ? (

@@ -29,12 +29,19 @@ const DOMPurify = createDOMPurify(dom.window);
  *
  *   jwpub://b/NWTR/40:1:1-40:1:1   → referência bíblica (livro:cap:verso, 1-66)
  *   jwpub://c/T:1001070105/1:3-1:5 → trecho de um documento da publicação
- *   jwpub://p/T:1001077384/        → outra publicação
+ *   jwpub://p/T:1001077384/        → outra publicação, OU um apêndice
  *
  * Cada um vira um `data-*` inerte e o `href` cai fora, para nada poder
  * navegar para um esquema que o navegador não entende.
+ *
+ * `appendixMepsIds`, quando fornecido, é o conjunto de `meps_document_id` da
+ * tabela `appendices` da fonte — sem ele, não há como saber se um link
+ * `p/T:{id}/` aponta para um apêndice (que este seed também está prestes a
+ * persistir, em `bible_appendices`) ou para uma publicação externa de
+ * verdade (glossário, outra tradução). Passe-o sempre que ele já estiver
+ * disponível — hoje isso é sempre, já que os apêndices vêm no mesmo sqlite.
  */
-export function rewriteBibleStudyLinks(html) {
+export function rewriteBibleStudyLinks(html, appendixMepsIds = new Set()) {
   if (typeof html !== "string") return "";
 
   return html.replace(
@@ -57,15 +64,33 @@ export function rewriteBibleStudyLinks(html) {
         return `<a${before}data-bible-ref="${book}:${chapter}:${verse}"${endAttr}${after}>`;
       }
 
-      // p/T:{mepsDocumentId}/ — MESMO atributo que resolveJwpubReferences em
-      // app/(app)/jwpub-actions.ts já resolve, então uma nota de estudo que
-      // cita outra publicação fica clicável de graça quando o usuário tem
-      // aquela publicação na biblioteca. Resolver aqui seria errado: se o
-      // usuário importa a publicação depois, o link teria nascido morto.
       const pubRef = /^p\/T:(\d+)\/(?:(\d+)(?:-\d+)?(?::\d+)?)?$/.exec(target);
       if (pubRef) {
+        const rawMepsId = Number(pubRef[1]);
+        // O índice do Apêndice A ("Apêndice A" header's own TOC list) usa um
+        // esquema de id "de menu" que é exatamente id_real − 9000 para seus 15
+        // links (A1..A7-H) — verificado sem nenhum desvio contra os 15
+        // artigos reais. Os índices de Apêndice B e C não têm esse offset;
+        // usam o meps_document_id real do artigo diretamente. Sem esse
+        // fallback, os 15 links do próprio índice de A ficariam mortos.
+        const mepsId = appendixMepsIds.has(rawMepsId)
+          ? rawMepsId
+          : appendixMepsIds.has(rawMepsId + 9000)
+            ? rawMepsId + 9000
+            : null;
+
+        // Um apêndice da própria Bíblia de Estudo: resolvido direto contra
+        // bible_appendices, sem depender de o usuário ter importado nada.
+        if (mepsId !== null) {
+          return `<a${before}data-bible-appendix-ref="${mepsId}"${after}>`;
+        }
+        // Publicação externa de verdade (glossário, outra obra) — MESMO
+        // atributo que resolveJwpubReferences em app/(app)/jwpub-actions.ts
+        // já resolve, então fica clicável de graça quando o usuário tem
+        // aquela publicação na biblioteca. Resolver aqui seria errado: se o
+        // usuário importa a publicação depois, o link teria nascido morto.
         const pidAttr = pubRef[2] ? ` data-jwpub-pubref-pid="${pubRef[2]}"` : "";
-        return `<a${before}data-jwpub-pubref="${pubRef[1]}"${pidAttr}${after}>`;
+        return `<a${before}data-jwpub-pubref="${rawMepsId}"${pidAttr}${after}>`;
       }
 
       // c/T:{id}/{faixa} e qualquer outro formato — preservados como texto,
@@ -89,16 +114,23 @@ export function sanitizeStudyHtml(html) {
       "class", "id", "colspan", "rowspan",
       "data-pid", "data-fnid", "data-bid", "data-xtid",
       "data-bible-ref", "data-bible-ref-end", "data-bible-ref-raw",
-      "data-jwpub-pubref", "data-jwpub-pubref-pid",
+      "data-jwpub-pubref", "data-jwpub-pubref-pid", "data-bible-appendix-ref",
     ],
-    FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
+    // "img" is forbidden entirely, not just its `src`: 18 of the 62
+    // appendices reference `jwpub-media://...` illustrations, but
+    // data/nwt_st.sqlite has no media table backing this feature (unlike
+    // .jwpub ingest, which has a real asset pipeline — see
+    // uploadPublicationMedia in lib/jwpub/ingest.ts). An <img> with no `src`
+    // renders a broken-image icon; dropping the tag leaves the figcaption
+    // (kept — it's plain text describing the figure and reads fine alone).
+    FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed", "img"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "src", "srcset", "href", "style"],
   });
 }
 
 /** Reescreve e sanitiza, na ordem que importa. */
-export function prepareStudyHtml(html) {
-  return sanitizeStudyHtml(rewriteBibleStudyLinks(html ?? ""));
+export function prepareStudyHtml(html, appendixMepsIds = new Set()) {
+  return sanitizeStudyHtml(rewriteBibleStudyLinks(html ?? "", appendixMepsIds));
 }
 
 /**
