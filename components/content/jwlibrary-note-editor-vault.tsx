@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { Vault, VaultContent, VaultHeader, VaultTitle, VaultDescription, VaultBody } from "@/components/ui/vault";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -109,8 +110,11 @@ export function JwlibraryNoteEditorVault({
   const [highlightColor, setHighlightColor] = useState<number | null>(null);
 
   const [tags, setTags] = useState<JwlibraryTagView[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
   const [noteTagIds, setNoteTagIds] = useState<string[]>([]);
   const [tagQuery, setTagQuery] = useState("");
+  // Guards the one-time flush (below) of tags picked before a brand-new note existed.
+  const flushedTagsRef = useRef(false);
 
   // Reset every field the moment the Vault (re-)opens for a specific
   // note/target — done during render (React's documented pattern for
@@ -134,21 +138,57 @@ export function JwlibraryNoteEditorVault({
     }
   }
 
+  // Resets the one-time tag-flush guard whenever the vault opens — done in an
+  // effect (not the render-time reset block above) since refs shouldn't be
+  // written during render.
+  useEffect(() => {
+    if (open) flushedTagsRef.current = false;
+  }, [open]);
+
   useEffect(() => {
     if (open && !isEdit && !isPrefilled) {
       void listOwnPublications().then((result) => setPublications(result.publications ?? []));
     }
   }, [open, isEdit, isPrefilled]);
 
-  // Tags only make sense once the note actually exists — true right away
-  // when editing, and true for a brand-new note the moment its first
-  // autosave creates it (see the `createdId` set in the autosave effect
-  // below). Refetches whenever the vault switches to a different note.
+  // The tag *list* doesn't depend on this note existing — fetched as soon as
+  // the vault opens so the row (or its skeleton, while this is in flight)
+  // shows immediately, even before the note has ever been saved.
   useEffect(() => {
-    if (!open || !createdId) return;
-    void listOwnJwlibraryTags().then((result) => setTags(result.tags ?? []));
-    void getJwlibraryNoteTagIds(createdId).then((result) => setNoteTagIds(result.tagIds ?? []));
-  }, [open, createdId]);
+    if (!open) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setTagsLoading(true);
+    });
+    void listOwnJwlibraryTags().then((result) => {
+      if (cancelled) return;
+      setTags(result.tags ?? []);
+      setTagsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // This note's own *assigned* tags only exist server-side once it's been
+  // saved — only relevant when editing a note that already existed. A
+  // brand-new note's selection lives purely in local state (staged) until
+  // its first autosave, then gets flushed to the server just below.
+  useEffect(() => {
+    if (!open || !isEdit || !note) return;
+    void getJwlibraryNoteTagIds(note.id).then((result) => setNoteTagIds(result.tagIds ?? []));
+  }, [open, isEdit, note]);
+
+  // Flushes any tags picked before the note existed, the moment its first
+  // autosave creates it.
+  useEffect(() => {
+    if (!createdId || isEdit || flushedTagsRef.current) return;
+    flushedTagsRef.current = true;
+    for (const tagId of noteTagIds) {
+      void addTagToJwlibraryNote(createdId, tagId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- flush once with whatever was staged at that moment, not on every noteTagIds change
+  }, [createdId, isEdit]);
 
   const filteredTags = useMemo(() => {
     const q = tagQuery.trim().toLowerCase();
@@ -156,20 +196,20 @@ export function JwlibraryNoteEditorVault({
     return tags.filter((t) => (t.name ?? "").toLowerCase().includes(q));
   }, [tags, tagQuery]);
 
-  async function toggleNoteTag(tagId: string) {
+  // A tag can be picked before the note has ever been saved — staged locally
+  // and flushed to the server by the effect above once the first autosave
+  // creates it. Once `createdId` exists, toggles apply immediately as before.
+  function toggleNoteTag(tagId: string) {
+    const wasActive = noteTagIds.includes(tagId);
+    setNoteTagIds((prev) => (wasActive ? prev.filter((t) => t !== tagId) : [...prev, tagId]));
     if (!createdId) return;
-    if (noteTagIds.includes(tagId)) {
-      setNoteTagIds((prev) => prev.filter((t) => t !== tagId));
-      await removeTagFromJwlibraryNote(createdId, tagId);
-    } else {
-      setNoteTagIds((prev) => [...prev, tagId]);
-      await addTagToJwlibraryNote(createdId, tagId);
-    }
+    if (wasActive) void removeTagFromJwlibraryNote(createdId, tagId);
+    else void addTagToJwlibraryNote(createdId, tagId);
   }
 
   async function handleCreateAndAssignTag() {
     const name = tagQuery.trim();
-    if (!name || !createdId) return;
+    if (!name) return;
     const result = await createJwlibraryTag(name);
     if (!result.id) return;
     setTagQuery("");
@@ -177,7 +217,7 @@ export function JwlibraryNoteEditorVault({
     setTags(refreshed.tags ?? []);
     const tagId = result.id;
     setNoteTagIds((prev) => [...prev, tagId]);
-    await addTagToJwlibraryNote(createdId, tagId);
+    if (createdId) void addTagToJwlibraryNote(createdId, tagId);
   }
 
   const locationReady =
@@ -292,36 +332,10 @@ export function JwlibraryNoteEditorVault({
             {isPrefilled && <VaultDescription>{prefilledLocation.label}</VaultDescription>}
           </VaultHeader>
           <VaultBody>
-            {isPrefilled && prefilledLocation.tokenRange && (
-              <div className="flex flex-col gap-1.5">
-                {prefilledLocation.selectedText && (
-                  <blockquote className="line-clamp-3 rounded-xl border-l-2 border-accent/50 bg-secondary/50 px-3 py-2 text-[13px] italic leading-relaxed text-muted-foreground">
-                    “{prefilledLocation.selectedText}”
-                  </blockquote>
-                )}
-                <span className="text-[11.5px] text-muted-foreground">Destacar o trecho selecionado?</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => {
-                    const colorIndex = Number(index);
-                    const active = highlightColor === colorIndex;
-                    return (
-                      <button
-                        key={colorIndex}
-                        type="button"
-                        onClick={() => setHighlightColor(active ? null : colorIndex)}
-                        aria-pressed={active}
-                        aria-label={color.name}
-                        title={color.name}
-                        className={cn(
-                          "flex size-7 items-center justify-center rounded-full border-2 transition-transform",
-                          active ? "scale-110 border-foreground" : "border-transparent"
-                        )}
-                        style={{ backgroundColor: color.hex }}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
+            {isPrefilled && prefilledLocation.tokenRange && prefilledLocation.selectedText && (
+              <blockquote className="line-clamp-3 rounded-xl border-l-2 border-accent/50 bg-secondary/50 px-3 py-2 text-[13px] italic leading-relaxed text-muted-foreground">
+                “{prefilledLocation.selectedText}”
+              </blockquote>
             )}
             {!isEdit && !isPrefilled && (
               <div className="flex flex-col gap-3">
@@ -365,51 +379,86 @@ export function JwlibraryNoteEditorVault({
 
             {locationReady ? (
               <div className={cn("flex flex-col gap-2.5", !isEdit && !isPrefilled && "mt-3")}>
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Título"
-                  aria-label="Título da nota"
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Título"
+                    aria-label="Título da nota"
+                    className="flex-1"
+                  />
+                  {isPrefilled && prefilledLocation.tokenRange && (
+                    <Select
+                      value={highlightColor !== null ? String(highlightColor) : "none"}
+                      onValueChange={(v) => setHighlightColor(v === "none" ? null : Number(v))}
+                    >
+                      <SelectTrigger className="w-36 shrink-0" aria-label="Cor do destaque">
+                        <SelectValue placeholder="Destacar" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sem destaque</SelectItem>
+                        {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
+                          <SelectItem key={index} value={index}>
+                            <span className="flex items-center gap-2">
+                              <span
+                                className="size-3 shrink-0 rounded-full"
+                                style={{ backgroundColor: color.hex }}
+                              />
+                              {color.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
                 <RichTextEditor content={content} onChange={setContent} placeholder="Escreva sua nota…" />
 
-                {createdId && (
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[11.5px] text-muted-foreground">Tags</span>
-                    <div className="flex items-center gap-2">
-                      <div className="relative w-28 shrink-0">
-                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          value={tagQuery}
-                          onChange={(e) => setTagQuery(e.target.value)}
-                          placeholder="Buscar"
-                          className="h-8 pl-8 pr-2 text-[12px]"
-                        />
-                      </div>
-                      <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                        {filteredTags.map((tag) => (
-                          <span key={tag.id} className="shrink-0">
-                            <JwlibraryTagChip
-                              tag={tag}
-                              active={noteTagIds.includes(tag.id)}
-                              onClick={() => void toggleNoteTag(tag.id)}
-                            />
-                          </span>
-                        ))}
-                        {tagQuery.trim() !== "" && filteredTags.length === 0 && (
-                          <button
-                            type="button"
-                            onClick={() => void handleCreateAndAssignTag()}
-                            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-accent/50 px-2.5 text-[12px] text-accent transition-colors hover:bg-accent/10"
-                          >
-                            <Plus className="size-3" />
-                            Criar &quot;{tagQuery.trim()}&quot;
-                          </button>
-                        )}
-                      </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11.5px] text-muted-foreground">Tags</span>
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-28 shrink-0">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={tagQuery}
+                        onChange={(e) => setTagQuery(e.target.value)}
+                        placeholder="Buscar"
+                        className="h-8 pl-8 pr-2 text-[12px]"
+                      />
+                    </div>
+                    <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      {tagsLoading ? (
+                        <>
+                          <Skeleton className="h-8 w-16 shrink-0 rounded-full" />
+                          <Skeleton className="h-8 w-20 shrink-0 rounded-full" />
+                          <Skeleton className="h-8 w-14 shrink-0 rounded-full" />
+                        </>
+                      ) : (
+                        <>
+                          {filteredTags.map((tag) => (
+                            <span key={tag.id} className="shrink-0">
+                              <JwlibraryTagChip
+                                tag={tag}
+                                active={noteTagIds.includes(tag.id)}
+                                onClick={() => toggleNoteTag(tag.id)}
+                              />
+                            </span>
+                          ))}
+                          {tagQuery.trim() !== "" && filteredTags.length === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void handleCreateAndAssignTag()}
+                              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-accent/50 px-2.5 text-[12px] text-accent transition-colors hover:bg-accent/10"
+                            >
+                              <Plus className="size-3" />
+                              Criar &quot;{tagQuery.trim()}&quot;
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
 
                 <div className="flex items-center justify-between pt-1">
                   <SaveIndicator state={saveState} />
