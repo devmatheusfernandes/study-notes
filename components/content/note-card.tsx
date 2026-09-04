@@ -74,6 +74,8 @@ export interface NoteCardProps {
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
   /** Still uploading or (for .jwpub) being ingested — not clickable, shows a "Processando…" badge, and flashes once when it flips back to false. */
   processing?: boolean;
+  /** 0-100 simulated upload progress, only meaningful while the card is an optimistic placeholder (see notes-store's `uploadProgress`). */
+  uploadProgress?: number;
   pinned?: boolean;
   variant?: "grid" | "list";
   /** Whether `onDelete` removes the item for good (trash screen) vs. moves it to the trash. */
@@ -98,13 +100,40 @@ export interface NoteCardProps {
   onDragStart?: (event: React.DragEvent) => void;
 }
 
-/** Sheen sweeping across a card while it's still uploading/ingesting — the parent must be `relative overflow-hidden` for this to clip to its rounded corners. */
+/** Sheen sweeping across a card while a .jwpub/.jwlibrary is being parsed after upload — the parent must be `relative overflow-hidden` for this to clip to its rounded corners. */
 function ProcessingShimmer() {
   return (
     <span
       aria-hidden
       className="animate-shimmer pointer-events-none absolute inset-0 bg-[length:200%_100%] bg-gradient-to-r from-transparent via-foreground/12 to-transparent"
     />
+  );
+}
+
+/**
+ * A wave that rises to fill the card as its upload progresses (0-100,
+ * simulated — see hooks/use-file-upload.ts, Server Actions don't expose real
+ * byte progress) — monotonic, never dips back down. The horizontal ripple
+ * keeps drifting continuously just for texture; only its height reflects
+ * actual progress. The parent must be `relative overflow-hidden`.
+ */
+function UploadWaveProgress({ progress }: { progress: number }) {
+  return (
+    <span aria-hidden className="pointer-events-none absolute inset-0">
+      <span
+        className="absolute inset-x-0 bottom-0 transition-[top] duration-300 ease-out"
+        style={{ top: `${100 - Math.max(0, Math.min(100, progress))}%` }}
+      >
+        <span className="absolute inset-x-0 bottom-0 top-2 bg-accent/15" />
+        <svg
+          className="animate-wave-scroll absolute inset-x-0 top-0 h-3 w-[200%] text-accent/30"
+          viewBox="0 0 200 20"
+          preserveAspectRatio="none"
+        >
+          <path d="M0 10 C 25 20, 75 0, 100 10 S 175 20, 200 10 L200 20 L0 20 Z" fill="currentColor" />
+        </svg>
+      </span>
+    </span>
   );
 }
 
@@ -118,6 +147,7 @@ export function NoteCard({
   syncStatus,
   vectorStatus = "none",
   processing = false,
+  uploadProgress,
   pinned = false,
   variant = "grid",
   permanentDelete = false,
@@ -139,6 +169,15 @@ export function NoteCard({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const config = TYPE_CONFIG[type];
   const isList = variant === "list";
+
+  // `processing` covers two different phases that deserve different
+  // animations: an optimistic placeholder (id not resolved by the server
+  // yet) is still uploading, while a real row with `processing` still true
+  // is a .jwpub/.jwlibrary being parsed after the upload already landed.
+  const isOptimistic = id.startsWith("optimistic:");
+  const isUploading = processing && isOptimistic;
+  const isIngesting = processing && !isOptimistic;
+  const processingLabel = isUploading ? "Enviando…" : "Processando…";
 
   // Text notes carry rich HTML (formatting preserved in the excerpt); files
   // just carry a plain one-line description (e.g. "2.3 MB") — only the
@@ -343,7 +382,8 @@ export function NoteCard({
           justReady && "ring-2 ring-accent shadow-[0_0_20px_-4px_var(--accent)]"
         )}
       >
-        {processing && <ProcessingShimmer />}
+        {isUploading && <UploadWaveProgress progress={uploadProgress ?? 0} />}
+        {isIngesting && <ProcessingShimmer />}
         {checkbox}
         <span
           className={cn(
@@ -394,11 +434,11 @@ export function NoteCard({
         <span className="hidden shrink-0 text-[11.5px] text-muted-foreground sm:block">{meta}</span>
         {processing && (
           <span
-            title="Processando…"
+            title={processingLabel}
             className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25 sm:inline-flex"
           >
             <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
-            Processando…
+            {processingLabel}
           </span>
         )}
         {!processing && vectorStatus === "completed" && (
@@ -434,7 +474,8 @@ export function NoteCard({
         justReady && "ring-2 ring-accent shadow-[0_0_24px_-4px_var(--accent)]"
       )}
     >
-      {processing && <ProcessingShimmer />}
+      {isUploading && <UploadWaveProgress progress={uploadProgress ?? 0} />}
+      {isIngesting && <ProcessingShimmer />}
       <div className="flex items-center gap-1.5 flex-wrap">
         {checkbox}
         <span
@@ -448,11 +489,11 @@ export function NoteCard({
         </span>
         {processing && (
           <span
-            title="Processando…"
+            title={processingLabel}
             className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25"
           >
             <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
-            Processando…
+            {processingLabel}
           </span>
         )}
         {!processing && vectorStatus === "completed" && (

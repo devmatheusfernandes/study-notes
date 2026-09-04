@@ -72,10 +72,11 @@
   --font-mono: var(--font-jetbrains-mono);
 
   --animate-shimmer: shimmer-sweep 1.8s linear infinite;
+  --animate-wave-scroll: wave-scroll 1.4s linear infinite;
 }
 
-/* A sheen sweeping left-to-right — shown over a card while a file upload or
-   .jwpub ingest is still processing, so "still working" reads as active
+/* A sheen sweeping left-to-right — shown over a card while a .jwpub/.jwlibrary
+   is still being parsed after upload, so "still working" reads as active
    progress instead of just a dimmed, inert card. */
 @keyframes shimmer-sweep {
   0% {
@@ -83,6 +84,18 @@
   }
   100% {
     background-position: 150% 0;
+  }
+}
+
+/* Horizontal drift for the wave-line texture riding on top of the upload
+   progress fill (see UploadWaveProgress in note-card.tsx, whose actual
+   height is driven inline by the simulated progress value, not by this). */
+@keyframes wave-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
   }
 }
 

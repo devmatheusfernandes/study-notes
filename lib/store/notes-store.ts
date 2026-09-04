@@ -57,6 +57,8 @@ export interface Note {
   tagIds: string[];
   /** True while a just-picked/dropped file is uploading or (for .jwpub) still being ingested — not clickable to open yet, see hooks/use-file-upload.ts. */
   processing?: boolean;
+  /** 0-100, only meaningful on an optimistic (not-yet-uploaded) file card — a simulated estimate (Server Actions don't expose real byte progress), driven by hooks/use-file-upload.ts. Absent once the card resolves to a real row. */
+  uploadProgress?: number;
   /** Stable React key across the optimistic→real id swap in resolveOptimisticFile — falls back to `id` when absent. */
   clientKey?: string;
 }
@@ -150,6 +152,8 @@ interface NotesStore {
   failOptimisticFile: (tempId: string) => void;
   /** Flips a note's processing flag once its post-upload work (e.g. jwpub ingest) finishes. */
   setNoteProcessing: (id: string, processing: boolean) => void;
+  /** Updates the simulated upload-progress fill (0-100) on an optimistic file card. */
+  setUploadProgress: (id: string, progress: number) => void;
   /** Local-only title swap (no server round trip — the caller already wrote it server-side, e.g. jwpub ingest resolving the publication's real title). */
   setNoteTitle: (id: string, title: string) => void;
 
@@ -586,6 +590,9 @@ export const useNotesStore = create<NotesStore>()(
 
       setNoteProcessing: (id, processing) =>
         set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, processing } : n)) })),
+
+      setUploadProgress: (id, progress) =>
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, uploadProgress: progress } : n)) })),
 
       setNoteTitle: (id, title) =>
         set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, title } : n)) })),

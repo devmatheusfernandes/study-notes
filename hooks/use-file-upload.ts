@@ -71,6 +71,35 @@ async function ingestUploadedJwlibraryBackups(
   }
 }
 
+/**
+ * Server Actions don't expose real byte-level upload progress (no XHR
+ * `upload.onprogress` equivalent), so the card's rising wave is a simulated
+ * estimate instead: it eases up to 90% over a duration guessed from the
+ * file's size, then holds there — never claiming "done" — until the actual
+ * `uploadFiles` response lands and the caller jumps it to 100%. Monotonic by
+ * construction (each tick is >= the last), so the wave only ever rises.
+ */
+function simulateUploadProgress(
+  tempId: string,
+  fileSize: number,
+  setUploadProgress: (id: string, progress: number) => void
+) {
+  const start = Date.now();
+  // ~50 KB/s assumed floor purely for pacing the animation, clamped to a
+  // sane range so a tiny file doesn't blip past and a huge one doesn't crawl forever.
+  const estimatedMs = Math.min(12_000, Math.max(700, fileSize / 50_000));
+  const interval = setInterval(() => {
+    const linear = Math.min(1, (Date.now() - start) / estimatedMs);
+    setUploadProgress(tempId, Math.round(linear * 90));
+    if (linear >= 1) clearInterval(interval);
+  }, 120);
+  return () => clearInterval(interval);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Shared upload & note import flow for header button, drop zone, and folder cards. */
 export function useFileUpload() {
   const [isUploading, setIsUploading] = useState(false);
@@ -79,6 +108,7 @@ export function useFileUpload() {
   const failOptimisticFile = useNotesStore((s) => s.failOptimisticFile);
   const setNoteProcessing = useNotesStore((s) => s.setNoteProcessing);
   const setNoteTitle = useNotesStore((s) => s.setNoteTitle);
+  const setUploadProgress = useNotesStore((s) => s.setUploadProgress);
   const addNote = useNotesStore((s) => s.addNote);
   const createFolder = useNotesStore((s) => s.createFolder);
 
@@ -174,12 +204,17 @@ export function useFileUpload() {
         // not clickable yet (see NoteCard's `processing` prop) — so the user
         // sees the file land immediately instead of waiting on the round trip.
         const tempIdByFile = new Map(files.map((file) => [file, addOptimisticFile(file, folderId)]));
+        const stopProgress = files.map((file) =>
+          simulateUploadProgress(tempIdByFile.get(file)!, file.size, setUploadProgress)
+        );
 
         const formData = new FormData();
         files.forEach((file) => formData.append("files", file));
 
         const result = await uploadFiles(formData, folderId);
+        stopProgress.forEach((stop) => stop());
 
+        const resolved: { tempId: string; uploaded: UploadedFile; stillProcessing: boolean }[] = [];
         for (const file of files) {
           const tempId = tempIdByFile.get(file)!;
           const uploaded = result.files.find((u) => u.title === file.name);
@@ -191,6 +226,15 @@ export function useFileUpload() {
           // they're readable; everything else is ready as soon as the upload lands.
           const lowerName = file.name.toLowerCase();
           const stillProcessing = lowerName.endsWith(".jwpub") || lowerName.endsWith(".jwlibrary");
+          setUploadProgress(tempId, 100);
+          resolved.push({ tempId, uploaded, stillProcessing });
+        }
+
+        // Briefly hold the fully-risen wave on screen before swapping the
+        // card to its real row — otherwise the 100% frame never gets a
+        // chance to paint, since both state updates would land in the same batch.
+        if (resolved.length > 0) await sleep(220);
+        for (const { tempId, uploaded, stillProcessing } of resolved) {
           resolveOptimisticFile(tempId, uploaded, stillProcessing);
         }
 

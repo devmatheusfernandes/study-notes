@@ -219,6 +219,7 @@ export function NotesCollection({
         syncStatus={note.syncStatus}
         vectorStatus={note.vectorStatus}
         processing={note.processing}
+        uploadProgress={note.uploadProgress}
         pinned={note.pinned}
         variant={viewMode}
         permanentDelete={isTrashed}
