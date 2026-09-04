@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { extractContentForNote } from "./extractor";
+import { extractContentForNote, extractContentForJwlibraryNote } from "./extractor";
 import { generateEmbeddings } from "./openai";
 
 /** Chunks per single OpenAI `embeddings.create` call — keeps every request a safe, bounded size regardless of how big the source publication is. */
@@ -15,7 +15,9 @@ const DEFAULT_CLAIM_BATCH_SIZE = 5;
 interface ClaimedQueueRow {
   id: string;
   user_id: string;
-  note_id: string;
+  /** Exactly one of `note_id`/`jwlibrary_note_id` is set — enforced by a DB check constraint (see 0019_jwlibrary_and_bible_vectorization.sql). */
+  note_id: string | null;
+  jwlibrary_note_id: string | null;
   attempts: number;
   processed_chunks: number;
   total_chunks: number | null;
@@ -55,15 +57,33 @@ export async function runVectorizationBatch(
   for (const item of items) {
     if (Date.now() > tickDeadline) break; // leaves remaining claimed items at 'processing' for this run or the next tick's stale-recovery
 
+    const isJwlibrary = item.jwlibrary_note_id !== null;
+    const contentTable = isJwlibrary ? "jwlibrary_notes" : "notes";
+    const contentId = (isJwlibrary ? item.jwlibrary_note_id : item.note_id)!;
+    // Which single column identifies this item's rows in note_embeddings —
+    // deliberately NOT `.match({ note_id: item.note_id, jwlibrary_note_id: item.jwlibrary_note_id })`:
+    // supabase-js's `.match()` sends a null value as `eq.null`, which never
+    // matches a genuinely NULL column (needs `.is()` instead), so a filter on
+    // the OTHER (always-null) owner column would silently zero out every
+    // delete below. Filtering on just the one non-null owner column sidesteps
+    // that entirely — it alone already uniquely identifies the row set.
+    const ownerColumn = isJwlibrary ? "jwlibrary_note_id" : "note_id";
+    // Still needed in full for the insert below, where both columns must be
+    // written (one real id, one explicit null) to satisfy the DB's
+    // exactly-one-owner check constraint.
+    const embeddingOwnerColumns = { note_id: item.note_id, jwlibrary_note_id: item.jwlibrary_note_id };
+
     try {
-      const { data: noteCheck } = await supabase.from("notes").select("id").eq("id", item.note_id).single();
-      if (!noteCheck) {
+      const { data: contentCheck } = await supabase.from(contentTable).select("id").eq("id", contentId).single();
+      if (!contentCheck) {
         await supabase.from("vectorization_queue").delete().eq("id", item.id);
-        await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
+        await supabase.from("note_embeddings").delete().eq(ownerColumn, contentId);
         continue;
       }
 
-      const extracted = await extractContentForNote(item.note_id, supabase);
+      const extracted = isJwlibrary
+        ? await extractContentForJwlibraryNote(contentId, supabase)
+        : await extractContentForNote(contentId, supabase);
 
       if (!extracted || extracted.chunks.length === 0) {
         await supabase
@@ -84,7 +104,7 @@ export async function runVectorizationBatch(
       // any prior embeddings correspond to old content/offsets and must go.
       // A resume (processed_chunks > 0) must NOT wipe them — they're already-paid-for progress.
       if (item.processed_chunks === 0) {
-        await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
+        await supabase.from("note_embeddings").delete().eq(ownerColumn, contentId);
       }
 
       let processedSoFar = item.processed_chunks;
@@ -101,7 +121,7 @@ export async function runVectorizationBatch(
 
         const vectorRows = slice.map((chunk, i) => ({
           user_id: item.user_id,
-          note_id: item.note_id,
+          ...embeddingOwnerColumns,
           jwpub_chapter_id: chunk.jwpubChapterId ?? null,
           chunk_index: chunk.chunkIndex,
           content: chunk.content,

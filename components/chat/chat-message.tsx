@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FileText, NotebookPen, Sparkles, Video } from "lucide-react";
+import { BookMarked, FileText, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatSource } from "@/lib/store/chat-store";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
@@ -41,6 +41,21 @@ function sourceHref(source: ChatSource): string {
     return "https://www.jw.org";
   }
 
+  if (source.type === "biblia") {
+    const params = new URLSearchParams();
+    if (source.bookOrder !== undefined) params.set("book", String(source.bookOrder));
+    if (source.chapter !== undefined) params.set("chapter", String(source.chapter));
+    if (source.firstVerse !== undefined) params.set("verse", String(source.firstVerse));
+    const qs = params.toString();
+    return qs ? `/bible?${qs}` : "/bible";
+  }
+
+  if (source.type === "estudo_pessoal") {
+    // No dedicated single-note reader exists for Estudo Pessoal notes — the
+    // manager list is the closest thing to "open this".
+    return "/jwlibrary";
+  }
+
   if (!source.noteId) return "/notes";
 
   const params = new URLSearchParams();
@@ -69,6 +84,8 @@ function sourceHref(source: ChatSource): string {
 function sourceIcon(type: string) {
   if (type === "jwpub") return FileText;
   if (type === "pdf") return FileText;
+  if (type === "estudo_pessoal") return BookMarked;
+  if (type === "biblia") return Scroll;
   return NotebookPen;
 }
 

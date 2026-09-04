@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { updateNoteRow } from "@/app/(app)/notes-actions";
 import { encryptText, decryptText } from "@/lib/encryption";
 import { buildPublicationIndex } from "@/lib/jwlibrary/resolve";
+import { enqueueJwlibraryNoteForVectorization } from "@/lib/vector/queue-actions";
 import type { ParsedJwlibrary, JwlibraryLocation } from "@/lib/jwlibrary/types";
 
 async function requireUser() {
@@ -547,6 +548,7 @@ export async function createJwlibraryNote(
     .single();
 
   if (error || !data) return { error: "Não foi possível criar a nota." };
+  void enqueueJwlibraryNoteForVectorization(data.id);
   return { id: data.id };
 }
 
@@ -562,7 +564,9 @@ export async function updateJwlibraryNote(
   if (patch.content !== undefined) update.content = encryptText(patch.content);
 
   const { error } = await supabase.from("jwlibrary_notes").update(update).eq("id", id);
-  return error ? { error: "Não foi possível salvar a nota." } : {};
+  if (error) return { error: "Não foi possível salvar a nota." };
+  void enqueueJwlibraryNoteForVectorization(id);
+  return {};
 }
 
 export async function deleteJwlibraryNote(id: string): Promise<{ error?: string }> {

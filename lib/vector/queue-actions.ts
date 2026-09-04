@@ -51,6 +51,43 @@ export async function enqueueNoteForVectorization(noteId: string): Promise<{ err
   return {};
 }
 
+/**
+ * Same as `enqueueNoteForVectorization`, for an Estudo Pessoal (jwlibrary)
+ * note instead — a separate table from `notes`, so it goes in the
+ * `jwlibrary_note_id` column instead of `note_id` (see
+ * 0019_jwlibrary_and_bible_vectorization.sql).
+ */
+export async function enqueueJwlibraryNoteForVectorization(jwlibraryNoteId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("vectorization_queue").upsert(
+    {
+      user_id: user.id,
+      jwlibrary_note_id: jwlibraryNoteId,
+      note_id: null,
+      status: "pending",
+      attempts: 0,
+      error: null,
+      total_chunks: null,
+      processed_chunks: 0,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "jwlibrary_note_id" }
+  );
+
+  if (error) {
+    console.error("Erro ao enfileirar nota de estudo pessoal para vetorização:", error);
+    return { error: "Não foi possível enfileirar a nota." };
+  }
+
+  return {};
+}
+
 export interface VectorQueueItemDetails {
   id: string;
   noteId: string;

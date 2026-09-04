@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowUp,
+  BookMarked,
   BookOpen,
   FileText,
   FolderPlus,
   NotebookPen,
+  Scroll,
   Sparkles,
   Upload,
   Video,
@@ -33,6 +35,8 @@ const SOURCE_FILTERS = [
   { id: "pdf", label: "PDFs", icon: FileText },
   { id: "jwpub", label: "JWPUB", icon: BookOpen },
   { id: "video", label: "Vídeos", icon: Video },
+  { id: "estudo_pessoal", label: "Estudo Pessoal", icon: BookMarked },
+  { id: "biblia", label: "Bíblia", icon: Scroll },
 ] as const;;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -179,7 +183,7 @@ export function SmartComposer(props: SmartComposerProps) {
     let next: string[];
     if (selectedFilters.includes(id)) {
       next = selectedFilters.filter((item) => item !== id);
-      if (next.length === 0) next = ["nota", "pdf", "jwpub", "video"];
+      if (next.length === 0) next = SOURCE_FILTERS.map((f) => f.id);
     } else {
       next = [...selectedFilters, id];
     }

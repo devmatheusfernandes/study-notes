@@ -5,6 +5,8 @@ import { notify } from "@/components/ui/toaster";
 export interface ChatSource {
   noteId?: string;
   videoId?: string;
+  /** Set for `estudo_pessoal` sources — jwlibrary_notes has no `notes` row/id to reuse `noteId` for. */
+  jwlibraryNoteId?: string;
   type: string;
   title: string;
   chapterTitle?: string;
@@ -14,6 +16,10 @@ export interface ChatSource {
   coverImage?: string;
   durationFormatted?: string;
   subtitlesUrl?: string;
+  /** Set for `biblia` sources — book/chapter/verse to link straight into /bible. */
+  bookOrder?: number;
+  chapter?: number;
+  firstVerse?: number;
 }
 
 export interface ChatMessage {

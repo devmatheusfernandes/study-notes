@@ -93,7 +93,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
   );
 
   const sendMessage = useCallback(
-    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video"]) => {
+    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"]) => {
       // 1. Optimistic user message
       addUserMsg(content);
 
@@ -123,7 +123,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
     const sourcesParam = searchParams.get("sources");
     const allowedSourceTypes = sourcesParam
       ? sourcesParam.split(",")
-      : ["nota", "pdf", "jwpub", "video"];
+      : ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"];
 
     // Clean URL without triggering page reload
     window.history.replaceState(null, "", window.location.pathname);

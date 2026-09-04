@@ -20,7 +20,7 @@ export const usePreferencesStore = create<PreferencesStore>()(
     (set) => ({
       viewMode: "grid",
       jwlibraryViewMode: "list",
-      selectedSourceFilters: ["nota", "pdf", "jwpub", "video"],
+      selectedSourceFilters: ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"],
 
       setViewMode: (viewMode) => {
         set({ viewMode });

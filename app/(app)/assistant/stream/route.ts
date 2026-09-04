@@ -77,7 +77,7 @@ async function rerankMatches(
   const { targetYear, targetNum, wantsLatest } = parseQueryConstraints(query);
   if (targetYear === null && targetNum === null && !wantsLatest) return matches;
 
-  const reranked: MatchResult[] = [];
+  let reranked: MatchResult[] = [];
 
   for (const m of matches) {
     const metaStr = typeof m.metadata === "string" ? m.metadata : JSON.stringify(m.metadata ?? {});
@@ -145,9 +145,9 @@ async function rerankMatches(
   }
 
   if (wantsLatest) {
-    const videoIds = [
-      ...new Set(reranked.filter((m) => m.source_type === "video" && m.video_id).map((m) => m.video_id!)),
-    ];
+    const videoMatches = reranked.filter((m) => m.source_type === "video" && m.video_id);
+    const videoIds = [...new Set(videoMatches.map((m) => m.video_id!))];
+
     if (videoIds.length > 0) {
       const { data: videoDates } = await supabase
         .from("global_videos")
@@ -157,25 +157,43 @@ async function rerankMatches(
         (videoDates ?? []).map((v) => [v.id, v.first_published ? new Date(v.first_published).getTime() : 0])
       );
 
-      let newestIndex = -1;
+      let newest: MatchResult | null = null;
       let newestTime = -1;
-      reranked.forEach((m, i) => {
-        if (m.source_type !== "video" || !m.video_id) return;
-        const t = publishedAt.get(m.video_id) ?? 0;
+      for (const m of videoMatches) {
+        const t = publishedAt.get(m.video_id!) ?? 0;
         if (t > newestTime) {
           newestTime = t;
-          newestIndex = i;
+          newest = m;
         }
-      });
+      }
 
-      // Boost just the most recent candidate among the topically-relevant
-      // videos semantic search already found -- enough to outrank same-topic
-      // but older videos, without discarding them as secondary context.
-      if (newestIndex !== -1) {
-        reranked[newestIndex] = {
-          ...reranked[newestIndex],
-          similarity: reranked[newestIndex].similarity + 1.0,
-        };
+      // A transcript never states its own air date, so boosting the newest
+      // video's *rank* alone isn't enough -- the model has no way to tell
+      // which of several same-topic transcripts is actually the latest one.
+      // Two things fix that: (1) drop every other same-topic video entirely
+      // instead of just out-ranking it -- dozens of full transcripts in
+      // context is both expensive and exactly what made the model reply "I
+      // don't see which is the latest" instead of just answering; (2) stamp
+      // the survivor's real publish date directly into its content, the one
+      // piece of information nothing else in the pipeline carries forward.
+      if (newest) {
+        const dateLabel =
+          newestTime > 0
+            ? new Date(newestTime).toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })
+            : null;
+        reranked = reranked
+          .filter((m) => m === newest || m.source_type !== "video" || !videoIds.includes(m.video_id!))
+          .map((m) =>
+            m === newest
+              ? {
+                  ...m,
+                  similarity: m.similarity + 1.0,
+                  content: dateLabel
+                    ? `[Este é o vídeo mais recente sobre o tema pedido, publicado em ${dateLabel}]\n\n${m.content}`
+                    : m.content,
+                }
+              : m
+          );
       }
     }
   }
@@ -199,11 +217,13 @@ function formatAllowedSourcesLabel(allowedSourceTypes: string[]): string {
     pdf: "seus PDFs/arquivos",
     jwpub: "suas publicações JWPUB",
     video: "seus vídeos JW",
+    estudo_pessoal: "seu estudo pessoal",
+    biblia: "a Bíblia",
   };
 
   const labels = allowedSourceTypes.map((t) => typeMap[t] || t);
-  if (labels.length === 0 || labels.length === 4) {
-    return "suas notas, publicações e vídeos";
+  if (labels.length === 0 || labels.length === 6) {
+    return "suas notas, publicações, vídeos, estudo pessoal e a Bíblia";
   }
   if (labels.length === 1) {
     return labels[0];
@@ -274,7 +294,11 @@ async function fetchExactMetadataMatches(
       videoQuery = videoQuery.ilike("title", `%${targetYear}%`);
     }
 
-    const { data: vids } = await videoQuery.limit(30);
+    // Without this, `.limit(30)` takes whatever arbitrary 30 rows Postgres
+    // happens to return first — a category can have hundreds of videos, so
+    // an unordered slice risks missing the actual most recent one entirely,
+    // which the "wantsLatest" rerank step below depends on being present.
+    const { data: vids } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
 
     if (vids && vids.length > 0) {
       for (const v of vids) {
@@ -346,7 +370,7 @@ export async function POST(request: Request) {
   }
   const allowedSourceTypes = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
     ? body.allowedSourceTypes
-    : ["nota", "pdf", "jwpub", "video"];
+    : ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"];
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -399,6 +423,7 @@ export async function POST(request: Request) {
         interface SourceItem {
           noteId?: string;
           videoId?: string;
+          jwlibraryNoteId?: string;
           type: string;
           title: string;
           chapterTitle?: string;
@@ -408,6 +433,9 @@ export async function POST(request: Request) {
           durationFormatted?: string;
           subtitlesUrl?: string;
           snippet?: string;
+          bookOrder?: number;
+          chapter?: number;
+          firstVerse?: number;
         }
 
         const sourcesMap = new Map<string, SourceItem>();
@@ -426,9 +454,13 @@ export async function POST(request: Request) {
 
             const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
             const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
+            const jwlibraryNoteId = meta.jwlibraryNoteId as string | undefined;
 
             const chapterTitle = meta.chapterTitle as string | undefined;
             const documentId = meta.documentId as number | undefined;
+            const bookOrder = meta.bookOrder as number | undefined;
+            const chapter = meta.chapter as number | undefined;
+            const firstVerse = (meta.firstVerse as number | null | undefined) ?? undefined;
 
             let type = (meta.type as string | undefined) || match.source_type || "nota";
             if (chapterTitle || documentId || type === "jwpub") {
@@ -443,11 +475,18 @@ export async function POST(request: Request) {
             const subtitlesUrl = meta.subtitlesUrl as string | undefined;
             const snippet = match.content ? match.content.trim() : undefined;
 
-            const key = videoId ? `video:${videoId}` : `${noteId}:${chapterTitle ?? ""}`;
+            const key = videoId
+              ? `video:${videoId}`
+              : jwlibraryNoteId
+                ? `jwlibrary:${jwlibraryNoteId}`
+                : bookOrder !== undefined && chapter !== undefined
+                  ? `biblia:${bookOrder}:${chapter}`
+                  : `${noteId}:${chapterTitle ?? ""}`;
             if (!sourcesMap.has(key)) {
               sourcesMap.set(key, {
                 ...(noteId ? { noteId } : {}),
                 ...(videoId ? { videoId } : {}),
+                ...(jwlibraryNoteId ? { jwlibraryNoteId } : {}),
                 type,
                 title,
                 ...(chapterTitle ? { chapterTitle } : {}),
@@ -457,6 +496,9 @@ export async function POST(request: Request) {
                 ...(coverImage ? { coverImage } : {}),
                 ...(durationFormatted ? { durationFormatted } : {}),
                 ...(subtitlesUrl ? { subtitlesUrl } : {}),
+                ...(bookOrder !== undefined ? { bookOrder } : {}),
+                ...(chapter !== undefined ? { chapter } : {}),
+                ...(firstVerse !== undefined ? { firstVerse } : {}),
               });
             }
           }
@@ -478,11 +520,30 @@ export async function POST(request: Request) {
 
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
 
+        // A similarity this high only happens for a forced exact match
+        // (fetchExactMetadataMatches' year/número/category hits start at
+        // 0.99, and the wantsLatest boost pushes the winner past that) — the
+        // retrieval layer has already confirmed relevance, not just guessed
+        // semantically. Tested empirically against a real "resuma a última
+        // adoração matinal" query: a plainer "use os trechos abaixo" wording
+        // still let gpt-4o-mini decline in some repeated identical calls at
+        // this app's own temperature (0.3) even with the right, clearly
+        // labeled content sitting in context; being explicit that a
+        // bracketed annotation is an already-verified fact (not the model's
+        // own guess) and telling it not to hedge fixed that in every trial.
+        const hasHighConfidenceMatch = matchRows.some((m) => m.similarity >= 0.95);
+
         const systemPrompt =
-          "Você é o assistente inteligente do Study Notes. Responda à pergunta do usuário de forma clara, prestativa e concisa em português. " +
-          (contextText
-            ? `Use exclusivamente os trechos de contexto fornecidos abaixo, extraídos de ${sourcesLabel}, para responder com precisão:\n\n${contextText}`
-            : `Você pesquisou especificamente em ${sourcesLabel}, mas nenhum trecho relevante foi encontrado para a pergunta dele. Responda educadamente informando especificamente que não encontrou informações em ${sourcesLabel}.`);
+          contextText && hasHighConfidenceMatch
+            ? `Você é o assistente inteligente do Study Notes. Você recebeu abaixo o trecho de contexto exato que responde à pergunta do usuário — ` +
+              `o sistema de busca já confirmou que esse é o conteúdo certo, incluindo quando um trecho começa com uma anotação entre colchetes ` +
+              `(como "[Este é o vídeo mais recente sobre o tema pedido, publicado em ...]"): isso é um FATO já verificado, não uma suposição sua. ` +
+              `Responda diretamente a pergunta do usuário usando esse conteúdo, em português, de forma clara e concisa, usando Markdown quando apropriado. ` +
+              `Não invente detalhes que não estejam no trecho, mas TAMBÉM não diga que a informação não foi encontrada — ela foi.\n\n${contextText}`
+            : "Você é o assistente inteligente do Study Notes. Responda à pergunta do usuário de forma clara, prestativa e concisa em português. " +
+              (contextText
+                ? `Use exclusivamente os trechos de contexto fornecidos abaixo, extraídos de ${sourcesLabel}, para responder com precisão:\n\n${contextText}`
+                : `Você pesquisou especificamente em ${sourcesLabel}, mas nenhum trecho relevante foi encontrado para a pergunta dele. Responda educadamente informando especificamente que não encontrou informações em ${sourcesLabel}.`);
 
         // 4. Stream from OpenAI
         const openai = new OpenAI({ apiKey });

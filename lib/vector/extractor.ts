@@ -165,6 +165,40 @@ export async function extractContentForNote(
   };
 }
 
+/**
+ * Mirrors extractContentForNote's plain-text branch, but reads
+ * `jwlibrary_notes` — a separate table from `notes` (own encryption, no
+ * `notes.id` to share), so it can't just call that function with a
+ * different id.
+ */
+export async function extractContentForJwlibraryNote(
+  jwlibraryNoteId: string,
+  supabase: SupabaseClient
+): Promise<ExtractedContent | null> {
+  const { data: note, error } = await supabase
+    .from("jwlibrary_notes")
+    .select("id, title, content")
+    .eq("id", jwlibraryNoteId)
+    .single();
+
+  if (error || !note) return null;
+
+  const decryptedTitle = decryptText(note.title) || "Sem título";
+  const plainBody = stripHtmlTags(decryptText(note.content) || "");
+  const fullText = `${decryptedTitle}\n\n${plainBody}`.trim();
+  const chunks = splitTextIntoChunks(fullText);
+
+  return {
+    title: decryptedTitle,
+    type: "estudo_pessoal",
+    chunks: chunks.map((c) => ({
+      chunkIndex: c.index,
+      content: c.content,
+      metadata: { title: decryptedTitle, type: "estudo_pessoal", jwlibraryNoteId: note.id },
+    })),
+  };
+}
+
 export async function extractContentForGlobalVideo(videoId: string): Promise<ExtractedContent | null> {
   const admin = createAdminClient();
   const { data: video, error } = await admin
