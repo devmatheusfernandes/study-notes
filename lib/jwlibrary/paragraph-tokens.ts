@@ -47,13 +47,28 @@ interface Tokenization {
   charLocations: CharLocation[];
 }
 
+/**
+ * Text inside these never counts as a token.
+ *
+ * `parNum` is the paragraph/verse number. `verse-affordance` is the footnote
+ * and study-note marker the Bible reader appends after a verse
+ * (components/content/bible-chapter-view.tsx) — it's chrome, not scripture,
+ * and JW Library never counted it either. It sits at the *end* of the verse,
+ * so it couldn't shift an existing index anyway; excluding it keeps a drag
+ * selection that happens to reach it from producing a token range one past
+ * the real text.
+ */
+const NON_TOKEN_CLASSES = ["parNum", "verse-affordance"];
+
 function collectTextNodes(root: HTMLElement): Text[] {
   const nodes: Text[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       let ancestor: HTMLElement | null = node.parentElement;
       while (ancestor && ancestor !== root) {
-        if (ancestor.classList.contains("parNum")) return NodeFilter.FILTER_REJECT;
+        if (NON_TOKEN_CLASSES.some((name) => ancestor!.classList.contains(name))) {
+          return NodeFilter.FILTER_REJECT;
+        }
         ancestor = ancestor.parentElement;
       }
       return NodeFilter.FILTER_ACCEPT;

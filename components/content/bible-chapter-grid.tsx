@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BIBLE_DIVISION_BG, divisionForBook } from "@/lib/bible/book-divisions";
+import { BibleBookOutline } from "./bible-book-outline";
 
 interface BibleChapterGridProps {
   bookName: string;
@@ -12,6 +13,8 @@ interface BibleChapterGridProps {
   /** Fetched by bible-reader.tsx (shared with its own prev/next bounds logic) — null while loading. */
   chapterCount: number | null;
   onSelectChapter: (chapter: number) => void;
+  /** Jumping in from the book outline lands on a specific verse, not just the chapter. */
+  onSelectSection: (chapter: number, verse: number | null) => void;
   onBack: () => void;
 }
 
@@ -21,6 +24,7 @@ export function BibleChapterGrid({
   bookOrder,
   chapterCount,
   onSelectChapter,
+  onSelectSection,
   onBack,
 }: BibleChapterGridProps) {
   // Every chapter of a book belongs to that book's section, so the whole grid
@@ -41,6 +45,8 @@ export function BibleChapterGrid({
       </button>
 
       <h1 className="font-heading text-2xl uppercase">{bookName}</h1>
+
+      <BibleBookOutline key={bookOrder} bookOrder={bookOrder} onSelectSection={onSelectSection} />
 
       {chapterCount === null ? (
         <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-[repeat(20,minmax(0,1fr))]">

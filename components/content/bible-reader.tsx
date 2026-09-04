@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,15 +13,19 @@ import {
   getBibleChapterCount,
   getBibleChapterVerses,
   getVerseCrossReferences,
+  getChapterStudyContent,
   type BibleBook,
   type BibleVerseRow,
   type CrossReference,
+  type CrossReferenceSource,
+  type BibleFootnote,
+  type BibleStudyNote,
 } from "@/app/(app)/bible-actions";
 import { getBibleChapterHighlights, type BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
-import { BibleReferencesPanel } from "./bible-references-panel";
+import { BibleStudyPanel, type BibleStudyTab } from "./bible-study-panel";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import {
   JwlibraryNoteEditorVault,
@@ -43,8 +47,8 @@ type BibleScreen = "books" | "chapters" | "reading";
 interface BibleTopHeaderProps {
   title: string;
   onBack?: () => void;
-  referencesOpen?: boolean;
-  onToggleReferences?: () => void;
+  studyOpen?: boolean;
+  onToggleStudy?: () => void;
   userEmail?: string;
 }
 
@@ -59,7 +63,7 @@ interface BibleTopHeaderProps {
  * Previously this was a second bar stacked below the shared Header's own
  * "Bíblia" title, which is the redundant double-header this replaces.
  */
-function BibleTopHeader({ title, onBack, referencesOpen, onToggleReferences, userEmail }: BibleTopHeaderProps) {
+function BibleTopHeader({ title, onBack, studyOpen, onToggleStudy, userEmail }: BibleTopHeaderProps) {
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:gap-3 sm:px-6">
       <SidebarToggleButton />
@@ -75,15 +79,15 @@ function BibleTopHeader({ title, onBack, referencesOpen, onToggleReferences, use
       )}
       <h1 className="min-w-0 flex-1 truncate font-heading text-lg tracking-tight">{title}</h1>
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
-        {onToggleReferences && (
+        {onToggleStudy && (
           <button
             type="button"
-            onClick={onToggleReferences}
-            aria-label="Referências"
-            aria-pressed={referencesOpen}
+            onClick={onToggleStudy}
+            aria-label="Estudo"
+            aria-pressed={studyOpen}
             className={cn(
               "shrink-0 rounded-full p-2 transition-colors",
-              referencesOpen
+              studyOpen
                 ? "bg-primary/[0.18] text-accent"
                 : "text-muted-foreground hover:bg-secondary hover:text-foreground"
             )}
@@ -218,30 +222,104 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     };
   }, [screen, bookOrder, chapter]);
 
-  // References panel — hidden by default; while open, tapping/selecting any
-  // verse (the same gesture that opens the highlight-color popup) also
-  // refreshes this panel for that verse. While closed, no extra API call.
-  const [referencesOpen, setReferencesOpen] = useState(false);
-  const [referenceVerse, setReferenceVerse] = useState<number | null>(null);
+  // Footnotes + study notes for the whole chapter, in one request alongside
+  // the verses. Fetching per chapter rather than per tapped verse means
+  // opening the panel is instant and the in-text markers can be drawn
+  // immediately — the worst chapter in the Bible is 92 footnotes (Salmo 119).
+  const [footnotes, setFootnotes] = useState<BibleFootnote[]>([]);
+  const [studyNotes, setStudyNotes] = useState<BibleStudyNote[]>([]);
+  const [isLoadingStudy, setIsLoadingStudy] = useState(false);
+
+  useEffect(() => {
+    if (screen !== "reading") return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setIsLoadingStudy(true);
+    });
+    void getChapterStudyContent(bookOrder, chapter).then((result) => {
+      if (cancelled) return;
+      setFootnotes(result.footnotes ?? []);
+      setStudyNotes(result.studyNotes ?? []);
+      setIsLoadingStudy(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, bookOrder, chapter]);
+
+  // bible_footnotes stores `verse_id` (the global BibleVerseId) and no verse
+  // number — there's no FK to embed through, so the mapping is done here with
+  // the chapter's verses, which are already in memory, instead of paying for
+  // a join server-side. See getChapterStudyContent.
+  const verseNumberById = useMemo(
+    () => new Map((verses ?? []).map((v) => [v.id, v.verse])),
+    [verses]
+  );
+
+  const footnoteCountByVerse = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const footnote of footnotes) {
+      const verse = verseNumberById.get(footnote.verseId);
+      if (verse === null || verse === undefined) continue;
+      counts.set(verse, (counts.get(verse) ?? 0) + 1);
+    }
+    return counts;
+  }, [footnotes, verseNumberById]);
+
+  const studyNoteVerses = useMemo(
+    () => new Set(studyNotes.map((note) => note.verse).filter((v): v is number => v !== null)),
+    [studyNotes]
+  );
+
+  // Study panel — hidden by default; while open, tapping/selecting any verse
+  // (the same gesture that opens the highlight-color popup) re-scopes it to
+  // that verse. While closed, no cross-reference request is made.
+  const [studyOpen, setStudyOpen] = useState(false);
+  const [studyTab, setStudyTab] = useState<BibleStudyTab>("referencias");
+  const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
   const [refs, setRefs] = useState<CrossReference[]>([]);
   const [isLoadingRefs, setIsLoadingRefs] = useState(false);
+  const [refsSource, setRefsSource] = useState<CrossReferenceSource>("nwt");
 
-  const handleVerseSelected = useCallback(
-    (verse: number) => {
-      setReferenceVerse(verse);
-      if (!referencesOpen) return;
-      setIsLoadingRefs(true);
-      void getVerseCrossReferences(bookOrder, chapter, verse).then((result) => {
-        setRefs(result.refs ?? []);
-        setIsLoadingRefs(false);
-      });
-    },
-    [referencesOpen, bookOrder, chapter]
-  );
+  const handleVerseSelected = useCallback((verse: number) => setSelectedVerse(verse), []);
+
+  // Driven by an effect rather than the tap handler so that switching the
+  // reference source (marginais ↔ estendidas) refetches for the verse already
+  // selected, without duplicating the request in two places.
+  useEffect(() => {
+    if (!studyOpen || selectedVerse === null) return;
+    let cancelled = false;
+    // Deferred a tick rather than set synchronously in the effect body — same
+    // pattern as the chapter/highlight loads above.
+    queueMicrotask(() => {
+      if (!cancelled) setIsLoadingRefs(true);
+    });
+    void getVerseCrossReferences(bookOrder, chapter, selectedVerse, refsSource).then((result) => {
+      if (cancelled) return;
+      setRefs(result.refs ?? []);
+      setIsLoadingRefs(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [studyOpen, selectedVerse, refsSource, bookOrder, chapter]);
+
+  const handleOpenStudy = useCallback((verse: number, tab: BibleStudyTab) => {
+    setSelectedVerse(verse);
+    setStudyTab(tab);
+    setStudyOpen(true);
+  }, []);
 
   function handleSelectReference(refBookOrder: number, refChapter: number, refVerse: number) {
     enterReading(refBookOrder, refChapter, refVerse);
   }
+
+  const verseFootnotes = selectedVerse === null
+    ? []
+    : footnotes.filter((f) => verseNumberById.get(f.verseId) === selectedVerse);
+  const verseStudyNotes = selectedVerse === null
+    ? []
+    : studyNotes.filter((n) => n.verse === selectedVerse);
 
   const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
   const [highlightNote, setHighlightNote] = useState<EditableJwlibraryNote | null>(null);
@@ -289,6 +367,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
           bookOrder={bookOrder}
           chapterCount={chapterCount}
           onSelectChapter={(chapterNum) => enterReading(bookOrder, chapterNum)}
+          onSelectSection={(chapterNum, verse) => enterReading(bookOrder, chapterNum, verse)}
           onBack={() => setScreen("books")}
         />
       </>
@@ -301,8 +380,8 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         <BibleTopHeader
           title={`${currentBook?.book ?? ""} ${chapter}`}
           onBack={() => setScreen("chapters")}
-          referencesOpen={referencesOpen}
-          onToggleReferences={() => setReferencesOpen((v) => !v)}
+          studyOpen={studyOpen}
+          onToggleStudy={() => setStudyOpen((v) => !v)}
           userEmail={userEmail}
         />
 
@@ -317,6 +396,9 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
               highlights={highlights}
               onHighlightNote={setHighlightNote}
               targetVerse={targetVerse}
+              footnoteCountByVerse={footnoteCountByVerse}
+              studyNoteVerses={studyNoteVerses}
+              onOpenStudy={handleOpenStudy}
             />
           )}
         </div>
@@ -340,14 +422,23 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         </div>
       </div>
 
-      <BibleReferencesPanel
-        open={referencesOpen}
-        onClose={() => setReferencesOpen(false)}
-        currentLabel={referenceVerse ? `${currentBook?.book ?? ""} ${chapter}:${referenceVerse}` : ""}
+      <BibleStudyPanel
+        open={studyOpen}
+        onClose={() => setStudyOpen(false)}
+        tab={studyTab}
+        onTabChange={setStudyTab}
+        currentLabel={selectedVerse ? `${currentBook?.book ?? ""} ${chapter}:${selectedVerse}` : ""}
+        selectedVerse={selectedVerse}
         refs={refs}
+        refsLoading={isLoadingRefs}
+        refsSource={refsSource}
+        onChangeRefsSource={setRefsSource}
         books={books ?? []}
-        isLoading={isLoadingRefs}
         onSelectReference={handleSelectReference}
+        footnotes={verseFootnotes}
+        studyNotes={verseStudyNotes}
+        studyLoading={isLoadingStudy}
+        onOpenBibleRef={enterReading}
       />
 
       <JwlibraryHighlightNotePanel

@@ -20,6 +20,12 @@ interface BibleChapterViewProps {
   onHighlightNote?: (note: { id: string; title: string; content: string }) => void;
   /** Scrolls to and briefly flashes this verse on mount — deep link from a jwlibrary Bible note, or from picking a cross reference (see bible-reader.tsx's `?verse=`/navigateTo). */
   targetVerse?: number | null;
+  /** How many footnotes each verse has, keyed by verse number. */
+  footnoteCountByVerse?: Map<number, number>;
+  /** Verse numbers that have a study note. */
+  studyNoteVerses?: Set<number>;
+  /** A footnote/study-note marker was clicked — opens the study panel on that tab. */
+  onOpenStudy?: (verse: number, tab: "notas" | "rodape") => void;
 }
 
 /**
@@ -37,6 +43,9 @@ export function BibleChapterView({
   highlights = [],
   onHighlightNote,
   targetVerse,
+  footnoteCountByVerse,
+  studyNoteVerses,
+  onOpenStudy,
 }: BibleChapterViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -226,6 +235,36 @@ export function BibleChapterView({
                 {v.verse}
               </span>
               <span className="whitespace-pre-line">{v.text ?? "texto não disponível nesta tradução"}</span>
+              {/*
+                Markers go at the END of the verse, not inline at the word that
+                produced them: the source has no word-level position for either
+                footnotes or study notes (that would need BibleChapter.Content's
+                own markers, which aren't in data/nwt_st.sqlite). `.verse-affordance`
+                keeps these out of word-token indexing — see
+                lib/jwlibrary/paragraph-tokens.ts.
+              */}
+              {v.verse !== null && (footnoteCountByVerse?.get(v.verse) || studyNoteVerses?.has(v.verse)) ? (
+                <span className="verse-affordance ml-1 inline-flex select-none items-center gap-1 align-super">
+                  {footnoteCountByVerse?.get(v.verse) ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenStudy?.(v.verse!, "rodape")}
+                      aria-label={`Notas de rodapé do versículo ${v.verse}`}
+                      className="font-mono text-[11px] text-muted-foreground transition-colors hover:text-accent"
+                    >
+                      *
+                    </button>
+                  ) : null}
+                  {studyNoteVerses?.has(v.verse) ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenStudy?.(v.verse!, "notas")}
+                      aria-label={`Nota de estudo do versículo ${v.verse}`}
+                      className="size-1.5 rounded-full bg-accent/60 transition-colors hover:bg-accent"
+                    />
+                  ) : null}
+                </span>
+              ) : null}
             </p>
           )
         )}

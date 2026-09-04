@@ -7,25 +7,30 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   getBibleVerseRange,
+  getBibleVerseByReference,
   type BibleBook,
   type BibleVerseRow,
   type CrossReference,
+  type CrossReferenceSource,
 } from "@/app/(app)/bible-actions";
-import { JwpubSidePanel } from "./jwpub-side-panel";
 
-interface BibleReferencesPanelProps {
-  open: boolean;
-  onClose: () => void;
+interface BibleReferencesListProps {
   /** e.g. "Jeremias 47:3" — the verse these references belong to. */
   currentLabel: string;
   refs: CrossReference[];
   books: BibleBook[];
   isLoading: boolean;
+  source: CrossReferenceSource;
+  onChangeSource: (source: CrossReferenceSource) => void;
   onSelectReference: (bookOrder: number, chapter: number, verse: number) => void;
 }
 
 function referenceLabel(ref: CrossReference, books: BibleBook[]): string {
   const bookName = books.find((b) => b.bookOrder === ref.refBookOrder)?.book ?? "";
+  // A null start verse means the target is a Psalm superscription, which has
+  // no verse number of its own — labeling it "51:null" or "51:0" would be
+  // worse than naming what it actually is.
+  if (ref.refStartVerse === null) return `${bookName} ${ref.refChapter} (sobrescrito)`;
   const verseRange = ref.refEndVerse ? `${ref.refStartVerse}-${ref.refEndVerse}` : String(ref.refStartVerse);
   return `${bookName} ${ref.refChapter}:${verseRange}`;
 }
@@ -33,69 +38,136 @@ function referenceLabel(ref: CrossReference, books: BibleBook[]): string {
 type VerseState = BibleVerseRow[] | "loading" | "error";
 
 /**
- * Toggleable study panel (see the header button in bible-reader.tsx) that
- * shows cross references for whatever verse was last tapped/selected — see
- * getVerseCrossReferences in app/(app)/bible-actions.ts and
- * data/cross_references.sqlite for the source. Same JwpubSidePanel shell as
- * footnotes/Bible citations inside a .jwpub publication.
+ * Groups references by their marginal letter.
+ *
+ * `marker` is a chapter-wide position counter in the source, not a per-verse
+ * index — Genesis 1:1's single marker is 1 while 1:2's are 2, 3 and 4. So the
+ * displayed letter is the *rank* of the distinct markers within this verse,
+ * which is what actually reads as "a, b, c" next to the text. `extended`
+ * references have no marker at all and fall into one unlabeled group.
+ */
+function groupByMarker(refs: CrossReference[]): { letter: string | null; refs: CrossReference[] }[] {
+  const groups = new Map<number | null, CrossReference[]>();
+  for (const ref of refs) {
+    const existing = groups.get(ref.marker);
+    if (existing) existing.push(ref);
+    else groups.set(ref.marker, [ref]);
+  }
+
+  const entries = [...groups.entries()];
+  const lettered = entries.length > 1 && entries.every(([marker]) => marker !== null);
+
+  return entries.map(([, groupRefs], index) => ({
+    letter: lettered ? String.fromCharCode(97 + index) : null,
+    refs: groupRefs,
+  }));
+}
+
+const SOURCE_LABELS: Record<CrossReferenceSource, string> = {
+  nwt: "Marginais",
+  extended: "Estendidas",
+};
+
+/**
+ * Cross references for whatever verse was last tapped — see
+ * getVerseCrossReferences in app/(app)/bible-actions.ts. Rendered as a tab
+ * inside BibleStudyPanel; the panel shell (Vault on mobile, side panel on
+ * desktop) lives there, not here.
  *
  * Each reference is an accordion row: tapping the label expands it in place
- * to show the actual verse text (fetched lazily via getBibleVerseRange, only
- * once per row, cached in `versesByIndex`), with a separate "Ir até o
- * capítulo" button to actually navigate there — clicking the label itself no
- * longer jumps away immediately.
+ * to show the actual verse text (fetched lazily, only once per row, cached in
+ * `versesByKey`), with a separate "Ir até o capítulo" button to navigate —
+ * clicking the label itself deliberately doesn't jump away.
  */
-export function BibleReferencesPanel({
-  open,
-  onClose,
+export function BibleReferencesList({
   currentLabel,
   refs,
   books,
   isLoading,
+  source,
+  onChangeSource,
   onSelectReference,
-}: BibleReferencesPanelProps) {
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-  const [versesByIndex, setVersesByIndex] = useState<Record<number, VerseState>>({});
+}: BibleReferencesListProps) {
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [versesByKey, setVersesByKey] = useState<Record<string, VerseState>>({});
 
-  async function toggle(index: number, ref: CrossReference) {
-    if (expandedIndex === index) {
-      setExpandedIndex(null);
+  async function toggle(key: string, ref: CrossReference) {
+    if (expandedKey === key) {
+      setExpandedKey(null);
       return;
     }
-    setExpandedIndex(index);
-    if (versesByIndex[index]) return;
-    setVersesByIndex((prev) => ({ ...prev, [index]: "loading" }));
-    const result = await getBibleVerseRange(ref.refBookOrder, ref.refChapter, ref.refStartVerse, ref.refEndVerse);
-    setVersesByIndex((prev) => ({ ...prev, [index]: result.verses ?? "error" }));
+    setExpandedKey(key);
+    if (versesByKey[key]) return;
+    setVersesByKey((prev) => ({ ...prev, [key]: "loading" }));
+
+    // A superscription target has no verse number, so the range query can't
+    // address it — getBibleVerseByReference's `verse: null` branch is the one
+    // that looks up `is_superscription` instead.
+    const result =
+      ref.refStartVerse === null
+        ? await getBibleVerseByReference(ref.refBookOrder, ref.refChapter, null).then((r) => ({
+            verses: r.verse ? [r.verse] : undefined,
+          }))
+        : await getBibleVerseRange(ref.refBookOrder, ref.refChapter, ref.refStartVerse, ref.refEndVerse);
+
+    setVersesByKey((prev) => ({ ...prev, [key]: result.verses ?? "error" }));
   }
 
-  return (
-    <JwpubSidePanel open={open} title="Referências" onClose={onClose}>
-      <div className="flex flex-col gap-3">
-        {currentLabel && (
-          <span className="font-mono text-[11px] tracking-[0.04em] text-accent">{currentLabel}</span>
-        )}
+  const groups = groupByMarker(refs);
 
-        {isLoading ? (
-          <p className="py-6 text-center text-[13px] text-muted-foreground">carregando…</p>
-        ) : refs.length === 0 ? (
-          <p className="py-6 text-center text-[13px] text-muted-foreground">
-            Toque num versículo pra ver as referências relacionadas.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {refs.map((ref, index) => {
-              const expanded = expandedIndex === index;
-              const verseState = versesByIndex[index];
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        {currentLabel && <span className="font-mono text-[11px] tracking-[0.04em] text-accent">{currentLabel}</span>}
+        <div className="ml-auto flex items-center gap-0.5 rounded-full bg-secondary p-0.5">
+          {(Object.keys(SOURCE_LABELS) as CrossReferenceSource[]).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onChangeSource(option)}
+              aria-pressed={source === option}
+              className={cn(
+                "rounded-full px-2.5 py-1 font-mono text-[10px] tracking-[0.04em] transition-colors",
+                source === option
+                  ? "bg-primary/[0.18] text-accent"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {SOURCE_LABELS[option]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <p className="py-6 text-center text-[13px] text-muted-foreground">carregando…</p>
+      ) : refs.length === 0 ? (
+        <p className="py-6 text-center text-[13px] text-muted-foreground">
+          {currentLabel
+            ? "Nenhuma referência para este versículo."
+            : "Toque num versículo pra ver as referências relacionadas."}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {groups.map((group, groupIndex) =>
+            group.refs.map((ref, index) => {
+              const key = `${groupIndex}-${index}`;
+              const expanded = expandedKey === key;
+              const verseState = versesByKey[key];
               return (
-                <li key={index} className="overflow-hidden rounded-2xl bg-secondary">
+                <li key={key} className="overflow-hidden rounded-2xl bg-secondary">
                   <button
                     type="button"
-                    onClick={() => void toggle(index, ref)}
+                    onClick={() => void toggle(key, ref)}
                     aria-expanded={expanded}
-                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-[13px] text-foreground transition-colors hover:bg-surface"
+                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-[13px] text-foreground transition-colors hover:bg-surface"
                   >
-                    {referenceLabel(ref, books)}
+                    {group.letter && index === 0 && (
+                      <span className="font-mono text-[10px] text-accent">{group.letter}</span>
+                    )}
+                    <span className={cn("flex-1", group.letter && index > 0 && "pl-[13px]")}>
+                      {referenceLabel(ref, books)}
+                    </span>
                     <ChevronDown
                       className={cn(
                         "size-4 shrink-0 text-muted-foreground transition-transform",
@@ -121,9 +193,8 @@ export function BibleReferencesPanel({
                           ) : (
                             <div className="flex flex-col gap-1 text-[13px] leading-relaxed text-foreground/90">
                               {verseState.map((v) => (
-                                // whitespace-pre-line: see the comment in
-                                // bible-chapter-view.tsx — verse text carries
-                                // real `\n` for poetry.
+                                // whitespace-pre-line: verse text carries real
+                                // `\n` for poetry — see bible-chapter-view.tsx.
                                 <p key={v.id} className="whitespace-pre-line">
                                   {v.verse !== null && (
                                     <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">
@@ -139,7 +210,9 @@ export function BibleReferencesPanel({
                             variant="outline"
                             size="sm"
                             fullWidth
-                            onClick={() => onSelectReference(ref.refBookOrder, ref.refChapter, ref.refStartVerse)}
+                            onClick={() =>
+                              onSelectReference(ref.refBookOrder, ref.refChapter, ref.refStartVerse ?? 1)
+                            }
                           >
                             Ir até o capítulo
                           </Button>
@@ -149,10 +222,10 @@ export function BibleReferencesPanel({
                   </AnimatePresence>
                 </li>
               );
-            })}
-          </ul>
-        )}
-      </div>
-    </JwpubSidePanel>
+            })
+          )}
+        </ul>
+      )}
+    </div>
   );
 }
