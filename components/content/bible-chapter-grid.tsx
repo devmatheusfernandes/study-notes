@@ -39,7 +39,7 @@ export function BibleChapterGrid({ bookName, chapterCount, onSelectChapter, onBa
               key={chapter}
               type="button"
               onClick={() => onSelectChapter(chapter)}
-              className="flex aspect-square items-center justify-center rounded-xl bg-secondary text-[13px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="flex aspect-square items-center justify-center bg-secondary text-[13px] text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               {chapter}
             </button>
