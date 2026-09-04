@@ -43,7 +43,9 @@ export function AiUsageCard() {
           notify.error("Erro ao iniciar re-vetorização", res.error);
           return;
         }
-        notify.success(`${res.enqueued} nota(s) enfileirada(s) para vetorização.`);
+        notify.success(
+          `${res.enqueued} nota(s) enfileirada(s). Processando um lote agora — o restante continua sozinho em segundo plano.`
+        );
         await processVectorQueue();
         const freshStats = await getAiUsageStats();
         setStats(freshStats);

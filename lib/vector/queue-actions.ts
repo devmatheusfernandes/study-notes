@@ -1,8 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { extractContentForNote } from "./extractor";
-import { generateEmbeddings } from "./openai";
+import { runVectorizationBatch } from "./processor";
+import { decryptText } from "@/lib/encryption";
 
 export interface AiUsageStats {
   totalTokens: number;
@@ -15,7 +15,10 @@ export interface AiUsageStats {
 }
 
 /**
- * Enqueues a note for vectorization (or re-queues it if edited).
+ * Enqueues a note for vectorization (or re-queues it if edited). Just
+ * inserts a `pending` row — processing itself happens on the Vercel Cron's
+ * schedule (see app/api/cron/vectorize/route.ts), or immediately if the user
+ * clicks "Processar Agora" in Settings.
  */
 export async function enqueueNoteForVectorization(noteId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -32,6 +35,9 @@ export async function enqueueNoteForVectorization(noteId: string): Promise<{ err
       status: "pending",
       attempts: 0,
       error: null,
+      // Content changed (or is brand new) → a fresh run, not a resume.
+      total_chunks: null,
+      processed_chunks: 0,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "note_id" }
@@ -42,12 +48,8 @@ export async function enqueueNoteForVectorization(noteId: string): Promise<{ err
     return { error: "Não foi possível enfileirar a nota." };
   }
 
-  // Fire-and-forget processing in background
-  void processVectorQueue(user.id);
   return {};
 }
-
-import { decryptText } from "@/lib/encryption";
 
 export interface VectorQueueItemDetails {
   id: string;
@@ -57,154 +59,28 @@ export interface VectorQueueItemDetails {
   status: "pending" | "processing" | "completed" | "failed";
   attempts: number;
   error: string | null;
+  processedChunks: number;
+  totalChunks: number | null;
   createdAt: number;
   updatedAt: number;
 }
 
 /**
- * Processes pending items in the vectorization queue for a user.
+ * Manually runs one batch of the vectorization queue right now, scoped to
+ * the caller's own rows (ordinary RLS on vectorization_queue — see
+ * claim_vectorization_queue_batch in the migration). This is the "Processar
+ * Agora" button's escape hatch in Settings; the Vercel Cron job
+ * (app/api/cron/vectorize/route.ts) is what normally drains the queue in the
+ * background without any user needing to click anything.
  */
-export async function processVectorQueue(targetUserId?: string): Promise<{ processed: number; errors: number }> {
+export async function processVectorQueue(): Promise<{ processed: number; errors: number }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  if (!user) return { processed: 0, errors: 0 };
 
-  const userId = targetUserId ?? user?.id;
-  if (!userId) return { processed: 0, errors: 0 };
-
-  // Fetch pending items OR items stuck in 'processing'
-  const { data: queueItems, error: fetchError } = await supabase
-    .from("vectorization_queue")
-    .select("id, note_id, attempts, status, updated_at")
-    .eq("user_id", userId)
-    .in("status", ["pending", "processing"])
-    .order("created_at", { ascending: true })
-    .limit(10);
-
-  if (fetchError) {
-    console.error("Erro ao buscar itens da fila de vetorização:", fetchError);
-    return { processed: 0, errors: 1 };
-  }
-
-  if (!queueItems || queueItems.length === 0) {
-    return { processed: 0, errors: 0 };
-  }
-
-  // Filter items: process 'pending', or 'processing' updated > 30s ago
-  const now = Date.now();
-  const itemsToProcess = queueItems.filter((item) => {
-    if (item.status === "pending") return true;
-    const lastUpdate = new Date(item.updated_at).getTime();
-    return now - lastUpdate > 30_000;
-  });
-
-  if (itemsToProcess.length === 0) {
-    return { processed: 0, errors: 0 };
-  }
-
-  let processedCount = 0;
-  let errorCount = 0;
-
-  for (const item of itemsToProcess) {
-    if (!item.note_id) continue;
-
-    // 1. Mark as processing
-    await supabase
-      .from("vectorization_queue")
-      .update({ status: "processing", updated_at: new Date().toISOString() })
-      .eq("id", item.id);
-
-    try {
-      // Check if note was deleted by user while in queue
-      const { data: noteCheck } = await supabase.from("notes").select("id").eq("id", item.note_id).single();
-      if (!noteCheck) {
-        await supabase.from("vectorization_queue").delete().eq("id", item.id);
-        await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
-        continue;
-      }
-
-      // Handle Personal Note / PDF / JWPUB Vectorization
-      const extracted = await extractContentForNote(item.note_id);
-
-      if (!extracted || extracted.chunks.length === 0) {
-        await supabase
-          .from("vectorization_queue")
-          .update({
-            status: "failed",
-            attempts: item.attempts + 1,
-            error: "Conteúdo da nota vazio ou ainda não pronto.",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", item.id);
-        errorCount++;
-        continue;
-      }
-
-        const texts = extracted.chunks.map((c) => c.content);
-        const embeddingsResult = await generateEmbeddings(texts);
-
-        await supabase.from("note_embeddings").delete().eq("note_id", item.note_id);
-
-        const vectorRows = extracted.chunks.map((chunk, index) => ({
-          user_id: userId,
-          note_id: item.note_id,
-          jwpub_chapter_id: chunk.jwpubChapterId ?? null,
-          chunk_index: chunk.chunkIndex,
-          content: chunk.content,
-          embedding: embeddingsResult.embeddings[index],
-          metadata: chunk.metadata,
-        }));
-
-        const { error: insertError } = await supabase.from("note_embeddings").insert(vectorRows);
-
-        if (insertError) {
-          throw new Error(`Falha ao salvar vetores no banco: ${insertError.message}`);
-        }
-
-        if (embeddingsResult.promptTokens > 0) {
-          await supabase.from("ai_usage_logs").insert({
-            user_id: userId,
-            note_id: item.note_id,
-            operation_type: "vectorization",
-            model: "text-embedding-3-small",
-            prompt_tokens: embeddingsResult.promptTokens,
-            completion_tokens: 0,
-            total_tokens: embeddingsResult.promptTokens,
-            estimated_cost_usd: embeddingsResult.estimatedCostUsd,
-          });
-        }
-
-      // 7. Mark queue item as completed
-      await supabase
-        .from("vectorization_queue")
-        .update({
-          status: "completed",
-          error: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", item.id);
-
-      processedCount++;
-    } catch (err) {
-      errorCount++;
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      const nextAttempts = item.attempts + 1;
-      const finalStatus = nextAttempts >= 3 ? "failed" : "pending";
-
-      await supabase
-        .from("vectorization_queue")
-        .update({
-          status: finalStatus,
-          attempts: nextAttempts,
-          error: errorMessage,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", item.id);
-    }
-  }
-
-  return { processed: processedCount, errors: errorCount };
+  return runVectorizationBatch(supabase);
 }
 
 /**
@@ -233,6 +109,8 @@ export async function revectorizeAllNotes(): Promise<{ enqueued: number; error?:
     status: "pending",
     attempts: 0,
     error: null,
+    total_chunks: null,
+    processed_chunks: 0,
     updated_at: new Date().toISOString(),
   }));
 
@@ -244,7 +122,6 @@ export async function revectorizeAllNotes(): Promise<{ enqueued: number; error?:
     return { enqueued: 0, error: "Não foi possível enfileirar as notas." };
   }
 
-  void processVectorQueue(user.id);
   return { enqueued: notes.length };
 }
 
@@ -321,7 +198,9 @@ export async function getVectorQueueDetails(): Promise<VectorQueueItemDetails[]>
 
   const { data: queueItems, error } = await supabase
     .from("vectorization_queue")
-    .select("id, note_id, status, attempts, error, created_at, updated_at, notes(title, type)")
+    .select(
+      "id, note_id, status, attempts, error, processed_chunks, total_chunks, created_at, updated_at, notes(title, type)"
+    )
     .eq("user_id", user.id)
     .order("updated_at", { ascending: false });
 
@@ -341,6 +220,8 @@ export async function getVectorQueueDetails(): Promise<VectorQueueItemDetails[]>
       status: item.status as VectorQueueItemDetails["status"],
       attempts: item.attempts,
       error: item.error,
+      processedChunks: item.processed_chunks,
+      totalChunks: item.total_chunks,
       createdAt: new Date(item.created_at).getTime(),
       updatedAt: new Date(item.updated_at).getTime(),
     };
@@ -348,7 +229,11 @@ export async function getVectorQueueDetails(): Promise<VectorQueueItemDetails[]>
 }
 
 /**
- * Resets a single queue item to pending and triggers queue processing.
+ * Resets a single queue item to pending — deliberately leaves
+ * `processed_chunks` alone, so retrying a big publication that failed partway
+ * through resumes from there instead of re-embedding (and re-billing) chunks
+ * already saved. Actual processing happens on the next cron tick, or
+ * instantly if the user also clicks "Processar Agora".
  */
 export async function retryQueueItem(queueId: string): Promise<{ error?: string }> {
   const supabase = await createClient();
@@ -371,7 +256,6 @@ export async function retryQueueItem(queueId: string): Promise<{ error?: string 
 
   if (error) return { error: "Não foi possível reiniciar o item." };
 
-  void processVectorQueue(user.id);
   return {};
 }
 
@@ -400,7 +284,6 @@ export async function retryAllFailedQueueItems(): Promise<{ count: number; error
 
   if (error) return { count: 0, error: "Não foi possível reiniciar os itens." };
 
-  void processVectorQueue(user.id);
   return { count: updated?.length ?? 0 };
 }
 

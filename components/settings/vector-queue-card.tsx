@@ -335,13 +335,17 @@ export function VectorQueueCard() {
                       {item.status === "pending" && (
                         <Badge variant="outline" className="gap-1 border-accent/40 text-accent">
                           <Clock className="size-3" />
-                          Pendente
+                          {item.totalChunks && item.processedChunks > 0
+                            ? `Pendente (retomando de ${item.processedChunks}/${item.totalChunks})`
+                            : "Pendente"}
                         </Badge>
                       )}
                       {item.status === "processing" && (
                         <Badge variant="outline" className="gap-1 border-accent/40 text-accent">
                           <Loader2 className="size-3 animate-spin" />
-                          Processando
+                          {item.totalChunks
+                            ? `Processando ${item.processedChunks}/${item.totalChunks} trechos`
+                            : "Processando"}
                         </Badge>
                       )}
                       {item.status === "completed" && (

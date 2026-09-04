@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptText } from "@/lib/encryption";
 import { stripHtmlTags, splitTextIntoChunks } from "./chunker";
@@ -18,8 +18,16 @@ export interface ExtractedContent {
   chunks: ExtractedChunk[];
 }
 
-export async function extractContentForNote(noteId: string): Promise<ExtractedContent | null> {
-  const supabase = await createClient();
+/**
+ * Takes the caller's own Supabase client rather than creating one itself —
+ * the per-request (RLS-scoped) client for the manual "Processar Agora"
+ * button, or the admin client when called from the cron route, which has no
+ * user session to scope a client to.
+ */
+export async function extractContentForNote(
+  noteId: string,
+  supabase: SupabaseClient
+): Promise<ExtractedContent | null> {
   const { data: note, error } = await supabase
     .from("notes")
     .select("id, type, title, body, storage_path, user_id")
