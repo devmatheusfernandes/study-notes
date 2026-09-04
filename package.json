@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "migrate": "node scripts/db-migrate.mjs",
-    "seed:bible": "node scripts/seed-bible.mjs"
+    "seed:bible": "node scripts/seed-bible.mjs",
+    "seed:cross-references": "node scripts/seed-cross-references.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -97,12 +97,133 @@ export async function getBibleVerseByReference(
   };
 }
 
+/** Every verse (including any superscription row) of one chapter — the core "load a whole chapter" query for components/content/bible-reader.tsx, which neither getBibleVerses (id-range) nor getBibleVerseByReference (single verse) serve. */
+export async function getBibleChapterVerses(
+  bookOrder: number,
+  chapter: number
+): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("bible_verses")
+    .select("id, book, chapter, verse, text, is_superscription")
+    .eq("book_order", bookOrder)
+    .eq("chapter", chapter)
+    .order("id", { ascending: true });
+
+  if (error) return { error: "Não foi possível carregar o capítulo." };
+  if (!data || data.length === 0) return { error: "Capítulo não encontrado." };
+
+  return {
+    verses: data.map((row) => ({
+      id: row.id,
+      book: row.book,
+      chapter: row.chapter,
+      verse: row.verse,
+      text: row.text,
+      isSuperscription: row.is_superscription,
+    })),
+  };
+}
+
+export interface CrossReference {
+  rank: number;
+  refBookOrder: number;
+  refChapter: number;
+  refStartVerse: number;
+  refEndVerse: number | null;
+}
+
+/** Cross references for one verse — see data/cross_references.sqlite and scripts/seed-cross-references.mjs for the source/decoding. Book names for display are resolved by the caller from its already-loaded listBibleBooks() list. */
+export async function getVerseCrossReferences(
+  bookOrder: number,
+  chapter: number,
+  verse: number
+): Promise<{ refs?: CrossReference[]; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("bible_cross_references")
+    .select("rank, ref_book_order, ref_chapter, ref_start_verse, ref_end_verse")
+    .eq("book_order", bookOrder)
+    .eq("chapter", chapter)
+    .eq("verse", verse)
+    .order("rank", { ascending: true });
+
+  if (error) return { error: "Não foi possível carregar as referências." };
+
+  return {
+    refs: (data ?? []).map((row) => ({
+      rank: row.rank,
+      refBookOrder: row.ref_book_order,
+      refChapter: row.ref_chapter,
+      refStartVerse: row.ref_start_verse,
+      refEndVerse: row.ref_end_verse,
+    })),
+  };
+}
+
+/** One verse or a small verse range (a cross reference's target) by book/chapter — for the accordion preview in bible-references-panel.tsx, so expanding a reference doesn't need the whole chapter. */
+export async function getBibleVerseRange(
+  bookOrder: number,
+  chapter: number,
+  startVerse: number,
+  endVerse: number | null
+): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  let query = supabase
+    .from("bible_verses")
+    .select("id, book, chapter, verse, text, is_superscription")
+    .eq("book_order", bookOrder)
+    .eq("chapter", chapter);
+  query = endVerse ? query.gte("verse", startVerse).lte("verse", endVerse) : query.eq("verse", startVerse);
+
+  const { data, error } = await query.order("id", { ascending: true });
+
+  if (error) return { error: "Não foi possível carregar o versículo." };
+  if (!data || data.length === 0) return { error: "Versículo não encontrado." };
+
+  return {
+    verses: data.map((row) => ({
+      id: row.id,
+      book: row.book,
+      chapter: row.chapter,
+      verse: row.verse,
+      text: row.text,
+      isSuperscription: row.is_superscription,
+    })),
+  };
+}
+
 export interface BibleBook {
   book: string;
   bookOrder: number;
 }
 
-/** For the Bible reference picker (components/content/bible-reference-picker.tsx) — no browsable book/chapter/verse list existed anywhere before. */
+/**
+ * For the Bible reference picker (components/content/bible-reference-picker.tsx)
+ * and the /bible book grid — no browsable book/chapter/verse list existed
+ * anywhere before.
+ *
+ * Filters to `chapter = 1 and verse = 1` (one row per book, 66 total)
+ * instead of selecting every verse and deduping client-side — PostgREST caps
+ * an unbounded select at 1000 rows, and Genesis alone has 1,533 verses, so
+ * the old dedupe-after-fetch approach silently returned Genesis only
+ * (confirmed empirically: the /bible book grid showed just "GE").
+ */
 export async function listBibleBooks(): Promise<{ books?: BibleBook[]; error?: string }> {
   const supabase = await createClient();
   const {
@@ -113,6 +234,8 @@ export async function listBibleBooks(): Promise<{ books?: BibleBook[]; error?: s
   const { data, error } = await supabase
     .from("bible_verses")
     .select("book, book_order")
+    .eq("chapter", 1)
+    .eq("verse", 1)
     .order("book_order", { ascending: true });
 
   if (error) return { error: "Não foi possível carregar os livros da Bíblia." };

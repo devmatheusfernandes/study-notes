@@ -648,6 +648,65 @@ export async function getChapterHighlights(
   };
 }
 
+export interface BibleVerseHighlight {
+  verse: number;
+  colorIndex: number;
+  startToken: number;
+  endToken: number;
+  note: { id: string; title: string; content: string } | null;
+}
+
+/** Sibling of getChapterHighlights, for Bible chapters (UserMark.BlockType = 2) instead of publication paragraphs — see components/content/bible-chapter-view.tsx. */
+export async function getBibleChapterHighlights(
+  bookNumber: number,
+  chapterNumber: number
+): Promise<{ highlights?: BibleVerseHighlight[]; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data: usermarks, error } = await supabase
+    .from("jwlibrary_usermarks")
+    .select("id, color_index")
+    .eq("book_number", bookNumber)
+    .eq("chapter_number", chapterNumber);
+
+  if (error) return { error: "Não foi possível carregar as marcações." };
+  if (!usermarks || usermarks.length === 0) return { highlights: [] };
+
+  const colorByMark = new Map(usermarks.map((m) => [m.id, m.color_index as number]));
+  const markIds = [...colorByMark.keys()];
+
+  const [{ data: ranges, error: rangesError }, { data: notes, error: notesError }] = await Promise.all([
+    supabase
+      .from("jwlibrary_blockranges")
+      .select("usermark_id, identifier, start_token, end_token")
+      .in("usermark_id", markIds)
+      .eq("block_type", 2), // Bible verse ranges only
+    supabase.from("jwlibrary_notes").select("id, user_mark_id, title, content").in("user_mark_id", markIds),
+  ]);
+
+  if (rangesError || notesError) return { error: "Não foi possível carregar as marcações." };
+
+  const noteByMark = new Map(
+    (notes ?? []).map((n) => [
+      n.user_mark_id as string,
+      { id: n.id, title: decryptText(n.title) ?? "", content: decryptText(n.content) ?? "" },
+    ])
+  );
+
+  return {
+    highlights: (ranges ?? [])
+      .filter((r) => r.start_token !== null && r.end_token !== null)
+      .map((r) => ({
+        verse: Number(r.identifier),
+        colorIndex: colorByMark.get(r.usermark_id) ?? 1,
+        startToken: r.start_token as number,
+        endToken: r.end_token as number,
+        note: noteByMark.get(r.usermark_id) ?? null,
+      })),
+  };
+}
+
 export async function listOwnJwlibraryTags(): Promise<{ tags?: JwlibraryTagView[]; error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };

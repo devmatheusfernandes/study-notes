@@ -206,9 +206,21 @@ export function JwlibraryNotesCollection() {
         params.set("pid", String(note.blockIdentifier));
       }
       router.push(`/notes/${note.publicationNoteId}?${params.toString()}`);
+      return;
     }
-    // Bible notes and unresolved publication notes have nothing to navigate
-    // to yet — their reference/verse text is already shown inline below.
+    if (note.location.bookNumber !== null && note.location.chapterNumber !== null) {
+      const params = new URLSearchParams({
+        book: String(note.location.bookNumber),
+        chapter: String(note.location.chapterNumber),
+      });
+      if (note.blockType === 2 && note.blockIdentifier !== null) {
+        params.set("verse", String(note.blockIdentifier));
+      }
+      router.push(`/bible?${params.toString()}`);
+      return;
+    }
+    // Unresolved publication notes have nothing to navigate to yet — their
+    // reference text is already shown inline below.
   }
 
   const fileInputEl = (
@@ -365,7 +377,10 @@ export function JwlibraryNotesCollection() {
           }
         >
           {filteredNotes.map((note) => {
-            const openable = Boolean(note.publicationNoteId && note.chapterDocumentId !== null);
+            const openable = Boolean(
+              (note.publicationNoteId && note.chapterDocumentId !== null) ||
+                (note.location.bookNumber !== null && note.location.chapterNumber !== null)
+            );
             // note.content is either plain text (imported from a real backup)
             // or Tiptap HTML (created here) — parseNotePreview handles both
             // the same way NoteCard already does for notes.body, so raw tags
