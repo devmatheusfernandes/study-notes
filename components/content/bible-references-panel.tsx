@@ -121,7 +121,10 @@ export function BibleReferencesPanel({
                           ) : (
                             <div className="flex flex-col gap-1 text-[13px] leading-relaxed text-foreground/90">
                               {verseState.map((v) => (
-                                <p key={v.id}>
+                                // whitespace-pre-line: see the comment in
+                                // bible-chapter-view.tsx — verse text carries
+                                // real `\n` for poetry.
+                                <p key={v.id} className="whitespace-pre-line">
                                   {v.verse !== null && (
                                     <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">
                                       {v.verse}

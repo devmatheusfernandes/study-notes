@@ -61,13 +61,14 @@ function Body({
         {reference(verses)}
       </span>
       <div className="text-[14.5px] leading-relaxed text-foreground/90">
+        {/* whitespace-pre-line: see the comment in bible-chapter-view.tsx — verse text carries real `\n` for poetry. */}
         {verses.map((v) =>
           v.isSuperscription ? (
-            <p key={v.id} className="my-2 italic text-muted-foreground">
+            <p key={v.id} className="my-2 whitespace-pre-line italic text-muted-foreground">
               {v.text ?? ""}
             </p>
           ) : (
-            <p key={v.id} className="my-2">
+            <p key={v.id} className="my-2 whitespace-pre-line">
               <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{v.verse}</span>
               {v.text ?? (
                 <span className="italic text-muted-foreground">

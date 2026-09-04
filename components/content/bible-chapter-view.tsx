@@ -201,9 +201,23 @@ export function BibleChapterView({
         ref={containerRef}
         className="mx-auto w-full max-w-2xl text-[15px] leading-relaxed text-foreground/90"
       >
+        {/*
+          `whitespace-pre-line` (here and in the other two surfaces that render
+          verse text) is what makes poetry actually break: bible_verses.text
+          carries real `\n` for 7.560 verses — see data/NWT_structure.md — and
+          without this the browser's default `white-space: normal` collapses
+          each one into a space, running Psalms together as prose. `pre-line`
+          rather than `pre-wrap`/`pre`: newlines are preserved, but every
+          other run of whitespace still collapses and lines still wrap.
+
+          It's on the inner <span> for a verse, not the <p>, purely to keep it
+          off the `parNum` span's layout. Word-token indexing
+          (lib/jwlibrary/paragraph-tokens.ts) is unaffected either way — it
+          walks text nodes, so a CSS property can't move a token index.
+        */}
         {verses.map((v) =>
           v.isSuperscription ? (
-            <p key={v.id} className="my-4 italic text-muted-foreground">
+            <p key={v.id} className="my-4 whitespace-pre-line italic text-muted-foreground">
               {v.text}
             </p>
           ) : (
@@ -211,7 +225,7 @@ export function BibleChapterView({
               <span className="parNum mr-1.5 select-none align-super font-mono text-[11px] text-muted-foreground">
                 {v.verse}
               </span>
-              <span>{v.text ?? "texto não disponível nesta tradução"}</span>
+              <span className="whitespace-pre-line">{v.text ?? "texto não disponível nesta tradução"}</span>
             </p>
           )
         )}
