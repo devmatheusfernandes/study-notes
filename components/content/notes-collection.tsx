@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { notify } from "@/components/ui/toaster";
 import { NoteCard } from "./note-card";
@@ -18,8 +19,10 @@ import { matchesSearch } from "@/lib/search";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { FileDropZone } from "./file-drop-zone";
 import { TagPickerVault } from "./tag-picker-vault";
+import { FolderPickerVault } from "./folder-picker-vault";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { getFileUrl } from "@/app/(app)/files-actions";
+import { NOTE_DRAG_MIME, hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
 
 interface NotesCollectionProps {
   status: NoteStatus;
@@ -112,8 +115,11 @@ export function NotesCollection({
   const folders = useNotesStore((s) => s.folders);
   const tags = useNotesStore((s) => s.tags);
   const [manageTagsNoteId, setManageTagsNoteId] = useState<string | null>(null);
+  const [moveFolderNoteId, setMoveFolderNoteId] = useState<string | null>(null);
+  const [isBackDragOver, setIsBackDragOver] = useState(false);
   const renameFolder = useNotesStore((s) => s.renameFolder);
   const deleteFolder = useNotesStore((s) => s.deleteFolder);
+  const bulkMoveNotes = useNotesStore((s) => s.bulkMoveNotes);
   const togglePin = useNotesStore((s) => s.togglePin);
   const archive = useNotesStore((s) => s.archive);
   const trash = useNotesStore((s) => s.trash);
@@ -187,6 +193,14 @@ export function NotesCollection({
     else window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  // Drags either just this card, or — if it's part of the active selection —
+  // every selected card at once, so multi-select drag-to-move works for free.
+  function handleNoteDragStart(event: React.DragEvent, note: Note) {
+    const ids = selectionMode && isSelected(note.id) ? selectedIds : [note.id];
+    event.dataTransfer.setData(NOTE_DRAG_MIME, JSON.stringify(ids));
+    event.dataTransfer.effectAllowed = "move";
+  }
+
   const renderCard = (note: Note) => {
     // A temp id (no server row yet) can't be pinned/archived/tagged/deleted —
     // see addOptimisticFile in the store. Once resolved to a real id the row
@@ -218,7 +232,9 @@ export function NotesCollection({
         onRestore={!isOptimistic && status !== "active" ? () => restore(note.id) : undefined}
         onDelete={isOptimistic ? undefined : isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
         onManageTags={isOptimistic ? undefined : () => setManageTagsNoteId(note.id)}
+        onMoveToFolder={isOptimistic || !showFolders ? undefined : () => setMoveFolderNoteId(note.id)}
         onToggleChecklistItem={(index) => toggleChecklistItem(note.id, index)}
+        onDragStart={isOptimistic || !showFolders ? undefined : (e) => handleNoteDragStart(e, note)}
       />
     );
   };
@@ -341,7 +357,26 @@ export function NotesCollection({
           <button
             type="button"
             onClick={() => setActiveFolder(openFolder.parentId ?? null)}
-            className="flex w-fit items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-[13px] text-foreground/80 transition-colors hover:bg-surface"
+            onDragOver={(e) => {
+              if (!hasDraggedNoteIds(e)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setIsBackDragOver(true);
+            }}
+            onDragLeave={() => setIsBackDragOver(false)}
+            onDrop={(e) => {
+              if (!hasDraggedNoteIds(e)) return;
+              e.preventDefault();
+              setIsBackDragOver(false);
+              const ids = readDraggedNoteIds(e.dataTransfer);
+              if (ids.length > 0) bulkMoveNotes(ids, openFolder.parentId);
+            }}
+            className={cn(
+              "flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] transition-all",
+              isBackDragOver
+                ? "bg-accent/20 text-accent ring-2 ring-accent scale-[1.02]"
+                : "bg-secondary text-foreground/80 hover:bg-surface"
+            )}
           >
             <ChevronLeft className="size-4" />
             {openFolder.name}
@@ -365,6 +400,7 @@ export function NotesCollection({
                   onRename={(name) => renameFolder(folder.id, name)}
                   onDelete={() => deleteFolder(folder.id)}
                   onDropItems={(items) => void processDiscoveredItems(items, folder.id)}
+                  onDropNoteIds={(ids) => bulkMoveNotes(ids, folder.id)}
                 />
               ))}
             </div>
@@ -404,6 +440,16 @@ export function NotesCollection({
       }}
       noteIds={manageTagsNoteId ? [manageTagsNoteId] : []}
     />
+    {showFolders && (
+      <FolderPickerVault
+        open={moveFolderNoteId !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveFolderNoteId(null);
+        }}
+        noteIds={moveFolderNoteId ? [moveFolderNoteId] : []}
+        currentFolderId={notes.find((n) => n.id === moveFolderNoteId)?.folderId}
+      />
+    )}
     </>
   );
 }

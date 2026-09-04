@@ -2,22 +2,26 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Archive, CheckCheck, RotateCcw, Tags, Trash2, X } from "lucide-react";
+import { Archive, CheckCheck, FolderInput, RotateCcw, Tags, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { useSelectionStore } from "@/lib/store/selection-store";
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { NoteStatus } from "@/lib/store/notes-store";
 import { TagPickerVault } from "./tag-picker-vault";
+import { FolderPickerVault } from "./folder-picker-vault";
 
 interface BulkActionBarProps {
   /** Which screen this is — decides whether "Arquivar" or "Restaurar" applies. */
   status: NoteStatus;
+  /** Folders only make sense on the main content screen — same as NotesCollection's `showFolders`. */
+  showFolders?: boolean;
 }
 
-export function BulkActionBar({ status }: BulkActionBarProps) {
+export function BulkActionBar({ status, showFolders = false }: BulkActionBarProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const visibleIds = useSelectionStore((s) => s.visibleIds);
   const selectAll = useSelectionStore((s) => s.selectAll);
@@ -100,6 +104,16 @@ export function BulkActionBar({ status }: BulkActionBarProps) {
             >
               Aplicar tags
             </Button>
+            {showFolders && (
+              <Button
+                variant="ghost"
+                size="sm"
+                leftIcon={<FolderInput />}
+                onClick={() => setFolderPickerOpen(true)}
+              >
+                Mover
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -112,6 +126,9 @@ export function BulkActionBar({ status }: BulkActionBarProps) {
           </div>
 
           <TagPickerVault open={tagPickerOpen} onOpenChange={setTagPickerOpen} noteIds={selectedIds} />
+          {showFolders && (
+            <FolderPickerVault open={folderPickerOpen} onOpenChange={setFolderPickerOpen} noteIds={selectedIds} />
+          )}
 
           <ConfirmVault
             open={confirmOpen}

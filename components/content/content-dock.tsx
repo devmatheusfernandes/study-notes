@@ -9,10 +9,10 @@ import type { NoteStatus } from "@/lib/store/notes-store";
  * Selecting notes and asking the assistant both want the bottom-of-screen dock,
  * so only one shows at a time — bulk actions take over the moment something's selected.
  */
-export function ContentDock({ status }: { status: NoteStatus }) {
+export function ContentDock({ status, showFolders = false }: { status: NoteStatus; showFolders?: boolean }) {
   const hasSelection = useSelectionStore((s) => s.selectedIds.length > 0);
   return hasSelection ? (
-    <BulkActionBar status={status} />
+    <BulkActionBar status={status} showFolders={showFolders} />
   ) : (
     <SmartComposer
       variant="notes"

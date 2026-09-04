@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileType,
+  FolderInput,
   MoreHorizontal,
   NotebookPen,
   Pin,
@@ -90,8 +91,21 @@ export interface NoteCardProps {
   onRestore?: () => void;
   onDelete?: () => void;
   onManageTags?: () => void;
+  onMoveToFolder?: () => void;
   /** Checks/unchecks one of the checklist items shown in the preview, by its index among all of them. */
   onToggleChecklistItem?: (index: number) => void;
+  /** Native HTML5 drag start, for dragging this card onto a FolderCard to move it. Parent decides the drag payload (single vs. multi-select) and omits this entirely for cards that shouldn't be draggable (optimistic/processing). */
+  onDragStart?: (event: React.DragEvent) => void;
+}
+
+/** Sheen sweeping across a card while it's still uploading/ingesting — the parent must be `relative overflow-hidden` for this to clip to its rounded corners. */
+function ProcessingShimmer() {
+  return (
+    <span
+      aria-hidden
+      className="animate-shimmer pointer-events-none absolute inset-0 bg-[length:200%_100%] bg-gradient-to-r from-transparent via-foreground/12 to-transparent"
+    />
+  );
 }
 
 export function NoteCard({
@@ -118,7 +132,9 @@ export function NoteCard({
   onRestore,
   onDelete,
   onManageTags,
+  onMoveToFolder,
   onToggleChecklistItem,
+  onDragStart,
 }: NoteCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const config = TYPE_CONFIG[type];
@@ -225,7 +241,14 @@ export function NoteCard({
   );
 
   const hasMenuItems = Boolean(
-    (onToggleSelect && !selected) || onTogglePin || onRename || onManageTags || onArchive || onRestore || onDelete
+    (onToggleSelect && !selected) ||
+      onTogglePin ||
+      onRename ||
+      onManageTags ||
+      onMoveToFolder ||
+      onArchive ||
+      onRestore ||
+      onDelete
   );
   const menu = hasMenuItems && (
     <DropdownMenu>
@@ -256,6 +279,12 @@ export function NoteCard({
           <DropdownMenuItem onSelect={onManageTags}>
             <Tags className="size-4" />
             Gerenciar tags
+          </DropdownMenuItem>
+        )}
+        {onMoveToFolder && (
+          <DropdownMenuItem onSelect={onMoveToFolder}>
+            <FolderInput className="size-4" />
+            Mover para pasta
           </DropdownMenuItem>
         )}
         {onArchive && <DropdownMenuItem onSelect={onArchive}>Arquivar</DropdownMenuItem>}
@@ -304,13 +333,17 @@ export function NoteCard({
   if (isList) {
     return (
       <div
+        draggable={Boolean(onDragStart)}
+        onDragStart={onDragStart}
         className={cn(
-          "group flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-700",
+          "group relative flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-700",
           pinned ? "bg-primary/[0.12] ring-1 ring-primary/25" : "bg-secondary hover:bg-surface",
-          processing && "opacity-60",
+          processing && "overflow-hidden opacity-80",
+          onDragStart && "cursor-grab active:cursor-grabbing",
           justReady && "ring-2 ring-accent shadow-[0_0_20px_-4px_var(--accent)]"
         )}
       >
+        {processing && <ProcessingShimmer />}
         {checkbox}
         <span
           className={cn(
@@ -389,15 +422,19 @@ export function NoteCard({
 
   return (
     <div
+      draggable={Boolean(onDragStart)}
+      onDragStart={onDragStart}
       className={cn(
-        "group flex flex-col gap-2.5 rounded-3xl border p-4 transition-all duration-700",
+        "group relative flex flex-col gap-2.5 rounded-3xl border p-4 transition-all duration-700",
         pinned
           ? "border-transparent bg-primary/[0.12] ring-1 ring-primary/25"
           : "border-transparent bg-secondary hover:border-accent/40",
-        processing && "opacity-60",
+        processing && "overflow-hidden opacity-80",
+        onDragStart && "cursor-grab active:cursor-grabbing",
         justReady && "ring-2 ring-accent shadow-[0_0_24px_-4px_var(--accent)]"
       )}
     >
+      {processing && <ProcessingShimmer />}
       <div className="flex items-center gap-1.5 flex-wrap">
         {checkbox}
         <span

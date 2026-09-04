@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { extractDiscoveredItems, type DiscoveredFile } from "@/lib/import-notes";
+import { hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
 
 export interface FolderCardProps {
   name: string;
@@ -18,6 +19,8 @@ export interface FolderCardProps {
   onRename?: (name: string) => void;
   onDelete?: () => void;
   onDropItems?: (items: DiscoveredFile[]) => void;
+  /** Called with the dragged note/file ids when they're dropped here to move them into this folder. */
+  onDropNoteIds?: (ids: string[]) => void;
 }
 
 export function FolderCard({
@@ -27,6 +30,7 @@ export function FolderCard({
   onRename,
   onDelete,
   onDropItems,
+  onDropNoteIds,
 }: FolderCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -45,6 +49,10 @@ export function FolderCard({
     return Array.from(event.dataTransfer.types).includes("Files");
   }
 
+  function isDraggable(event: React.DragEvent) {
+    return hasFiles(event) || hasDraggedNoteIds(event);
+  }
+
   return (
     <div
       className={`relative cursor-pointer flex items-center gap-3 rounded-3xl p-4 text-left transition-all duration-200 ${
@@ -53,20 +61,20 @@ export function FolderCard({
           : "bg-card hover:bg-secondary"
       }`}
       onDragEnter={(e) => {
-        if (!hasFiles(e)) return;
+        if (!isDraggable(e)) return;
         e.preventDefault();
         e.stopPropagation();
         dragDepth.current += 1;
         setIsDragOver(true);
       }}
       onDragOver={(e) => {
-        if (!hasFiles(e)) return;
+        if (!isDraggable(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = "copy";
+        e.dataTransfer.dropEffect = hasDraggedNoteIds(e) ? "move" : "copy";
       }}
       onDragLeave={(e) => {
-        if (!hasFiles(e)) return;
+        if (!isDraggable(e)) return;
         e.preventDefault();
         e.stopPropagation();
         dragDepth.current -= 1;
@@ -76,11 +84,17 @@ export function FolderCard({
         }
       }}
       onDrop={(e) => {
-        if (!hasFiles(e)) return;
+        if (!isDraggable(e)) return;
         e.preventDefault();
         e.stopPropagation();
         dragDepth.current = 0;
         setIsDragOver(false);
+
+        if (hasDraggedNoteIds(e)) {
+          const ids = readDraggedNoteIds(e.dataTransfer);
+          if (ids.length > 0) onDropNoteIds?.(ids);
+          return;
+        }
 
         void extractDiscoveredItems(e.dataTransfer).then((discovered) => {
           if (discovered.length > 0) {

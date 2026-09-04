@@ -19,7 +19,7 @@ export default function NotesPage() {
         emptyTitle="Nenhuma nota ainda"
         emptyDescription="Segure a barra abaixo e arraste para cima para criar sua primeira nota."
       />
-      <ContentDock status="active" />
+      <ContentDock status="active" showFolders />
     </>
   );
 }

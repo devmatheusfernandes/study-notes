@@ -70,6 +70,20 @@
   --font-sans: var(--font-figtree);
   --font-heading: var(--font-caprasimo);
   --font-mono: var(--font-jetbrains-mono);
+
+  --animate-shimmer: shimmer-sweep 1.8s linear infinite;
+}
+
+/* A sheen sweeping left-to-right — shown over a card while a file upload or
+   .jwpub ingest is still processing, so "still working" reads as active
+   progress instead of just a dimmed, inert card. */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 150% 0;
+  }
 }
 
 body {

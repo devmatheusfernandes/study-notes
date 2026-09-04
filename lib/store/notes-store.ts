@@ -11,6 +11,8 @@ import {
   setNotePinned,
   setNoteStatus,
   bulkSetNoteStatus,
+  setNoteFolderRow,
+  bulkSetNoteFolder,
   deleteNotePermanently as deleteNoteRowPermanently,
   bulkDeleteNotesPermanently as bulkDeleteNoteRowsPermanently,
   createFolderRow,
@@ -111,6 +113,7 @@ type PendingOp =
   | { key: string; entityId: string; kind: "updateNote"; payload: { id: string; patch: { title?: string; body?: string } } }
   | { key: string; entityId: string; kind: "setNotePinned"; payload: { id: string; pinned: boolean } }
   | { key: string; entityId: string; kind: "setNoteStatus"; payload: { id: string; status: NoteStatus } }
+  | { key: string; entityId: string; kind: "setNoteFolder"; payload: { id: string; folderId?: string } }
   | { key: string; entityId: string; kind: "deleteNote"; payload: { id: string } }
   | { key: string; entityId: string; kind: "createFolder"; payload: { id: string; name: string; parentId?: string } }
   | { key: string; entityId: string; kind: "renameFolder"; payload: { id: string; name: string } }
@@ -167,6 +170,10 @@ interface NotesStore {
   restore: (id: string) => void;
   /** Removes a note for good — only meaningful for items already in the trash. */
   deletePermanently: (id: string) => void;
+  /** Moves a single note/file into a folder, or to the root when `folderId` is omitted. */
+  moveNote: (id: string, folderId?: string) => void;
+  /** Moves every given note/file into a folder, or to the root when `folderId` is omitted. */
+  bulkMoveNotes: (ids: string[], folderId?: string) => void;
   bulkArchive: (ids: string[]) => void;
   bulkRestore: (ids: string[]) => void;
   bulkTrash: (ids: string[]) => void;
@@ -227,6 +234,8 @@ function opAction(op: PendingOp): () => Promise<{ error?: string }> {
       return () => setNotePinned(op.payload.id, op.payload.pinned);
     case "setNoteStatus":
       return () => setNoteStatus(op.payload.id, op.payload.status);
+    case "setNoteFolder":
+      return () => setNoteFolderRow(op.payload.id, op.payload.folderId ?? null);
     case "deleteNote":
       return () => deleteNoteRowPermanently(op.payload.id);
     case "createFolder":
@@ -612,6 +621,38 @@ export const useNotesStore = create<NotesStore>()(
             notify.error("Não foi possível excluir");
           }
         });
+      },
+
+      moveNote: (id, folderId) => {
+        const previous = get().notes.find((n) => n.id === id)?.folderId;
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, folderId } : n)) }));
+
+        const op: PendingOp = { key: `note:${id}:folder`, entityId: id, kind: "setNoteFolder", payload: { id, folderId } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, folderId: previous } : n)) }));
+            notify.error("Não foi possível mover");
+          }
+        });
+      },
+
+      bulkMoveNotes: (ids, folderId) => {
+        const idSet = new Set(ids);
+        const previous = get().notes;
+        set((s) => ({ notes: s.notes.map((n) => (idSet.has(n.id) ? { ...n, folderId } : n)) }));
+
+        void bulkSetNoteFolder(ids, folderId ?? null)
+          .then((res) => {
+            if (res.error) {
+              set({ notes: previous });
+              notify.error("Não foi possível mover", res.error);
+            }
+          })
+          .catch(() => {
+            for (const id of ids) {
+              enqueueOp(set, { key: `note:${id}:folder`, entityId: id, kind: "setNoteFolder", payload: { id, folderId } });
+            }
+          });
       },
 
       bulkArchive: (ids) => applyBulkStatus(set, get, ids, "archived"),

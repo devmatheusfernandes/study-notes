@@ -220,6 +220,22 @@ export async function bulkSetNoteStatus(ids: string[], status: NoteStatus): Prom
   return error ? { error: "Não foi possível atualizar." } : {};
 }
 
+export async function setNoteFolderRow(id: string, folderId: string | null): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("notes").update({ folder_id: folderId }).eq("id", id);
+  return error ? { error: "Não foi possível mover." } : {};
+}
+
+export async function bulkSetNoteFolder(ids: string[], folderId: string | null): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("notes").update({ folder_id: folderId }).in("id", ids);
+  return error ? { error: "Não foi possível mover." } : {};
+}
+
 export async function deleteNotePermanently(id: string): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
