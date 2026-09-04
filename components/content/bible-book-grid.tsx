@@ -1,6 +1,7 @@
 "use client";
 
 import type { BibleBook } from "@/app/(app)/bible-actions";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BIBLE_BOOK_ABBREVIATIONS_PT, OLD_TESTAMENT_MAX_BOOK_ORDER } from "@/lib/bible/book-abbreviations";
 
 interface BibleBookGridProps {
@@ -36,7 +37,18 @@ export function BibleBookGrid({ books, onSelectBook }: BibleBookGridProps) {
       </div>
 
       {books === null ? (
-        <p className="py-10 text-center text-[13px] text-muted-foreground">carregando…</p>
+        <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
+          {[0, 1].map((section) => (
+            <div key={section} className="flex flex-1 flex-col gap-3">
+              <Skeleton className="h-3 w-40 rounded" />
+              <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-4 sm:gap-2">
+                {Array.from({ length: section === 0 ? 39 : 27 }, (_, i) => (
+                  <Skeleton key={i} className="aspect-square rounded-xl sm:aspect-auto sm:h-14" />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
           <section className="flex flex-1 flex-col gap-3">

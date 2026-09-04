@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Archive, BookMarked, BookOpen, LayoutGrid, MessageSquare, Trash2 } from "lucide-react";
+import { Archive, Book, Gem, LayoutGrid, MessageSquare, Trash2 } from "lucide-react";
 
 export interface SidebarNavItem {
   label: string;
@@ -10,8 +10,8 @@ export interface SidebarNavItem {
 
 export const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = [
   { label: "Meu conteúdo", href: "/notes", icon: LayoutGrid },
-  { label: "JW Library", href: "/jwlibrary", icon: BookMarked },
-  { label: "Bíblia", href: "/bible", icon: BookOpen },
+  { label: "Estudo Pessoal", href: "/jwlibrary", icon: Gem },
+  { label: "Bíblia", href: "/bible", icon: Book },
   { label: "Chats", href: "/chats", icon: MessageSquare },
   { label: "Arquivados", href: "/archived", icon: Archive },
   { label: "Lixeira", href: "/trash", icon: Trash2 },

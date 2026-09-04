@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronLeft } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface BibleChapterGridProps {
   bookName: string;
@@ -26,7 +27,11 @@ export function BibleChapterGrid({ bookName, chapterCount, onSelectChapter, onBa
       <h1 className="font-heading text-2xl uppercase">{bookName}</h1>
 
       {chapterCount === null ? (
-        <p className="py-10 text-center text-[13px] text-muted-foreground">carregando…</p>
+        <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-[repeat(20,minmax(0,1fr))]">
+          {Array.from({ length: 30 }, (_, i) => (
+            <Skeleton key={i} className="aspect-square rounded-xl" />
+          ))}
+        </div>
       ) : (
         <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-[repeat(20,minmax(0,1fr))]">
           {Array.from({ length: chapterCount }, (_, i) => i + 1).map((chapter) => (

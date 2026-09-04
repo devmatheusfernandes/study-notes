@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { BookMarked, Download, Pencil, Plus, RefreshCw, Search, Settings2, Tag, Upload } from "lucide-react";
+import { BookMarked, Download, Plus, RefreshCw, Search, Settings2, Tag, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { FileDropZone } from "./file-drop-zone";
 import { JwlibraryNoteEditorVault } from "./jwlibrary-note-editor-vault";
+import { JwlibraryNoteSidePanel } from "./jwlibrary-note-side-panel";
 import { JwlibraryTagPickerVault } from "./jwlibrary-tag-picker-vault";
 import { JwlibraryTagChip } from "./jwlibrary-tag-chip";
 import { JwlibraryBulkActionBar } from "./jwlibrary-bulk-action-bar";
@@ -37,6 +38,13 @@ function matchesQuery(note: JwlibraryNoteView, query: string): boolean {
     .join(" ")
     .toLowerCase();
   return haystack.includes(query.trim().toLowerCase());
+}
+
+function isNoteOpenable(note: JwlibraryNoteView): boolean {
+  return Boolean(
+    (note.publicationNoteId && note.chapterDocumentId !== null) ||
+      (note.location.bookNumber !== null && note.location.chapterNumber !== null)
+  );
 }
 
 function referenceLabel(note: JwlibraryNoteView): string {
@@ -90,6 +98,7 @@ export function JwlibraryNotesCollection() {
   const [creatingNote, setCreatingNote] = useState(false);
   const editorOpen = editingNote !== null || creatingNote;
   const [taggingNoteId, setTaggingNoteId] = useState<string | null>(null);
+  const [viewingNote, setViewingNote] = useState<JwlibraryNoteView | null>(null);
   const [tagSearch, setTagSearch] = useState("");
   const jwlibraryViewMode = usePreferencesStore((s) => s.jwlibraryViewMode);
   const setJwlibraryViewMode = usePreferencesStore((s) => s.setJwlibraryViewMode);
@@ -98,9 +107,10 @@ export function JwlibraryNotesCollection() {
   // is what makes this component re-render on toggle/selectAll/clear —
   // isSelected is a stable function reference across renders, so subscribing
   // to it alone never triggers a re-render (same pattern notes-collection.tsx
-  // relies on). Read but otherwise unused — the subscription is the point.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // relies on). Also drives `selectionMode` below, which keeps every card's
+  // checkbox visible once anything is selected, not just the hovered one.
   const selectedIds = useJwlibrarySelectionStore((s) => s.selectedIds);
+  const selectionMode = selectedIds.length > 0;
   const isSelected = useJwlibrarySelectionStore((s) => s.isSelected);
   const toggleSelect = useJwlibrarySelectionStore((s) => s.toggle);
   const setVisibleIds = useJwlibrarySelectionStore((s) => s.setVisibleIds);
@@ -330,7 +340,14 @@ export function JwlibraryNotesCollection() {
   return (
     <FileDropZone>
       {fileInputEl}
-      <div className="flex flex-col gap-4 px-4 py-5 sm:px-6">
+      {/* Outer row so JwlibraryNoteSidePanel (a JwpubSidePanel — a flex-row
+          sibling that pushes content on desktop, same as the reader
+          surfaces) sits beside the main column instead of stacking below it
+          — FileDropZone's own wrapper is flex-col, which was swallowing this
+          panel at the very bottom of the page instead of showing it as a
+          side panel. */}
+      <div className="flex min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-4 px-4 py-5 sm:px-6">
         {toolbar}
         {(usedColors.length > 0 || tags.length > 0) && (
           <div className="flex flex-col gap-2">
@@ -377,10 +394,6 @@ export function JwlibraryNotesCollection() {
           }
         >
           {filteredNotes.map((note) => {
-            const openable = Boolean(
-              (note.publicationNoteId && note.chapterDocumentId !== null) ||
-                (note.location.bookNumber !== null && note.location.chapterNumber !== null)
-            );
             // note.content is either plain text (imported from a real backup)
             // or Tiptap HTML (created here) — parseNotePreview handles both
             // the same way NoteCard already does for notes.body, so raw tags
@@ -409,7 +422,7 @@ export function JwlibraryNotesCollection() {
                 layout
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col gap-1.5 rounded-2xl border border-transparent bg-secondary p-4 transition-colors"
+                className="group flex flex-col gap-1.5 rounded-2xl border border-transparent bg-secondary p-4 transition-colors"
               >
                 <div className="flex items-center gap-2">
                   <button
@@ -417,7 +430,10 @@ export function JwlibraryNotesCollection() {
                     onClick={() => toggleSelect(note.id)}
                     aria-label={isSelected(note.id) ? "Remover da seleção" : "Selecionar"}
                     aria-pressed={isSelected(note.id)}
-                    className="shrink-0"
+                    className={cn(
+                      "shrink-0 overflow-hidden transition-[width,margin-right] duration-200 ease-out",
+                      selectionMode || isSelected(note.id) ? "w-6 mr-0" : "w-0 group-hover:w-6"
+                    )}
                   >
                     <Checkbox checked={isSelected(note.id)} className="pointer-events-none" tabIndex={-1} readOnly />
                   </button>
@@ -438,37 +454,43 @@ export function JwlibraryNotesCollection() {
                   >
                     <Tag className="size-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingNote(note)}
-                    aria-label="Editar nota"
-                    className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
                 </div>
 
-                {/* Sibling of the edit button above, not nested inside it — a
-                    card can't both open the reader and edit metadata from the
-                    same click target. */}
-                {openable ? (
-                  <button
-                    type="button"
-                    onClick={() => openNote(note)}
-                    className="flex flex-col gap-1.5 text-left hover:opacity-90"
-                  >
-                    {body}
-                  </button>
-                ) : (
-                  <div className="flex flex-col gap-1.5">{body}</div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setViewingNote(note)}
+                  className="flex flex-col gap-1.5 text-left hover:opacity-90"
+                >
+                  {body}
+                </button>
               </motion.div>
             );
           })}
         </div>
+
+        <JwlibraryBulkActionBar onDeleted={() => void refresh()} />
       </div>
 
-      <JwlibraryBulkActionBar onDeleted={() => void refresh()} />
+      <JwlibraryNoteSidePanel
+        open={viewingNote !== null}
+        note={viewingNote}
+        tags={tags}
+        openable={viewingNote ? isNoteOpenable(viewingNote) : false}
+        onClose={() => setViewingNote(null)}
+        onEdit={() => {
+          if (viewingNote) setEditingNote(viewingNote);
+          setViewingNote(null);
+        }}
+        onGoToContent={() => {
+          if (viewingNote) openNote(viewingNote);
+          setViewingNote(null);
+        }}
+        onDeleted={() => {
+          setViewingNote(null);
+          void refresh();
+        }}
+      />
+      </div>
 
       <JwlibraryNoteEditorVault
         open={editorOpen}

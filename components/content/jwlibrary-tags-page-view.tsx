@@ -25,7 +25,7 @@ export function JwlibraryTagsPageView() {
         className="flex w-fit items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-[13px] text-foreground/80 transition-colors hover:bg-surface"
       >
         <ChevronLeft className="size-4" />
-        JW Library
+        Estudo Pessoal
       </Link>
 
       <JwlibraryTagManagerList tags={tags} onRefresh={refresh} />

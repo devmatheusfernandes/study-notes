@@ -128,6 +128,11 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   const bookIndex = books?.findIndex((b) => b.bookOrder === bookOrder) ?? -1;
 
   useEffect(() => {
+    // Reset before fetching, not just after — otherwise switching books
+    // briefly shows the PREVIOUS book's chapter count (e.g. the chapter grid
+    // flashing 50 buttons before snapping down to 10) instead of the
+    // "carregando…" state bible-chapter-grid.tsx already has for `null`.
+    queueMicrotask(() => setChapterCount(null));
     void getBibleChapterCount(bookOrder).then((result) => setChapterCount(result.count ?? null));
   }, [bookOrder]);
 
