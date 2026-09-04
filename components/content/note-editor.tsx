@@ -8,8 +8,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SyncStatusIndicator } from "@/components/content/sync-status";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/content/rich-text-editor";
+import { NoteReferenceSurface } from "@/components/content/note-reference-surface";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useHydrated } from "@/components/providers/store-hydration";
+import { listPublicationSymbols } from "@/app/(app)/jwpub-actions";
+import type { PublicationOption } from "@/lib/notes/reference-suggestions";
+import type { NoteReference } from "@/lib/notes/note-reference";
 
 interface NoteEditorProps {
   /** Existing note id, or undefined for a brand-new note. */
@@ -57,6 +61,23 @@ export function NoteEditor({ noteId, initialNote }: NoteEditorProps) {
   const [createdId, setCreatedId] = useState<string | null>(noteId ?? null);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
+  // The user's .jwpub library, for in-note references: it decides whether a
+  // typed "(th 2)" is a real reference and it populates the "/" menu. Fetched
+  // once here rather than per keystroke — a note is edited far more often
+  // than the library changes.
+  const [publications, setPublications] = useState<PublicationOption[]>([]);
+  const [openReference, setOpenReference] = useState<NoteReference | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listPublicationSymbols().then((result) => {
+      if (!cancelled) setPublications(result.publications);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Debounced autosave.
   useEffect(() => {
     if (!hydrated) return;
@@ -84,69 +105,78 @@ export function NoteEditor({ noteId, initialNote }: NoteEditorProps) {
   const pinned = current?.pinned ?? false;
 
   return (
-    <motion.main
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="flex flex-1 flex-col"
-    >
-      <header className="flex items-center gap-2 px-4 py-3 sm:px-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          leftIcon={<ArrowLeft />}
-          onClick={() => router.push("/notes")}
-        >
-          Voltar
-        </Button>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => editorRef.current?.openImagePicker()}
-            aria-label="Inserir imagem"
-            className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+    // Row, not just the main column: the reference panel is a flex sibling
+    // (same arrangement as JwpubReader), so opening it narrows the note
+    // instead of floating over the text the user is writing.
+    <div className="flex min-h-dvh w-full">
+      <motion.main
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: "easeOut" }}
+        className="flex min-w-0 flex-1 flex-col"
+      >
+        <header className="flex items-center gap-2 px-4 py-3 sm:px-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<ArrowLeft />}
+            onClick={() => router.push("/notes")}
           >
-            <ImagePlus className="size-4" />
-          </button>
-          {current && (
+            Voltar
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              onClick={() => togglePin(current.id)}
-              aria-label={pinned ? "Desafixar nota" : "Fixar nota"}
-              aria-pressed={pinned}
-              className={cn(
-                "rounded-full p-2 transition-colors",
-                pinned
-                  ? "bg-primary/[0.18] text-accent"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
+              onClick={() => editorRef.current?.openImagePicker()}
+              aria-label="Inserir imagem"
+              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
-              <Pin className={cn("size-4", pinned && "fill-current")} />
+              <ImagePlus className="size-4" />
             </button>
-          )}
+            {current && (
+              <button
+                type="button"
+                onClick={() => togglePin(current.id)}
+                aria-label={pinned ? "Desafixar nota" : "Fixar nota"}
+                aria-pressed={pinned}
+                className={cn(
+                  "rounded-full p-2 transition-colors",
+                  pinned
+                    ? "bg-primary/[0.18] text-accent"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                )}
+              >
+                <Pin className={cn("size-4", pinned && "fill-current")} />
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Título da nota"
+            aria-label="Título da nota"
+            autoFocus={!noteId}
+            className="w-full bg-transparent font-heading text-3xl leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50"
+          />
+
+          <SyncStatusIndicator status={current?.syncStatus ?? "local"} />
+
+          <RichTextEditor
+            ref={editorRef}
+            content={body}
+            onChange={setBody}
+            autoFocus={!noteId}
+            className="flex flex-1 flex-col"
+            publications={publications}
+            onReferenceClick={setOpenReference}
+          />
         </div>
-      </header>
+      </motion.main>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Título da nota"
-          aria-label="Título da nota"
-          autoFocus={!noteId}
-          className="w-full bg-transparent font-heading text-3xl leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50"
-        />
-
-        <SyncStatusIndicator status={current?.syncStatus ?? "local"} />
-
-        <RichTextEditor
-          ref={editorRef}
-          content={body}
-          onChange={setBody}
-          autoFocus={!noteId}
-          className="flex flex-1 flex-col"
-        />
-      </div>
-    </motion.main>
+      <NoteReferenceSurface reference={openReference} onClose={() => setOpenReference(null)} />
+    </div>
   );
 }

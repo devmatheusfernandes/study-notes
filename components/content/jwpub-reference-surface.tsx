@@ -22,6 +22,8 @@ interface JwpubReferenceSurfaceProps {
   target: JwpubReferenceTarget | null;
   html: string | null;
   isLoading: boolean;
+  /** Shown instead of the content when the reference could not be resolved at all (e.g. the publication is not in this user's library). */
+  error?: string | null;
   onClose: () => void;
 }
 
@@ -29,10 +31,12 @@ function Body({
   target,
   html,
   isLoading,
+  error,
 }: {
   target: JwpubReferenceTarget | null;
   html: string | null;
   isLoading: boolean;
+  error?: string | null;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,8 +69,8 @@ function Body({
     );
   }
 
-  if (!target || !html) {
-    return <p className="text-[13.5px] text-muted-foreground">Conteúdo não encontrado.</p>;
+  if (error || !target || !html) {
+    return <p className="text-[13.5px] text-muted-foreground">{error ?? "Conteúdo não encontrado."}</p>;
   }
 
   return (
@@ -89,10 +93,10 @@ function Body({
 }
 
 /** Same side-panel-on-desktop/Vault-on-mobile shell as footnotes — opened by tapping a resolved `data-jwpub-pubref` cross-reference (e.g. "th study 5") in another already-uploaded publication. */
-export function JwpubReferenceSurface({ open, target, html, isLoading, onClose }: JwpubReferenceSurfaceProps) {
+export function JwpubReferenceSurface({ open, target, html, isLoading, error, onClose }: JwpubReferenceSurfaceProps) {
   return (
     <JwpubSidePanel open={open} title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"} onClose={onClose}>
-      <Body target={target} html={html} isLoading={isLoading} />
+      <Body target={target} html={html} isLoading={isLoading} error={error} />
     </JwpubSidePanel>
   );
 }

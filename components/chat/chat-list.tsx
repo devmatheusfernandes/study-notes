@@ -42,6 +42,95 @@ interface ChatListProps {
   maxItems?: number;
 }
 
+/**
+ * Module scope on purpose — declaring this inside `ChatList` would make it a
+ * new component *type* on every render, so React would unmount and remount
+ * each row instead of updating it, replaying the entrance animation. The
+ * sidebar re-renders on every navigation (it reads `usePathname`), which made
+ * the recent-conversations list visibly flicker on each page change.
+ */
+function ConversationItem({
+  conv,
+  compact,
+  onArchive,
+  onRestore,
+  onRequestDelete,
+}: {
+  conv: ChatConversation;
+  compact: boolean;
+  onArchive: (conv: ChatConversation) => void;
+  onRestore: (conv: ChatConversation) => void;
+  onRequestDelete: (id: string) => void;
+}) {
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, height: 0 }}
+      className="group"
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-colors",
+          compact ? "hover:bg-secondary" : "bg-secondary hover:bg-surface"
+        )}
+      >
+        <Link href={`/chats/${conv.id}`} className="flex min-w-0 flex-1 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+            <MessageSquare className="size-3.5" />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[13.5px] font-medium text-foreground transition-colors group-hover:text-accent">
+              {conv.title}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              {formatRelativeTime(conv.updatedAt)}
+            </span>
+          </div>
+        </Link>
+
+        {conv.status === "archived" && (
+          <Badge variant="outline" className="shrink-0 text-[9px]">
+            Arquivada
+          </Badge>
+        )}
+
+        {!compact && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Opções"
+                className="shrink-0 rounded-full p-1 text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:text-foreground"
+              >
+                <MoreHorizontal className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {conv.status === "active" ? (
+                <DropdownMenuItem onSelect={() => onArchive(conv)}>
+                  <Archive className="size-4" />
+                  Arquivar
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onSelect={() => onRestore(conv)}>
+                  <ArchiveRestore className="size-4" />
+                  Restaurar
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem variant="destructive" onSelect={() => onRequestDelete(conv.id)}>
+                <Trash2 className="size-4" />
+                Excluir
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 export function ChatList({ compact = false, maxItems }: ChatListProps) {
   const conversations = useChatStore((s) => s.conversations);
   const isLoaded = useChatStore((s) => s.isLoaded);
@@ -87,82 +176,6 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
     notify.success("Conversa excluída.");
   }
 
-  function ConversationItem({ conv }: { conv: ChatConversation }) {
-    return (
-      <motion.div
-        layout
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, height: 0 }}
-        className="group"
-      >
-        <div
-          className={cn(
-            "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-colors",
-            compact ? "hover:bg-secondary" : "bg-secondary hover:bg-surface"
-          )}
-        >
-          <Link
-            href={`/chats/${conv.id}`}
-            className="flex min-w-0 flex-1 items-center gap-2.5"
-          >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-              <MessageSquare className="size-3.5" />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-[13.5px] font-medium text-foreground transition-colors group-hover:text-accent">
-                {conv.title}
-              </span>
-              <span className="text-[11px] text-muted-foreground">
-                {formatRelativeTime(conv.updatedAt)}
-              </span>
-            </div>
-          </Link>
-
-          {conv.status === "archived" && (
-            <Badge variant="outline" className="shrink-0 text-[9px]">
-              Arquivada
-            </Badge>
-          )}
-
-          {!compact && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Opções"
-                  className="shrink-0 rounded-full p-1 text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:text-foreground"
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {conv.status === "active" ? (
-                  <DropdownMenuItem onSelect={() => void handleArchive(conv)}>
-                    <Archive className="size-4" />
-                    Arquivar
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onSelect={() => void handleRestore(conv)}>
-                    <ArchiveRestore className="size-4" />
-                    Restaurar
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => setConfirmDeleteId(conv.id)}
-                >
-                  <Trash2 className="size-4" />
-                  Excluir
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </motion.div>
-    );
-  }
-
   if (compact) {
     if (!isLoaded) {
       return (
@@ -183,7 +196,14 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
     return (
       <div className="flex flex-col gap-0.5">
         {displayItems.map((conv) => (
-          <ConversationItem key={conv.id} conv={conv} />
+          <ConversationItem
+            key={conv.id}
+            conv={conv}
+            compact={compact}
+            onArchive={(c) => void handleArchive(c)}
+            onRestore={(c) => void handleRestore(c)}
+            onRequestDelete={setConfirmDeleteId}
+          />
         ))}
         {activeConversations.length > (maxItems ?? 3) && (
           <Link
@@ -211,7 +231,14 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
 
       <AnimatePresence mode="popLayout">
         {displayItems.map((conv) => (
-          <ConversationItem key={conv.id} conv={conv} />
+          <ConversationItem
+            key={conv.id}
+            conv={conv}
+            compact={compact}
+            onArchive={(c) => void handleArchive(c)}
+            onRestore={(c) => void handleRestore(c)}
+            onRequestDelete={setConfirmDeleteId}
+          />
         ))}
       </AnimatePresence>
 
@@ -222,7 +249,14 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
           </span>
           <AnimatePresence mode="popLayout">
             {archivedConversations.map((conv) => (
-              <ConversationItem key={conv.id} conv={conv} />
+              <ConversationItem
+            key={conv.id}
+            conv={conv}
+            compact={compact}
+            onArchive={(c) => void handleArchive(c)}
+            onRestore={(c) => void handleRestore(c)}
+            onRequestDelete={setConfirmDeleteId}
+          />
             ))}
           </AnimatePresence>
         </div>

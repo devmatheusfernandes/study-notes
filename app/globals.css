@@ -35,6 +35,21 @@
   --surface: #211d1b;
   --surface-elevated: #302b28;
 
+  /* Bible book divisions (/bible grid) — JW Library tints its book tiles by
+     section in shades of one hue; this is the same idea in the Organic
+     palette. Two four-step ramps, mixed from the existing tokens rather than
+     picked by hand: --primary for the Hebrew-Aramaic Scriptures, the warmer
+     --accent for the Christian Greek Scriptures. Every step stays at 5.2:1 or
+     better against --foreground, so the book names keep AA contrast. */
+  --bible-pentateuch: color-mix(in oklab, var(--primary) 24%, var(--background));
+  --bible-historical: color-mix(in oklab, var(--primary) 38%, var(--background));
+  --bible-poetic: color-mix(in oklab, var(--primary) 52%, var(--background));
+  --bible-prophetic: color-mix(in oklab, var(--primary) 66%, var(--background));
+  --bible-gospels: color-mix(in oklab, var(--accent) 20%, var(--background));
+  --bible-acts: color-mix(in oklab, var(--accent) 31%, var(--background));
+  --bible-letters: color-mix(in oklab, var(--accent) 42%, var(--background));
+  --bible-revelation: color-mix(in oklab, var(--accent) 53%, var(--background));
+
   --radius: 1.25rem;
 }
 
@@ -62,6 +77,15 @@
   --color-ring: var(--ring);
   --color-surface: var(--surface);
   --color-surface-elevated: var(--surface-elevated);
+
+  --color-bible-pentateuch: var(--bible-pentateuch);
+  --color-bible-historical: var(--bible-historical);
+  --color-bible-poetic: var(--bible-poetic);
+  --color-bible-prophetic: var(--bible-prophetic);
+  --color-bible-gospels: var(--bible-gospels);
+  --color-bible-acts: var(--bible-acts);
+  --color-bible-letters: var(--bible-letters);
+  --color-bible-revelation: var(--bible-revelation);
 
   --radius-sm: calc(var(--radius) - 0.5rem);
   --radius-md: calc(var(--radius) - 0.25rem);
@@ -112,4 +136,24 @@ body {
 
 *::-webkit-scrollbar {
   display: none !important; /* Chrome, Safari, Opera, Edge */
+}
+
+/* In-note references — "(mt 7:12)" / "(th 2)" typed into a note body and
+   marked up by lib/tiptap/note-reference-mark.ts. Styled here rather than
+   with utility classes on the mark so the same treatment applies anywhere a
+   note body is rendered, not just inside the editor. */
+.note-reference {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+  border-radius: 999px;
+  padding: 0.05em 0.4em;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+  transition: background-color 0.15s ease;
+}
+
+.note-reference:hover {
+  background: color-mix(in oklab, var(--primary) 26%, transparent);
 }

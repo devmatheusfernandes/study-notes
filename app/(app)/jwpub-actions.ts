@@ -420,3 +420,152 @@ export async function saveAnswer(
 
   return error ? { error: "Não foi possível salvar a resposta." } : {};
 }
+
+/* ------------------------------------------------------------------ *
+ * In-note references (see lib/notes/note-reference.ts)
+ * ------------------------------------------------------------------ */
+
+export interface PublicationSymbolSummary {
+  symbol: string;
+  title: string;
+  noteId: string;
+  publicationId: string;
+}
+
+/**
+ * Every publication this user has ingested, as `symbol → title`.
+ *
+ * The note editor loads this once on mount and uses it to decide whether a
+ * typed "(th 2)" is a real reference at all — without that check, ordinary
+ * parenthetical prose would be marked up as a reference that can never
+ * resolve. Deliberately excludes `status = 'failed'` rows, which have no
+ * chapters to open.
+ */
+export async function listPublicationSymbols(): Promise<{
+  publications: PublicationSymbolSummary[];
+}> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { publications: [] };
+
+  const { data } = await supabase
+    .from("jwpub_publications")
+    .select("id, note_id, symbol, title")
+    .eq("status", "ready")
+    .order("title", { ascending: true });
+
+  const publications: PublicationSymbolSummary[] = [];
+  for (const row of data ?? []) {
+    if (!row.symbol) continue;
+    publications.push({
+      symbol: row.symbol.toLowerCase(),
+      title: row.title,
+      noteId: row.note_id,
+      publicationId: row.id,
+    });
+  }
+  return { publications };
+}
+
+/**
+ * Matches a chapter title against the number the user wrote in "(th 2)".
+ *
+ * Publications number their parts inconsistently — "Estudo 2", "Lição 2",
+ * "2 Seja um bom leitor" — so this tries the labelled forms first and only
+ * then a bare leading number, mirroring the heuristic JwpubReader already
+ * uses for `?chapter=` links.
+ */
+function chapterTitleMatchesNumber(title: string, wanted: number): boolean {
+  const normalized = title
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  // Built from a plain string, not a template literal: the escapes here are
+  // regex syntax, and a template literal would consume them as string escapes
+  // first (turning "\\s" into a literal "s").
+  const labelled = new RegExp(
+    "(?:licao|capitulo|cap\\.?|estudo|secao|parte|artigo)\\s*0*" + wanted + "(?!\\d)"
+  );
+  if (labelled.test(normalized)) return true;
+
+  const leading = /^\s*0*(\d{1,3})(?!\d)/.exec(normalized);
+  return leading !== null && Number(leading[1]) === wanted;
+}
+
+export interface ResolvedPublicationReference {
+  noteId: string;
+  publicationId: string;
+  publicationTitle: string;
+  symbol: string;
+  documentId: number;
+  chapterTitle: string;
+  html: string;
+}
+
+/**
+ * Opens "(th 2)" — the caller's own `th` publication, chapter 2 — in one
+ * round trip: finds the publication by symbol, picks the chapter, and returns
+ * its content.
+ *
+ * Resolved at click time rather than when the reference was typed, so a
+ * reference written before the publication was uploaded starts working the
+ * moment it lands (and stops if the file is deleted) — the same reasoning as
+ * resolveJwpubReferences above.
+ */
+export async function resolvePublicationReference(
+  symbol: string,
+  chapter: number | null
+): Promise<{ reference?: ResolvedPublicationReference; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const cleanSymbol = symbol.trim().toLowerCase();
+  if (!cleanSymbol) return { error: "Referência inválida." };
+
+  const { data: publication } = await supabase
+    .from("jwpub_publications")
+    .select("id, note_id, title, symbol")
+    .ilike("symbol", cleanSymbol)
+    .eq("status", "ready")
+    .limit(1)
+    .maybeSingle();
+
+  if (!publication) {
+    return { error: `Você ainda não tem a publicação "${cleanSymbol.toUpperCase()}" na sua biblioteca.` };
+  }
+
+  const { data: chapters } = await supabase
+    .from("jwpub_chapters")
+    .select("document_id, position, title, content_html")
+    .eq("publication_id", publication.id)
+    .order("position", { ascending: true });
+
+  if (!chapters || chapters.length === 0) return { error: "Publicação sem capítulos." };
+
+  let match = chapters[0];
+  if (chapter !== null) {
+    const byTitle = chapters.find((row) => chapterTitleMatchesNumber(row.title, chapter));
+    // Position is 0-based, so "chapter 2" is index 2 only when the file has a
+    // cover/front-matter document at 0 — try both rather than guessing.
+    const byPosition =
+      chapters.find((row) => row.position === chapter) ??
+      chapters.find((row) => row.position === chapter - 1);
+    const resolved = byTitle ?? byPosition;
+    if (!resolved) {
+      return { error: `A publicação "${publication.title}" não tem um capítulo ${chapter}.` };
+    }
+    match = resolved;
+  }
+
+  return {
+    reference: {
+      noteId: publication.note_id,
+      publicationId: publication.id,
+      publicationTitle: publication.title,
+      symbol: publication.symbol,
+      documentId: match.document_id,
+      chapterTitle: match.title,
+      html: match.content_html ?? "",
+    },
+  };
+}
