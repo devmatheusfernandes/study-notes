@@ -220,6 +220,52 @@ export async function getChapter(
   return { html: data.content_html ?? "" };
 }
 
+export interface ResolvedJwpubReference {
+  mepsDocumentId: number;
+  noteId: string;
+  publicationId: string;
+  publicationTitle: string;
+  documentId: number;
+  chapterTitle: string;
+}
+
+/**
+ * Batch-resolves `jwpub://p/T:<mepsDocumentId>/…` cross-references (see
+ * rewriteJwpubLinks in lib/jwpub/sanitize.ts) against the caller's own
+ * already-ingested publications — deliberately dynamic, not done once at
+ * ingest time, since a reference that's inert today becomes clickable the
+ * moment the user uploads the publication it points to (and vice versa if
+ * they later delete it).
+ */
+export async function resolveJwpubReferences(
+  mepsDocumentIds: number[]
+): Promise<{ resolved: ResolvedJwpubReference[] }> {
+  const { supabase, user } = await requireUser();
+  if (!user || mepsDocumentIds.length === 0) return { resolved: [] };
+
+  const uniqueIds = [...new Set(mepsDocumentIds)];
+  const { data } = await supabase
+    .from("jwpub_chapters")
+    .select("meps_document_id, document_id, title, publication_id, jwpub_publications(note_id, title, status)")
+    .in("meps_document_id", uniqueIds);
+
+  const resolved: ResolvedJwpubReference[] = [];
+  for (const row of data ?? []) {
+    if (row.meps_document_id === null) continue;
+    const pub = Array.isArray(row.jwpub_publications) ? row.jwpub_publications[0] : row.jwpub_publications;
+    if (!pub || pub.status !== "ready") continue;
+    resolved.push({
+      mepsDocumentId: row.meps_document_id,
+      noteId: pub.note_id,
+      publicationId: row.publication_id,
+      publicationTitle: pub.title,
+      documentId: row.document_id,
+      chapterTitle: row.title,
+    });
+  }
+  return { resolved };
+}
+
 export async function getFootnote(
   publicationId: string,
   footnoteId: number

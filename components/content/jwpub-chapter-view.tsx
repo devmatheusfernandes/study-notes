@@ -18,6 +18,10 @@ interface JwpubChapterViewProps {
   answers: Record<string, string>;
   onFootnote: (footnoteId: number) => void;
   onBibleRef: (firstVerseId: number, lastVerseId: number) => void;
+  /** A `data-jwpub-pubref` cross-reference was clicked — only fires for one whose MepsDocumentId is in `resolvedPubRefIds` (see JwpubReader, which resolves them against the user's own library). */
+  onPublicationRef?: (mepsDocumentId: number, pid?: string) => void;
+  /** MepsDocumentIds this user currently has an ingested chapter for — drives both which pubrefs look clickable and which actually respond to a click. */
+  resolvedPubRefIds?: Set<number>;
   /** "Anotar" mode (Fase 2) — while true, clicking any paragraph/heading (without selecting text) picks the whole thing for a new jwlibrary note instead of the normal footnote/bible-ref handling. Selecting a specific span works independently of this mode — see onPickParagraphSpan. */
   pickingParagraph?: boolean;
   onPickParagraph?: (pid: string) => void;
@@ -48,6 +52,8 @@ export function JwpubChapterView({
   answers,
   onFootnote,
   onBibleRef,
+  onPublicationRef,
+  resolvedPubRefIds,
   pickingParagraph = false,
   onPickParagraph,
   onPickParagraphSpan,
@@ -92,6 +98,16 @@ export function JwpubChapterView({
         return;
       }
 
+      const pubRef = el?.closest<HTMLElement>("[data-jwpub-pubref]");
+      if (pubRef) {
+        const mepsId = Number(pubRef.dataset.jwpubPubref);
+        if (Number.isFinite(mepsId) && resolvedPubRefIds?.has(mepsId)) {
+          event.preventDefault();
+          onPublicationRef?.(mepsId, pubRef.dataset.jwpubPubrefPid);
+        }
+        return;
+      }
+
       const highlightMark = el?.closest<HTMLElement>("[data-jwlibrary-note-id]");
       if (highlightMark) {
         const noteId = highlightMark.dataset.jwlibraryNoteId;
@@ -102,7 +118,27 @@ export function JwpubChapterView({
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [onFootnote, onBibleRef, pickingParagraph, onPickParagraph, highlights, onHighlightNote]);
+  }, [onFootnote, onBibleRef, onPublicationRef, resolvedPubRefIds, pickingParagraph, onPickParagraph, highlights, onHighlightNote]);
+
+  // Upgrades resolved pubrefs to look clickable (accent + underline), same
+  // treatment as footnotes/bible refs — done imperatively post-render, like
+  // the highlight-drawing effect below, since which ones are resolved only
+  // becomes known once JwpubReader's async resolveJwpubReferences call
+  // returns, well after this HTML was already sanitized and rendered.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const els = container.querySelectorAll<HTMLElement>("[data-jwpub-pubref]");
+    els.forEach((el) => {
+      const id = Number(el.dataset.jwpubPubref);
+      const isResolved = Number.isFinite(id) && (resolvedPubRefIds?.has(id) ?? false);
+      el.classList.toggle("cursor-pointer", isResolved);
+      el.classList.toggle("text-accent", isResolved);
+      el.classList.toggle("underline", isResolved);
+      el.classList.toggle("underline-offset-2", isResolved);
+      el.classList.toggle("text-foreground/80", !isResolved);
+    });
+  }, [html, resolvedPubRefIds]);
 
   // Selecting text always offers to anchor a new note to that exact span —
   // no need to switch into "Anotar" mode first (that mode is only for
@@ -346,6 +382,10 @@ export function JwpubChapterView({
           "[&_[data-jwpub-footnote]]:cursor-pointer [&_[data-jwpub-footnote]]:text-accent [&_[data-jwpub-footnote]]:underline [&_[data-jwpub-footnote]]:underline-offset-2",
           "[&_[data-jwpub-bible-first]]:cursor-pointer [&_[data-jwpub-bible-first]]:text-accent [&_[data-jwpub-bible-first]]:underline [&_[data-jwpub-bible-first]]:underline-offset-2",
           "[&_[data-jwpub-ref]]:text-foreground/80",
+          // Starts muted/inert like data-jwpub-ref — the effect above upgrades
+          // it to the accent/clickable look once resolution confirms the
+          // referenced publication is actually in this user's library.
+          "[&_[data-jwpub-pubref]]:text-foreground/80",
           // "Anotar" mode: every paragraph/heading becomes a click target for a
           // new note, highlighted on hover so it's clear what will be picked.
           pickingParagraph &&

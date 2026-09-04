@@ -1,13 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ChevronLeft, ChevronRight, List, NotebookPen, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
-import { getChapter, getFootnote, getPublication, getAnswers } from "@/app/(app)/jwpub-actions";
+import {
+  getChapter,
+  getFootnote,
+  getPublication,
+  getAnswers,
+  resolveJwpubReferences,
+  type ResolvedJwpubReference,
+} from "@/app/(app)/jwpub-actions";
 import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { getChapterHighlights, type ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
@@ -17,6 +24,7 @@ import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
+import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
 import {
   JwlibraryNoteEditorVault,
   type PrefilledJwlibraryLocation,
@@ -164,6 +172,17 @@ export function JwpubReader({
   const [bibleError, setBibleError] = useState<string | null>(null);
   const [isLoadingBible, setIsLoadingBible] = useState(false);
 
+  // Cross-references to other publications (e.g. "th study 5") — resolved
+  // dynamically per chapter against the user's own library, not baked in at
+  // ingest, so uploading the referenced publication later makes old links
+  // start working retroactively. Keyed by MepsDocumentId.
+  const [resolvedPubRefs, setResolvedPubRefs] = useState<Map<number, ResolvedJwpubReference>>(new Map());
+  const resolvedPubRefIds = useMemo(() => new Set(resolvedPubRefs.keys()), [resolvedPubRefs]);
+  const [referenceOpen, setReferenceOpen] = useState(false);
+  const [referenceTarget, setReferenceTarget] = useState<JwpubReferenceTarget | null>(null);
+  const [referenceHtml, setReferenceHtml] = useState<string | null>(null);
+  const [isLoadingReference, setIsLoadingReference] = useState(false);
+
   // "Anotar" mode (Fase 2): while true, clicking a paragraph in
   // JwpubChapterView opens the note editor pre-anchored to it instead of the
   // normal footnote/bible-ref handling.
@@ -239,6 +258,54 @@ export function JwpubReader({
       cancelled = true;
     };
   }, [publication.id, activeChapter]);
+
+  // Scans the just-loaded chapter for cross-references and resolves them
+  // against whatever this user currently has ingested — re-runs on every
+  // chapter (and would also re-run if the same chapter's html were refetched
+  // after the user uploads the referenced publication and comes back).
+  useEffect(() => {
+    let cancelled = false;
+    const ids = html ? [...new Set([...html.matchAll(/data-jwpub-pubref="(\d+)"/g)].map((m) => Number(m[1])))] : [];
+
+    if (ids.length === 0) {
+      queueMicrotask(() => {
+        if (!cancelled) setResolvedPubRefs(new Map());
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void resolveJwpubReferences(ids).then((result) => {
+      if (cancelled) return;
+      setResolvedPubRefs(new Map(result.resolved.map((r) => [r.mepsDocumentId, r])));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [html]);
+
+  const handlePublicationRef = useCallback(
+    (mepsDocumentId: number, pid?: string) => {
+      const resolved = resolvedPubRefs.get(mepsDocumentId);
+      if (!resolved) return;
+      setReferenceOpen(true);
+      setReferenceHtml(null);
+      setIsLoadingReference(true);
+      setReferenceTarget({
+        noteId: resolved.noteId,
+        publicationTitle: resolved.publicationTitle,
+        chapterTitle: resolved.chapterTitle,
+        documentId: resolved.documentId,
+        pid,
+      });
+      void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
+        setReferenceHtml(result.html ?? null);
+        setIsLoadingReference(false);
+      });
+    },
+    [resolvedPubRefs]
+  );
 
   const handleFootnote = useCallback(
     (footnoteId: number) => {
@@ -374,6 +441,19 @@ export function JwpubReader({
             )}
           </div>
 
+          {!failed && (
+            <button
+              type="button"
+              onClick={() => void reprocess()}
+              disabled={isReprocessing}
+              aria-label="Reprocessar publicação"
+              title="Reler o arquivo original — útil depois que o app aprende a reconhecer mais coisas nele, como referências para outras publicações"
+              className="shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className={cn("size-4", isReprocessing && "animate-spin")} />
+            </button>
+          )}
+
           {chapters.length > 0 && (
             <button
               type="button"
@@ -439,6 +519,8 @@ export function JwpubReader({
                   answers={answers}
                   onFootnote={handleFootnote}
                   onBibleRef={handleBibleRef}
+                  onPublicationRef={handlePublicationRef}
+                  resolvedPubRefIds={resolvedPubRefIds}
                   pickingParagraph={pickingParagraph}
                   onPickParagraph={handlePickParagraph}
                   onPickParagraphSpan={handlePickParagraphSpan}
@@ -544,6 +626,14 @@ export function JwpubReader({
         error={bibleError}
         isLoading={isLoadingBible}
         onClose={() => setBibleOpen(false)}
+      />
+
+      <JwpubReferenceSurface
+        open={referenceOpen}
+        target={referenceTarget}
+        html={referenceHtml}
+        isLoading={isLoadingReference}
+        onClose={() => setReferenceOpen(false)}
       />
 
       <JwlibraryHighlightNotePanel

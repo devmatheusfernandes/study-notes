@@ -18,6 +18,7 @@ export function sanitizeChapterHtml(html: string): string {
       "class", "id", "style", "src", "alt", "title", "href", "colspan", "rowspan",
       "data-jwpub-footnote", "data-jwpub-ref", "data-pid", "data-key",
       "data-jwpub-bible-first", "data-jwpub-bible-last",
+      "data-jwpub-pubref", "data-jwpub-pubref-pid",
     ],
     FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "srcset"],
@@ -32,7 +33,17 @@ export function sanitizeChapterHtml(html: string): string {
  *     `"<documentId>:<block>:<element>"` (the reader opens these too — see
  *     readBibleCitations in parser.ts for why the href itself isn't the key);
  *     falls back to data-jwpub-ref otherwise
- *   jwpub://p/…             → data-jwpub-ref="…" (kept for later, not clickable in v1)
+ *   jwpub://p/T:<mepsDocumentId>/<range>  → data-jwpub-pubref="<mepsDocumentId>"
+ *     (plus data-jwpub-pubref-pid="<firstParagraph>" when `<range>` has one) —
+ *     verified against a real archive: a cross-reference like "th study 5"
+ *     is literally `jwpub://p/T:1102018445/`, where `1102018445` is the
+ *     referenced document's own `MepsDocumentId` — the exact same id already
+ *     stored per chapter in `jwpub_chapters.meps_document_id`. Whether this
+ *     is clickable depends on whether *that* publication is in the user's own
+ *     library, which can change after this one was ingested — so it's left
+ *     as inert data here and resolved dynamically at read time (see
+ *     resolveJwpubReferences in jwpub-actions.ts), not baked in now.
+ *   jwpub://p/… of any other shape → data-jwpub-ref="…" (kept, not clickable)
  *
  * The `href` is dropped in every case so nothing can navigate to a scheme the
  * browser doesn't understand. `documentId` is the current chapter's own id —
@@ -58,6 +69,14 @@ export function rewriteJwpubLinks(
         const citation = bid ? citations.get(`${documentId}:${bid[1]}:${bid[2]}`) : undefined;
         if (citation) {
           return `<a${before}data-jwpub-bible-first="${citation.firstVerseId}" data-jwpub-bible-last="${citation.lastVerseId}"${after}>`;
+        }
+      }
+
+      if (target.startsWith("p/")) {
+        const pubRef = /^p\/T:(\d+)\/(?:(\d+)(?:-\d+)?(?::\d+)?)?$/.exec(target);
+        if (pubRef) {
+          const pidAttr = pubRef[2] ? ` data-jwpub-pubref-pid="${pubRef[2]}"` : "";
+          return `<a${before}data-jwpub-pubref="${pubRef[1]}"${pidAttr}${after}>`;
         }
       }
 

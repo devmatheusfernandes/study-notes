@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings } from "lucide-react";
+import { Settings, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SIDEBAR_NAV_ITEMS } from "./sidebar-nav-items";
@@ -128,6 +128,14 @@ export function SidebarContent({ collapsed = false, onNavigate }: SidebarContent
             icon={Settings}
             collapsed={collapsed}
             active={pathname === "/settings" || pathname.startsWith("/settings/")}
+            onNavigate={onNavigate}
+          />
+          <NavLink
+            href="/trash"
+            label="Lixeira"
+            icon={Trash2}
+            collapsed={collapsed}
+            active={pathname === "/trash" || pathname.startsWith("/trash/")}
             onNavigate={onNavigate}
           />
         </div>
