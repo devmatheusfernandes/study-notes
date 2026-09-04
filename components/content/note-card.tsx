@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  BookMarked,
   Check,
   File,
   FileSpreadsheet,
@@ -32,7 +33,7 @@ import type { Tag } from "@/lib/store/notes-store";
 /** Cards only render a handful of tag pills before collapsing the rest into "+N". */
 const MAX_TAG_PILLS = 3;
 
-export type ContentType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "arquivo";
+export type ContentType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "jwlibrary" | "arquivo";
 
 const TYPE_CONFIG: Record<ContentType, { label: string; icon: LucideIcon; className: string }> = {
   nota: { label: "NOTA", icon: NotebookPen, className: "bg-primary/[0.18] text-accent" },
@@ -40,6 +41,7 @@ const TYPE_CONFIG: Record<ContentType, { label: string; icon: LucideIcon; classN
   docx: { label: "DOCX", icon: FileType, className: "bg-foreground/10 text-foreground/80" },
   xlsx: { label: "XLSX", icon: FileSpreadsheet, className: "bg-foreground/10 text-foreground/80" },
   jwpub: { label: "JWPUB", icon: FileText, className: "bg-[#8B5CF6]/20 text-[#8B5CF6]" },
+  jwlibrary: { label: "BACKUP", icon: BookMarked, className: "bg-sky-500/20 text-sky-400" },
   arquivo: { label: "ARQUIVO", icon: File, className: "bg-foreground/10 text-foreground/80" },
 };
 

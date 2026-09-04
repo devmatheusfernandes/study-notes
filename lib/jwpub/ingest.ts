@@ -32,6 +32,7 @@ export async function ingestJwpub(
       issueTagNumber: parsed.issueTagNumber,
       chapters: parsed.chapters.map((chapter) => ({
         documentId: chapter.documentId,
+        mepsDocumentId: chapter.mepsDocumentId,
         position: chapter.position,
         title: chapter.title,
       })),

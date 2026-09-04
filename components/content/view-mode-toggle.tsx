@@ -10,10 +10,18 @@ const OPTIONS: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
   { value: "list", label: "Lista", icon: List },
 ];
 
-export function ViewModeToggle() {
+interface ViewModeToggleProps {
+  /** Controlled mode — when given (with `onChange`), overrides the global `viewMode` preference. Used by /jwlibrary, which has its own independent view-mode setting. */
+  value?: ViewMode;
+  onChange?: (mode: ViewMode) => void;
+}
+
+export function ViewModeToggle({ value, onChange }: ViewModeToggleProps = {}) {
   const hydrated = useHydrated();
-  const viewMode = usePreferencesStore((s) => s.viewMode);
-  const setViewMode = usePreferencesStore((s) => s.setViewMode);
+  const globalViewMode = usePreferencesStore((s) => s.viewMode);
+  const setGlobalViewMode = usePreferencesStore((s) => s.setViewMode);
+  const viewMode = value ?? globalViewMode;
+  const setViewMode = onChange ?? setGlobalViewMode;
 
   return (
     <div

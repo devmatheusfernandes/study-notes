@@ -17,6 +17,7 @@ export const ALLOWED_EXTENSIONS: Record<string, string> = {
   md: "text/markdown",
   json: "application/json",
   jwpub: "application/octet-stream",
+  jwlibrary: "application/octet-stream",
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
@@ -37,6 +38,10 @@ export const MAX_FILE_SIZE = 15 * 1024 * 1024;
  */
 export const MAX_FILE_SIZE_BY_EXTENSION: Record<string, number> = {
   jwpub: 60 * 1024 * 1024,
+  // A backup is years of notes/highlights as plain text — much lighter than
+  // a whole illustrated publication, but still given headroom over the
+  // 15 MB default.
+  jwlibrary: 20 * 1024 * 1024,
 };
 
 export function maxSizeForExtension(extension: string) {

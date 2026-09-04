@@ -167,6 +167,13 @@ export function NotesCollection({
       return;
     }
 
+    // A backup isn't "one document to open" — it's a collection of many
+    // notes/highlights, browsed on the dedicated management page instead.
+    if (note.type === "jwlibrary") {
+      router.push("/jwlibrary");
+      return;
+    }
+
     // Open the tab synchronously, on the click itself, so browsers don't treat
     // the later redirect as an unrequested popup once the signed URL resolves.
     const tab = window.open("", "_blank");

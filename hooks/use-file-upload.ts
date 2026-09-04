@@ -36,6 +36,41 @@ async function ingestUploadedPublications(
   }
 }
 
+/**
+ * Same idea as ingestUploadedPublications, but for `.jwlibrary` backups —
+ * these parse entirely server-side (see app/(app)/jwlibrary/ingest/route.ts
+ * for why: unlike .jwpub, userData.db isn't encrypted, so there's no
+ * crypto.subtle reason to do it in the browser), so this just fires the
+ * request and waits for the JSON result.
+ */
+async function ingestUploadedJwlibraryBackups(
+  originals: File[],
+  uploaded: UploadedFile[],
+  setNoteProcessing: (id: string, processing: boolean) => void
+) {
+  for (const file of originals) {
+    if (!file.name.toLowerCase().endsWith(".jwlibrary")) continue;
+    const row = uploaded.find((u) => u.title === file.name);
+    if (!row) continue;
+    try {
+      const res = await fetch("/jwlibrary/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noteId: row.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? "Falha ao importar o backup.");
+      notify.success(`"${file.name}" importado`);
+    } catch (error) {
+      notify.error(
+        "Não foi possível importar o backup",
+        error instanceof Error ? error.message : undefined
+      );
+    }
+    setNoteProcessing(row.id, false);
+  }
+}
+
 /** Shared upload & note import flow for header button, drop zone, and folder cards. */
 export function useFileUpload() {
   const [isUploading, setIsUploading] = useState(false);
@@ -152,15 +187,17 @@ export function useFileUpload() {
             failOptimisticFile(tempId);
             continue;
           }
-          // .jwpub needs a further parse-and-persist pass before it's readable;
-          // everything else is ready to open as soon as the upload lands.
-          const stillProcessing = file.name.toLowerCase().endsWith(".jwpub");
+          // .jwpub/.jwlibrary need a further parse-and-persist pass before
+          // they're readable; everything else is ready as soon as the upload lands.
+          const lowerName = file.name.toLowerCase();
+          const stillProcessing = lowerName.endsWith(".jwpub") || lowerName.endsWith(".jwlibrary");
           resolveOptimisticFile(tempId, uploaded, stillProcessing);
         }
 
         if (result.files.length > 0) {
           totalUploadedFiles += result.files.length;
           void ingestUploadedPublications(files, result.files, setNoteProcessing, setNoteTitle);
+          void ingestUploadedJwlibraryBackups(files, result.files, setNoteProcessing);
         }
         if (result.error) {
           notify.error("Não foi possível concluir o envio de alguns arquivos", result.error);

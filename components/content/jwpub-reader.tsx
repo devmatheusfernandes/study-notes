@@ -3,18 +3,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, NotebookPen, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
 import { getChapter, getFootnote, getPublication, getAnswers } from "@/app/(app)/jwpub-actions";
 import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
+import { getChapterHighlights, type ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
+import {
+  JwlibraryNoteEditorVault,
+  type PrefilledJwlibraryLocation,
+  type EditableJwlibraryNote,
+} from "./jwlibrary-note-editor-vault";
+import { JwlibraryHighlightNotePanel } from "./jwlibrary-highlight-note-panel";
 
 interface JwpubReaderProps {
   noteId: string;
@@ -136,6 +143,7 @@ export function JwpubReader({
       params.set("doc", String(chapter.documentId));
       params.delete("chapter");
       params.delete("text");
+      params.delete("pid");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
     [chapters, pathname, router, searchParams]
@@ -155,6 +163,17 @@ export function JwpubReader({
   const [bibleError, setBibleError] = useState<string | null>(null);
   const [isLoadingBible, setIsLoadingBible] = useState(false);
 
+  // "Anotar" mode (Fase 2): while true, clicking a paragraph in
+  // JwpubChapterView opens the note editor pre-anchored to it instead of the
+  // normal footnote/bible-ref handling.
+  const [pickingParagraph, setPickingParagraph] = useState(false);
+  const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
+  // Clicking a highlight's margin marker opens a read-only side panel first
+  // (JwlibraryHighlightNotePanel); tapping "Editar" inside it sets
+  // highlightEditMode, promoting the same note into the full editor vault.
+  const [highlightNote, setHighlightNote] = useState<EditableJwlibraryNote | null>(null);
+  const [highlightEditMode, setHighlightEditMode] = useState(false);
+
   // Fetched once per publication (not per chapter) — cheap, and every
   // chapter switch would otherwise re-fetch the whole set.
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -169,6 +188,36 @@ export function JwpubReader({
   }, [publication.id]);
 
   const activeChapter = chapters[activeIndex];
+
+  // Fetched per chapter (unlike answers, which are per-publication) — each
+  // chapter has its own meps_document_id, and the query is already scoped
+  // directly to it (see getChapterHighlights), so this stays cheap.
+  const [highlights, setHighlights] = useState<ParagraphHighlight[]>([]);
+  const refreshHighlights = useCallback(() => {
+    if (!activeChapter) return;
+    void getChapterHighlights(
+      publication.symbol,
+      publication.mepsLanguageIndex,
+      publication.issueTagNumber,
+      activeChapter.mepsDocumentId
+    ).then((result) => setHighlights(result.highlights ?? []));
+  }, [publication.symbol, publication.mepsLanguageIndex, publication.issueTagNumber, activeChapter]);
+
+  useEffect(() => {
+    if (!activeChapter) return;
+    let cancelled = false;
+    void getChapterHighlights(
+      publication.symbol,
+      publication.mepsLanguageIndex,
+      publication.issueTagNumber,
+      activeChapter.mepsDocumentId
+    ).then((result) => {
+      if (!cancelled) setHighlights(result.highlights ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [publication.symbol, publication.mepsLanguageIndex, publication.issueTagNumber, activeChapter]);
 
   useEffect(() => {
     if (!activeChapter) return;
@@ -214,6 +263,53 @@ export function JwpubReader({
       setIsLoadingBible(false);
     });
   }, []);
+
+  const handlePickParagraph = useCallback(
+    (pid: string) => {
+      setPickingParagraph(false);
+      setPendingNoteLocation({
+        blockType: 1,
+        blockIdentifier: Number(pid),
+        location: {
+          bookNumber: null,
+          chapterNumber: null,
+          keySymbol: publication.symbol,
+          mepsLanguage: publication.mepsLanguageIndex,
+          issueTagNumber: publication.issueTagNumber,
+          mepsDocumentId: activeChapter?.mepsDocumentId ?? null,
+          track: null,
+          locationType: 0,
+        },
+        label: `${publication.title} — ${activeChapter?.title ?? ""}`,
+      });
+    },
+    [publication, activeChapter]
+  );
+
+  const handlePickParagraphSpan = useCallback(
+    (pid: string, startToken: number, endToken: number, colorIndex?: number, selectedText?: string) => {
+      setPickingParagraph(false);
+      setPendingNoteLocation({
+        blockType: 1,
+        blockIdentifier: Number(pid),
+        location: {
+          bookNumber: null,
+          chapterNumber: null,
+          keySymbol: publication.symbol,
+          mepsLanguage: publication.mepsLanguageIndex,
+          issueTagNumber: publication.issueTagNumber,
+          mepsDocumentId: activeChapter?.mepsDocumentId ?? null,
+          track: null,
+          locationType: 0,
+        },
+        label: `${publication.title} — ${activeChapter?.title ?? ""}`,
+        tokenRange: { start: startToken, end: endToken },
+        initialColorIndex: colorIndex,
+        selectedText,
+      });
+    },
+    [publication, activeChapter]
+  );
 
   /** Recovery path: re-download the original from Storage and parse it again. */
   async function reprocess() {
@@ -280,6 +376,24 @@ export function JwpubReader({
           {chapters.length > 0 && (
             <button
               type="button"
+              onClick={() => setPickingParagraph((v) => !v)}
+              aria-label="Anotar parágrafo"
+              aria-pressed={pickingParagraph}
+              title="Toque num parágrafo pra criar uma nota nele"
+              className={cn(
+                "shrink-0 rounded-full p-2 transition-colors",
+                pickingParagraph
+                  ? "bg-primary/[0.18] text-accent"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <NotebookPen className="size-4" />
+            </button>
+          )}
+
+          {chapters.length > 0 && (
+            <button
+              type="button"
               onClick={() => setShowChapters((v) => !v)}
               aria-label="Capítulos"
               aria-pressed={showChapters}
@@ -324,6 +438,11 @@ export function JwpubReader({
                   answers={answers}
                   onFootnote={handleFootnote}
                   onBibleRef={handleBibleRef}
+                  pickingParagraph={pickingParagraph}
+                  onPickParagraph={handlePickParagraph}
+                  onPickParagraphSpan={handlePickParagraphSpan}
+                  highlights={highlights}
+                  onHighlightNote={setHighlightNote}
                 />
               )}
             </div>
@@ -424,6 +543,31 @@ export function JwpubReader({
         error={bibleError}
         isLoading={isLoadingBible}
         onClose={() => setBibleOpen(false)}
+      />
+
+      <JwlibraryHighlightNotePanel
+        open={highlightNote !== null && !highlightEditMode}
+        note={highlightNote}
+        onClose={() => setHighlightNote(null)}
+        onEdit={() => setHighlightEditMode(true)}
+        onDeleted={() => {
+          setHighlightNote(null);
+          void refreshHighlights();
+        }}
+      />
+
+      <JwlibraryNoteEditorVault
+        open={pendingNoteLocation !== null || (highlightNote !== null && highlightEditMode)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setPendingNoteLocation(null);
+            setHighlightNote(null);
+            setHighlightEditMode(false);
+          }
+        }}
+        note={highlightEditMode ? highlightNote : null}
+        prefilledLocation={pendingNoteLocation}
+        onSaved={refreshHighlights}
       />
     </div>
   );

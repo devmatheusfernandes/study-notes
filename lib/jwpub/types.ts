@@ -3,6 +3,8 @@
 export interface JwpubChapter {
   /** `Document.DocumentId` from the source SQLite — how `jwpub://` links address a chapter. */
   documentId: number;
+  /** `Document.MepsDocumentId` — the globally-unique document id, how a `.jwlibrary` backup's `Location.DocumentId` addresses this chapter. Null if the column was missing. */
+  mepsDocumentId: number | null;
   position: number;
   title: string;
   html: string;
@@ -47,6 +49,8 @@ export interface ParsedJwpub extends JwpubPublicationMeta {
 /** What the reader needs to render its chapter list — deliberately without the HTML. */
 export interface ChapterSummary {
   documentId: number;
+  /** Same field as JwpubChapter — needed to build a jwlibrary Location when creating a note on a paragraph (see jwpub-reader.tsx's picking mode). */
+  mepsDocumentId: number | null;
   position: number;
   title: string;
   hasContent: boolean;
@@ -57,4 +61,7 @@ export interface PublicationSummary {
   symbol: string;
   title: string;
   status: "ready" | "failed";
+  /** Needed alongside `symbol`/a chapter's `mepsDocumentId` to build a jwlibrary Location — see lib/jwlibrary/resolve.ts's publicationKey. */
+  mepsLanguageIndex: number | null;
+  issueTagNumber: number | null;
 }

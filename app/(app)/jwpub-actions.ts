@@ -44,7 +44,7 @@ export interface SavePublicationInput {
   mepsLanguageIndex: number | null;
   year: number | null;
   issueTagNumber: number | null;
-  chapters: { documentId: number; position: number; title: string }[];
+  chapters: { documentId: number; mepsDocumentId: number | null; position: number; title: string }[];
 }
 
 /** Creates (or replaces) the publication row plus one stub per chapter. */
@@ -96,6 +96,7 @@ export async function savePublication(
         user_id: user.id,
         publication_id: publication.id,
         document_id: chapter.documentId,
+        meps_document_id: chapter.mepsDocumentId,
         position: chapter.position,
         title: chapter.title,
       }))
@@ -170,7 +171,7 @@ export async function getPublication(
 
   const { data: publication } = await supabase
     .from("jwpub_publications")
-    .select("id, symbol, title, status")
+    .select("id, symbol, title, status, meps_language_index, issue_tag_number")
     .eq("note_id", noteId)
     .maybeSingle();
 
@@ -178,7 +179,7 @@ export async function getPublication(
 
   const { data: chapters } = await supabase
     .from("jwpub_chapters")
-    .select("document_id, position, title, content_html")
+    .select("document_id, meps_document_id, position, title, content_html")
     .eq("publication_id", publication.id)
     .order("position", { ascending: true });
 
@@ -188,9 +189,12 @@ export async function getPublication(
       symbol: publication.symbol,
       title: publication.title,
       status: publication.status as PublicationSummary["status"],
+      mepsLanguageIndex: publication.meps_language_index,
+      issueTagNumber: publication.issue_tag_number,
     },
     chapters: (chapters ?? []).map((chapter) => ({
       documentId: chapter.document_id,
+      mepsDocumentId: chapter.meps_document_id,
       position: chapter.position,
       title: chapter.title,
       hasContent: !!chapter.content_html,

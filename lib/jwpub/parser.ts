@@ -136,14 +136,30 @@ async function readChapters(
   inflate: (input: Uint8Array) => Uint8Array,
   onProgress?: ParseProgress
 ): Promise<JwpubChapter[]> {
-  const res = db.exec("SELECT DocumentId, Title, Content FROM Document ORDER BY DocumentId");
+  // MepsDocumentId is the globally-unique document id — how a .jwlibrary
+  // backup's Location.DocumentId addresses a chapter (see
+  // data/jwlibrary_schema.md). Selected defensively: older/unusual archives
+  // might lack the column, in which case chapters just come back
+  // unresolvable by a jwlibrary import, nothing else breaks.
+  let res;
+  try {
+    res = db.exec("SELECT DocumentId, MepsDocumentId, Title, Content FROM Document ORDER BY DocumentId");
+  } catch {
+    res = db.exec("SELECT DocumentId, Title, Content FROM Document ORDER BY DocumentId");
+  }
   if (res.length === 0) return [];
 
+  const columns = res[0].columns;
+  const hasMepsDocumentId = columns.includes("MepsDocumentId");
   const rows = res[0].values;
   const chapters: JwpubChapter[] = [];
 
   for (let i = 0; i < rows.length; i++) {
-    const [documentId, title, content] = rows[i];
+    const row = Object.fromEntries(columns.map((col, idx) => [col, rows[i][idx]]));
+    const documentId = row.DocumentId;
+    const mepsDocumentId = hasMepsDocumentId ? row.MepsDocumentId : null;
+    const title = row.Title;
+    const content = row.Content;
     onProgress?.("Decodificando capítulos", i + 1, rows.length);
 
     const html =
@@ -155,6 +171,7 @@ async function readChapters(
 
     chapters.push({
       documentId: Number(documentId),
+      mepsDocumentId: mepsDocumentId === null || mepsDocumentId === undefined ? null : Number(mepsDocumentId),
       position: i,
       title: title === null ? `Capítulo ${documentId}` : String(title),
       html,
