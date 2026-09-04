@@ -397,14 +397,21 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
 
   if (screen === "books") {
     return (
-      <>
-        <BibleTopHeader title="Bíblia" userEmail={userEmail} />
-        <BibleBookGrid
-          books={books}
-          onSelectBook={pickBook}
-          appendixHeaders={appendixHeaders}
-          onSelectAppendix={setOpenAppendixId}
-        />
+      // JwpubSidePanel (rendered inside BibleAppendixSurface) is a flex
+      // sibling that animates its own width to push the content beside it —
+      // it only does that inside a flex ROW. Without this wrapper it just
+      // stacked in normal document flow, full-width, underneath the book
+      // grid instead of opening as a side panel next to it.
+      <div className="flex min-h-dvh w-full flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <BibleTopHeader title="Bíblia" userEmail={userEmail} />
+          <BibleBookGrid
+            books={books}
+            onSelectBook={pickBook}
+            appendixHeaders={appendixHeaders}
+            onSelectAppendix={setOpenAppendixId}
+          />
+        </div>
         <BibleAppendixSurface
           mepsDocumentId={openAppendixId}
           onClose={() => setOpenAppendixId(null)}
@@ -414,7 +421,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
             enterReading(refBookOrder, refChapter, refVerse);
           }}
         />
-      </>
+      </div>
     );
   }
 
