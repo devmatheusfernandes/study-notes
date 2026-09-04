@@ -286,6 +286,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         <BibleTopHeader title="Bíblia" userEmail={userEmail} />
         <BibleChapterGrid
           bookName={currentBook?.book ?? ""}
+          bookOrder={bookOrder}
           chapterCount={chapterCount}
           onSelectChapter={(chapterNum) => enterReading(bookOrder, chapterNum)}
           onBack={() => setScreen("books")}
