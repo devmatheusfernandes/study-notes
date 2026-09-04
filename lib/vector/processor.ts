@@ -36,7 +36,7 @@ interface ClaimedQueueRow {
  */
 export async function runVectorizationBatch(
   supabase: SupabaseClient,
-  opts?: { batchSize?: number }
+  opts?: { batchSize?: number; deadline?: number }
 ): Promise<{ processed: number; errors: number }> {
   const { data: claimed, error: claimError } = await supabase.rpc("claim_vectorization_queue_batch", {
     p_batch_size: opts?.batchSize ?? DEFAULT_CLAIM_BATCH_SIZE,
@@ -50,7 +50,11 @@ export async function runVectorizationBatch(
   const items = (claimed ?? []) as ClaimedQueueRow[];
   if (items.length === 0) return { processed: 0, errors: 0 };
 
-  const tickDeadline = Date.now() + MAX_TICK_DURATION_MS;
+  // A caller that loops (the daily cron, which drains the queue instead of
+  // doing a single tick) passes one deadline shared by every call, so the
+  // whole invocation stays inside the function's time budget. On its own,
+  // each call just gets its own MAX_TICK_DURATION_MS.
+  const tickDeadline = opts?.deadline ?? Date.now() + MAX_TICK_DURATION_MS;
   let processedCount = 0;
   let errorCount = 0;
 
