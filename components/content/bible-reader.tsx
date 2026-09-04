@@ -13,6 +13,7 @@ import {
   getBibleChapterCount,
   getBibleChapterVerses,
   getVerseCrossReferences,
+  getChapterCrossReferences,
   getChapterStudyContent,
   type BibleBook,
   type BibleVerseRow,
@@ -127,6 +128,12 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   const [chapter, setChapter] = useState(initialChapter ?? 1);
   const [targetVerse, setTargetVerse] = useState<number | null>(initialVerse ?? null);
   const [chapterCount, setChapterCount] = useState<number | null>(null);
+  // Which verse the study panel is scoped to; null means "the whole chapter".
+  // Declared up here, not down with the rest of the panel state, because
+  // enterReading below re-scopes it on every navigation and the React
+  // Compiler refuses to memoize a callback that reads a binding declared
+  // after it.
+  const [selectedVerse, setSelectedVerse] = useState<number | null>(initialVerse ?? null);
 
   const currentBook = books?.find((b) => b.bookOrder === bookOrder) ?? null;
   const bookIndex = books?.findIndex((b) => b.bookOrder === bookOrder) ?? -1;
@@ -150,6 +157,10 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       setBookOrder(nextBookOrder);
       setChapter(nextChapter);
       setTargetVerse(verse ?? null);
+      // The study panel is scoped to a verse of the CURRENT chapter, so any
+      // navigation has to re-scope it: to the verse we are jumping to, or back
+      // to the whole chapter when there isn't one.
+      setSelectedVerse(verse ?? null);
       setScreen("reading");
       const params = new URLSearchParams(searchParams.toString());
       params.set("book", String(nextBookOrder));
@@ -276,27 +287,43 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   // that verse. While closed, no cross-reference request is made.
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyTab, setStudyTab] = useState<BibleStudyTab>("referencias");
-  const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
-  const [refs, setRefs] = useState<CrossReference[]>([]);
+  const [refs, setRefs] = useState<(CrossReference & { verse: number | null })[]>([]);
   const [isLoadingRefs, setIsLoadingRefs] = useState(false);
+  const [refsTruncated, setRefsTruncated] = useState(false);
   const [refsSource, setRefsSource] = useState<CrossReferenceSource>("nwt");
 
   const handleVerseSelected = useCallback((verse: number) => setSelectedVerse(verse), []);
 
   // Driven by an effect rather than the tap handler so that switching the
-  // reference source (marginais ↔ estendidas) refetches for the verse already
-  // selected, without duplicating the request in two places.
+  // reference source (marginais ↔ estendidas) or clearing the verse refetches
+  // without duplicating the request in three places.
+  //
+  // With no verse selected the panel shows the whole chapter, so this fetches
+  // the chapter's references instead of nothing — that's what makes opening
+  // the panel useful before tapping anything.
   useEffect(() => {
-    if (!studyOpen || selectedVerse === null) return;
+    if (!studyOpen) return;
     let cancelled = false;
     // Deferred a tick rather than set synchronously in the effect body — same
     // pattern as the chapter/highlight loads above.
     queueMicrotask(() => {
       if (!cancelled) setIsLoadingRefs(true);
     });
-    void getVerseCrossReferences(bookOrder, chapter, selectedVerse, refsSource).then((result) => {
+
+    const request =
+      selectedVerse === null
+        ? getChapterCrossReferences(bookOrder, chapter, refsSource)
+        : getVerseCrossReferences(bookOrder, chapter, selectedVerse, refsSource).then((result) => ({
+            // The per-verse action doesn't echo the verse back (the caller
+            // already knows it); the panel groups on it, so it's added here.
+            refs: result.refs?.map((ref) => ({ ...ref, verse: selectedVerse })),
+            truncated: false,
+          }));
+
+    void request.then((result) => {
       if (cancelled) return;
       setRefs(result.refs ?? []);
+      setRefsTruncated(result.truncated ?? false);
       setIsLoadingRefs(false);
     });
     return () => {
@@ -314,12 +341,18 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     enterReading(refBookOrder, refChapter, refVerse);
   }
 
-  const verseFootnotes = selectedVerse === null
-    ? []
-    : footnotes.filter((f) => verseNumberById.get(f.verseId) === selectedVerse);
-  const verseStudyNotes = selectedVerse === null
-    ? []
-    : studyNotes.filter((n) => n.verse === selectedVerse);
+  // Footnotes carry a verse *id*; the panel groups and labels by verse
+  // *number*, so the mapping happens once here. With no verse selected the
+  // whole chapter goes through, which is the panel's default view.
+  const panelFootnotes = useMemo(() => {
+    const withVerse = footnotes.map((f) => ({ ...f, verse: verseNumberById.get(f.verseId) ?? null }));
+    return selectedVerse === null ? withVerse : withVerse.filter((f) => f.verse === selectedVerse);
+  }, [footnotes, verseNumberById, selectedVerse]);
+
+  const panelStudyNotes = useMemo(
+    () => (selectedVerse === null ? studyNotes : studyNotes.filter((n) => n.verse === selectedVerse)),
+    [studyNotes, selectedVerse]
+  );
 
   const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
   const [highlightNote, setHighlightNote] = useState<EditableJwlibraryNote | null>(null);
@@ -427,16 +460,20 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         onClose={() => setStudyOpen(false)}
         tab={studyTab}
         onTabChange={setStudyTab}
-        currentLabel={selectedVerse ? `${currentBook?.book ?? ""} ${chapter}:${selectedVerse}` : ""}
+        bookName={currentBook?.book ?? ""}
+        chapter={chapter}
         selectedVerse={selectedVerse}
+        onClearVerse={() => setSelectedVerse(null)}
+        onSelectVerse={setSelectedVerse}
         refs={refs}
         refsLoading={isLoadingRefs}
+        refsTruncated={refsTruncated}
         refsSource={refsSource}
         onChangeRefsSource={setRefsSource}
         books={books ?? []}
         onSelectReference={handleSelectReference}
-        footnotes={verseFootnotes}
-        studyNotes={verseStudyNotes}
+        footnotes={panelFootnotes}
+        studyNotes={panelStudyNotes}
         studyLoading={isLoadingStudy}
         onOpenBibleRef={enterReading}
       />

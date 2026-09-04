@@ -14,6 +14,15 @@ function Tabs({
     <TabsPrimitive.Root
       data-slot="tabs"
       data-orientation={orientation}
+      // Every layout class in this file keys off `data-horizontal`/
+      // `data-vertical` (Tailwind compiles `data-horizontal:` to the bare
+      // attribute selector `[data-horizontal]`, not to `[data-orientation=…]`),
+      // but Base UI only emits `data-orientation`. Nothing matched, so the root
+      // never got `flex-col` and rendered the tab list BESIDE its panels
+      // instead of above them. Emitting the boolean attribute is the smallest
+      // fix that keeps every existing class string working.
+      data-horizontal={orientation === "horizontal" ? "" : undefined}
+      data-vertical={orientation === "vertical" ? "" : undefined}
       className={cn(
         "group/tabs flex gap-2 data-horizontal:flex-col",
         className

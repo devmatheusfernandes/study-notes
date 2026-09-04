@@ -15,14 +15,11 @@ import {
 } from "@/app/(app)/bible-actions";
 
 interface BibleReferencesListProps {
-  /** e.g. "Jeremias 47:3" — the verse these references belong to. */
-  currentLabel: string;
   refs: CrossReference[];
   books: BibleBook[];
-  isLoading: boolean;
-  source: CrossReferenceSource;
-  onChangeSource: (source: CrossReferenceSource) => void;
   onSelectReference: (bookOrder: number, chapter: number, verse: number) => void;
+  /** Disambiguates the lazy-load cache when several lists are on screen at once (the whole-chapter view renders one per verse). */
+  cacheKeyPrefix?: string;
 }
 
 function referenceLabel(ref: CrossReference, books: BibleBook[]): string {
@@ -63,16 +60,17 @@ function groupByMarker(refs: CrossReference[]): { letter: string | null; refs: C
   }));
 }
 
-const SOURCE_LABELS: Record<CrossReferenceSource, string> = {
+export const CROSS_REFERENCE_SOURCE_LABELS: Record<CrossReferenceSource, string> = {
   nwt: "Marginais",
   extended: "Estendidas",
 };
 
 /**
- * Cross references for whatever verse was last tapped — see
- * getVerseCrossReferences in app/(app)/bible-actions.ts. Rendered as a tab
- * inside BibleStudyPanel; the panel shell (Vault on mobile, side panel on
- * desktop) lives there, not here.
+ * A list of cross references — see getVerseCrossReferences /
+ * getChapterCrossReferences in app/(app)/bible-actions.ts. Rendered inside
+ * BibleStudyPanel, which owns the shell, the scope label and the source
+ * toggle; this component is only the list, so the panel can stack several of
+ * them (one per verse) in its whole-chapter view.
  *
  * Each reference is an accordion row: tapping the label expands it in place
  * to show the actual verse text (fetched lazily, only once per row, cached in
@@ -80,13 +78,10 @@ const SOURCE_LABELS: Record<CrossReferenceSource, string> = {
  * clicking the label itself deliberately doesn't jump away.
  */
 export function BibleReferencesList({
-  currentLabel,
   refs,
   books,
-  isLoading,
-  source,
-  onChangeSource,
   onSelectReference,
+  cacheKeyPrefix = "",
 }: BibleReferencesListProps) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [versesByKey, setVersesByKey] = useState<Record<string, VerseState>>({});
@@ -116,42 +111,10 @@ export function BibleReferencesList({
   const groups = groupByMarker(refs);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        {currentLabel && <span className="font-mono text-[11px] tracking-[0.04em] text-accent">{currentLabel}</span>}
-        <div className="ml-auto flex items-center gap-0.5 rounded-full bg-secondary p-0.5">
-          {(Object.keys(SOURCE_LABELS) as CrossReferenceSource[]).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => onChangeSource(option)}
-              aria-pressed={source === option}
-              className={cn(
-                "rounded-full px-2.5 py-1 font-mono text-[10px] tracking-[0.04em] transition-colors",
-                source === option
-                  ? "bg-primary/[0.18] text-accent"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {SOURCE_LABELS[option]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {isLoading ? (
-        <p className="py-6 text-center text-[13px] text-muted-foreground">carregando…</p>
-      ) : refs.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-muted-foreground">
-          {currentLabel
-            ? "Nenhuma referência para este versículo."
-            : "Toque num versículo pra ver as referências relacionadas."}
-        </p>
-      ) : (
         <ul className="flex flex-col gap-1.5">
           {groups.map((group, groupIndex) =>
             group.refs.map((ref, index) => {
-              const key = `${groupIndex}-${index}`;
+              const key = `${cacheKeyPrefix}${groupIndex}-${index}`;
               const expanded = expandedKey === key;
               const verseState = versesByKey[key];
               return (
@@ -225,7 +188,5 @@ export function BibleReferencesList({
             })
           )}
         </ul>
-      )}
-    </div>
   );
 }

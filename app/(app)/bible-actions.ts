@@ -187,6 +187,54 @@ export async function getVerseCrossReferences(
   };
 }
 
+/**
+ * Cap for the whole-chapter reference view (the study panel before any verse
+ * is tapped). `nwt` never reaches it — its worst chapter is 298 references.
+ * `extended` does: Salmo 119 alone has 2.083, and 120 chapters carry more
+ * than 500, so an uncapped select would silently hit PostgREST's own 1000-row
+ * ceiling and look like missing data. Truncating explicitly, and saying so in
+ * the UI, is the honest version of the same limit.
+ */
+const CHAPTER_REFS_LIMIT = 400;
+
+/** Every cross reference in a chapter, for the study panel's "nothing selected yet" state. `truncated` tells the caller the list was cut — see CHAPTER_REFS_LIMIT. */
+export async function getChapterCrossReferences(
+  bookOrder: number,
+  chapter: number,
+  source: CrossReferenceSource = "nwt"
+): Promise<{ refs?: (CrossReference & { verse: number | null })[]; truncated?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("bible_cross_references")
+    .select("verse, rank, marker, ref_book_order, ref_chapter, ref_start_verse, ref_end_verse")
+    .eq("book_order", bookOrder)
+    .eq("chapter", chapter)
+    .eq("source", source)
+    .order("verse", { ascending: true, nullsFirst: true })
+    .order("rank", { ascending: true })
+    .limit(CHAPTER_REFS_LIMIT);
+
+  if (error) return { error: "Não foi possível carregar as referências." };
+
+  return {
+    truncated: (data ?? []).length === CHAPTER_REFS_LIMIT,
+    refs: (data ?? []).map((row) => ({
+      verse: row.verse,
+      rank: row.rank,
+      marker: row.marker,
+      refBookOrder: row.ref_book_order,
+      refChapter: row.ref_chapter,
+      refStartVerse: row.ref_start_verse,
+      refEndVerse: row.ref_end_verse,
+    })),
+  };
+}
+
 export interface BibleFootnote {
   id: number;
   /**
