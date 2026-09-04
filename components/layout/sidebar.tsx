@@ -36,7 +36,7 @@ export function Sidebar() {
       )}
     >
       <SidebarContent collapsed={desktopCollapsed} />
-      <button
+      {/* <button
         type="button"
         onClick={toggleDesktop}
         aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
@@ -47,7 +47,7 @@ export function Sidebar() {
       >
         {desktopCollapsed ? <PanelLeft className="size-4" /> : <PanelLeftClose className="size-4" />}
         {!desktopCollapsed && "Recolher"}
-      </button>
+      </button> */}
     </aside>
   );
 }

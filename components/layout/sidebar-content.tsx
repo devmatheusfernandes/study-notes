@@ -121,21 +121,20 @@ export function SidebarContent({ collapsed = false, onNavigate }: SidebarContent
               </span>
             </div>
           )}
-
-          <NavLink
-            href="/settings"
-            label="Configurações"
-            icon={Settings}
-            collapsed={collapsed}
-            active={pathname === "/settings" || pathname.startsWith("/settings/")}
-            onNavigate={onNavigate}
-          />
           <NavLink
             href="/trash"
             label="Lixeira"
             icon={Trash2}
             collapsed={collapsed}
             active={pathname === "/trash" || pathname.startsWith("/trash/")}
+            onNavigate={onNavigate}
+          />
+          <NavLink
+            href="/settings"
+            label="Configurações"
+            icon={Settings}
+            collapsed={collapsed}
+            active={pathname === "/settings" || pathname.startsWith("/settings/")}
             onNavigate={onNavigate}
           />
         </div>

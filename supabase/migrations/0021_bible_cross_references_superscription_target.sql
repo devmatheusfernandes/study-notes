@@ -1,0 +1,11 @@
+-- A migração 0020 tornou `verse` nulável, para as 52 referências da fonte
+-- 'nwt' que NASCEM numa superescrição de Salmo. Faltou o outro lado: 31
+-- referências APONTAM para uma superescrição, que também não tem número de
+-- versículo (bible_verses.verse é NULL nessas 116 linhas).
+--
+-- Não são casos de borda descartáveis — são exatamente as referências mais
+-- úteis do conjunto. Gênesis 39 aponta para a superescrição do Salmo 51
+-- ("quando o profeta Natã foi a ele depois que ele teve relações com
+-- Bate-Seba"), ou seja, liga a narrativa histórica ao salmo que ela gerou.
+-- Jogá-las fora para caber num `not null` seria perder o melhor do dado.
+alter table public.bible_cross_references alter column ref_start_verse drop not null;

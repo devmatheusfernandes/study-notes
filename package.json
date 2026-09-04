@@ -11,6 +11,7 @@
     "seed:bible": "node scripts/seed-bible.mjs",
     "seed:cross-references": "node scripts/seed-cross-references.mjs",
     "seed:videos": "node scripts/seed-all-videos.mjs",
+    "seed:bible-study": "node scripts/seed-bible-study.mjs",
     "seed:bible-embeddings": "node scripts/seed-bible-embeddings.mjs"
   },
   "dependencies": {
@@ -61,6 +62,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
+    "jsdom": "^29.1.1",
     "pg": "^8.23.0",
     "serwist": "^9.5.12",
     "tailwindcss": "^4",
