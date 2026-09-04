@@ -1,4 +1,4 @@
--- Full NWT (Portuguese) verse text, seeded once from data/NWT.sqlite via
+-- Full NWT (Portuguese) verse text, seeded once from data/nwt_st.sqlite via
 -- `npm run seed:bible` (see scripts/seed-bible.mjs). `id` matches the
 -- `BibleVerseId` scheme used internally by JW Library / .jwpub archives, so a
 -- citation resolved out of a publication's BibleCitation table can be looked

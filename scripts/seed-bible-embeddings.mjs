@@ -111,7 +111,14 @@ async function main() {
     // useful for linking (the /bible reader takes a per-chapter verse
     // *number*, not `bible_verses.id`'s global BibleVerseId).
     if (row.verse !== null) current.verseNumbers.push(row.verse);
-    if (row.text) current.texts.push(row.text);
+    // `text` carries real `\n` line breaks for poetry (7.560 verses — see
+    // data/NWT_structure.md). Those are typography, not meaning, and
+    // splitTextIntoChunks below treats `\n` as its *preferred* break point,
+    // so keeping them would cut a chunk at nearly every line of Psalms
+    // instead of at sentence boundaries. Collapsed to spaces here, at the
+    // one place the text enters the embedding pipeline — the column itself
+    // keeps the breaks for the reader.
+    if (row.text) current.texts.push(row.text.replace(/\n/g, " "));
   }
   console.log(`Agrupados em ${chapters.length} capítulo(s).`);
 

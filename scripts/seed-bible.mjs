@@ -1,5 +1,5 @@
 /**
- * One-off seed for public.bible_verses from data/NWT.sqlite (see
+ * One-off seed for public.bible_verses from data/nwt_st.sqlite (see
  * data/NWT_structure.md for the source schema). Uses sql.js to read the
  * sqlite file (same library the app uses client-side for .jwpub parsing —
  * no native binary needed) and `pg` to bulk-insert via DATABASE_URL, exactly
@@ -38,7 +38,7 @@ if (!env.DATABASE_URL) {
   process.exit(1);
 }
 
-const dbPath = path.join(root, "data", "NWT.sqlite");
+const dbPath = path.join(root, "data", "nwt_st.sqlite");
 if (!fs.existsSync(dbPath)) {
   console.error(`Arquivo não encontrado: ${dbPath}`);
   process.exit(1);
@@ -53,12 +53,25 @@ const res = sqlite.exec(
 sqlite.close();
 
 if (res.length === 0) {
-  console.error("Tabela verses vazia ou não encontrada em NWT.sqlite.");
+  console.error("Tabela verses vazia ou não encontrada em nwt_st.sqlite.");
   process.exit(1);
 }
 
 const rows = res[0].values;
-console.log(`${rows.length} versos lidos de NWT.sqlite.`);
+console.log(`${rows.length} versos lidos de nwt_st.sqlite.`);
+
+/**
+ * `text` carries real `\n` line breaks for poetry (7.560 versos, ver
+ * data/NWT_structure.md) — those are meaningful and must survive untouched,
+ * which is why this only collapses runs of literal *spaces*: ` {2,}`, not
+ * `\s{2,}`. Four verses in the source have a stray double space (e.g.
+ * 1 Samuel 20:4 "Farei  tudo"); normalizing them here keeps the app's
+ * word-token indexing (lib/jwlibrary/paragraph-tokens.ts) predictable.
+ */
+function normalizeVerseText(text) {
+  if (typeof text !== "string") return text;
+  return text.replace(/ {2,}/g, " ");
+}
 
 const client = new Client({
   connectionString: env.DATABASE_URL,
@@ -81,7 +94,7 @@ try {
         row[1],
         row[2],
         row[3],
-        row[4],
+        normalizeVerseText(row[4]),
         Boolean(row[5]),
         row[6]
       );
