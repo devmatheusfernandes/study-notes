@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { FileDropZone } from "./file-drop-zone";
-import { JwlibraryNoteEditorVault } from "./jwlibrary-note-editor-vault";
+import { JwlibraryNoteEditorVault, type PrefilledJwlibraryLocation } from "./jwlibrary-note-editor-vault";
 import { JwlibraryNoteSidePanel } from "./jwlibrary-note-side-panel";
 import { JwlibraryTagPickerVault } from "./jwlibrary-tag-picker-vault";
 import { JwlibraryTagChip } from "./jwlibrary-tag-chip";
@@ -39,6 +39,23 @@ function matchesQuery(note: JwlibraryNoteView, query: string): boolean {
     .toLowerCase();
   return haystack.includes(query.trim().toLowerCase());
 }
+
+/** "Nova nota" from this page creates a plain note with no publication/Bible association — skips JwlibraryNoteEditorVault's own location picker entirely (prefilledLocation with every location field null still satisfies its "locationReady" check). */
+const GENERAL_NOTE_LOCATION: PrefilledJwlibraryLocation = {
+  blockType: 0,
+  blockIdentifier: null,
+  location: {
+    bookNumber: null,
+    chapterNumber: null,
+    keySymbol: null,
+    mepsLanguage: null,
+    issueTagNumber: null,
+    mepsDocumentId: null,
+    track: null,
+    locationType: null,
+  },
+  label: "Nota geral",
+};
 
 function isNoteOpenable(note: JwlibraryNoteView): boolean {
   return Boolean(
@@ -331,6 +348,7 @@ export function JwlibraryNotesCollection() {
             }
           }}
           note={editingNote}
+          prefilledLocation={creatingNote ? GENERAL_NOTE_LOCATION : null}
           onSaved={() => void refresh()}
         />
       </FileDropZone>
@@ -501,6 +519,7 @@ export function JwlibraryNotesCollection() {
           }
         }}
         note={editingNote}
+        prefilledLocation={creatingNote ? GENERAL_NOTE_LOCATION : null}
         onSaved={() => void refresh()}
       />
       <JwlibraryTagPickerVault
