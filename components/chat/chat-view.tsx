@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useChatStore, type ChatSource } from "@/lib/store/chat-store";
 import { addUserMessage as addUserMessageAction } from "@/app/(app)/chat-actions";
 import { ChatMessage } from "./chat-message";
@@ -21,6 +22,13 @@ export function ChatView({ conversationId }: ChatViewProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // A `?q=` in the URL means the auto-send effect below is about to add the
+  // user's message on its next tick — read synchronously (unlike the
+  // effect-based window.location read in that effect, which only runs after
+  // first paint) so the "pergunte algo" empty state below never has a chance
+  // to flash in between this page mounting and that message actually landing.
+  const hasPendingQuery = !!useSearchParams().get("q")?.trim();
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -47,6 +55,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
         const decoder = new TextDecoder();
         let buffer = "";
         let sources: ChatSource[] = [];
+        let sourcesUncertain = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -71,8 +80,9 @@ export function ChatView({ conversationId }: ChatViewProps) {
                 useChatStore.getState().updateConversation(conversationId, { title: event.title });
               } else if (event.type === "sources") {
                 sources = event.sources ?? [];
+                sourcesUncertain = !!event.uncertain;
               } else if (event.type === "done") {
-                finishStream(sources);
+                finishStream(sources, sourcesUncertain);
               } else if (event.type === "error") {
                 failStream(event.content || "Erro desconhecido.");
               }
@@ -83,7 +93,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
         }
 
         if (useChatStore.getState().isStreaming) {
-          finishStream(sources);
+          finishStream(sources, sourcesUncertain);
         }
       } catch {
         failStream("Falha na conexão com o assistente.");
@@ -136,7 +146,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
       {/* Scrollable conversation messages container */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6">
         <div className="mx-auto flex max-w-2xl sm:max-w-3xl flex-col gap-4">
-          {messages.length === 0 && (
+          {messages.length === 0 && !hasPendingQuery && (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-accent/15">
                 <span className="text-lg">✨</span>
@@ -152,6 +162,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
               role={msg.role}
               content={msg.content}
               sources={msg.sources}
+              sourcesUncertain={msg.sourcesUncertain}
               isStreaming={msg.isStreaming}
             />
           ))}

@@ -1,5 +1,6 @@
 "use server";
 
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 export interface ChatConversationRow {
@@ -23,6 +24,8 @@ export interface ChatMessageRow {
   role: "user" | "assistant";
   content: string;
   sources: ChatSource[];
+  /** True when the retrieved sources were shown but the model itself couldn't confirm any of them answered the question. */
+  sourcesUncertain: boolean;
   createdAt: number;
 }
 
@@ -109,7 +112,12 @@ export async function addUserMessage(
   return { messageId: msg.id };
 }
 
-export async function getConversationMessages(
+// Cached per request — generateMetadata and the page component in
+// app/(app)/chats/[id]/page.tsx both call this for the same conversationId,
+// and without this they'd hit the DB twice (title/status + messages, each)
+// before the page can even start rendering, stretching out how long the
+// route's loading.tsx stays visible for no reason.
+export const getConversationMessages = cache(async function getConversationMessages(
   conversationId: string
 ): Promise<{ messages: ChatMessageRow[]; title: string; status: string }> {
   const { supabase, user } = await requireUser();
@@ -125,7 +133,7 @@ export async function getConversationMessages(
 
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("id, role, content, sources, created_at")
+    .select("id, role, content, sources, uncertain_sources, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
@@ -139,10 +147,11 @@ export async function getConversationMessages(
       role: row.role as ChatMessageRow["role"],
       content: row.content,
       sources: (row.sources ?? []) as ChatSource[],
+      sourcesUncertain: row.uncertain_sources ?? false,
       createdAt: new Date(row.created_at).getTime(),
     })),
   };
-}
+});
 
 export async function archiveConversation(id: string): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();

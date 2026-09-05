@@ -427,7 +427,14 @@ export async function POST(
         }
 
         // 2. Vector search (hybrid: personal notes + global videos)
-        const RAG_THRESHOLD = 0.35;
+        // Raised slightly from 0.35 — at 0.35, "Fontes" routinely listed
+        // chunks that were only loosely on-topic (e.g. three separate
+        // chapters of Romans for a specific-verse question), which the model
+        // then correctly declined to answer from, but the UI still showed
+        // as if they might contain the answer. See the `uncertain` flag
+        // below for closing that gap without needing a further threshold
+        // bump that could start hiding genuinely relevant chunks instead.
+        const RAG_THRESHOLD = 0.42;
         const { data: matches } = await supabase.rpc("match_hybrid_embeddings", {
           query_embedding: embedding,
           user_id_param: user.id,
@@ -643,15 +650,23 @@ export async function POST(
           }
         }
 
-        // 7. Send sources
+        // 7. Send sources — flagged "uncertain" when the model itself
+        // hedged (per the cautious-prompt wording above, "a informação não
+        // foi encontrada") despite something scoring above RAG_THRESHOLD.
+        // Sources are what the *search* found; this flag is whether the
+        // *model* actually confirmed one of them answers the question —
+        // the two can disagree, and the UI needs to show that distinction
+        // instead of presenting merely-similar chunks as if they were it.
+        const uncertain = sources.length > 0 && /n[ãa]o\s+(foi|foram)\s+encontrad/i.test(fullContent);
         if (sources.length > 0) {
-          sendEvent({ type: "sources", sources });
+          sendEvent({ type: "sources", sources, uncertain });
         }
 
         // 8. Persist assistant message
         await supabase.from("chat_messages").insert({
           conversation_id: conversationId,
           user_id: user.id,
+          uncertain_sources: uncertain,
           role: "assistant",
           content: fullContent,
           sources,

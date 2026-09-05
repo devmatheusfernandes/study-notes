@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { BookMarked, FileText, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
+import { AlertTriangle, BookMarked, FileText, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatSource } from "@/lib/store/chat-store";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
@@ -11,6 +11,8 @@ interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
   sources: ChatSource[];
+  /** Sources were retrieved, but the model itself couldn't confirm any of them actually answers the question. */
+  sourcesUncertain?: boolean;
   isStreaming?: boolean;
 }
 
@@ -118,7 +120,7 @@ function renderMarkdown(text: string): string {
   return `<p>${html}</p>`;
 }
 
-export function ChatMessage({ role, content, sources, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ role, content, sources, sourcesUncertain, isStreaming }: ChatMessageProps) {
   if (role === "user") {
     return (
       <motion.div
@@ -244,10 +246,17 @@ export function ChatMessage({ role, content, sources, isStreaming }: ChatMessage
             );
           })()}
 
+          {sourcesUncertain && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-amber-600 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>Nenhuma das fontes abaixo respondeu com certeza — revise se alguma é relevante.</span>
+            </div>
+          )}
+
           {/* Render regular source pill links in a horizontal scrollable row */}
           <div className="flex flex-col gap-1.5 w-full overflow-hidden">
             <span className="font-mono text-[9.5px] font-medium tracking-[0.09em] text-muted-foreground">
-              FONTES ({sources.length})
+              {sourcesUncertain ? "FONTES CONSIDERADAS" : "FONTES"} ({sources.length})
             </span>
             <div className="flex w-full overflow-x-auto gap-2 pb-1 scrollbar-none whitespace-nowrap">
               {sources.map((source, idx) => {

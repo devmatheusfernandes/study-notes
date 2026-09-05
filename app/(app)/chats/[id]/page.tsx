@@ -27,6 +27,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
     role: r.role,
     content: r.content,
     sources: r.sources,
+    sourcesUncertain: r.sourcesUncertain,
     createdAt: r.createdAt,
   }));
 

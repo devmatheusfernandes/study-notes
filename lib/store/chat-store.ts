@@ -27,6 +27,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources: ChatSource[];
+  /** True when the search found sources but the model itself couldn't confirm any of them actually answered the question. */
+  sourcesUncertain?: boolean;
   createdAt: number;
   isStreaming?: boolean;
 }
@@ -56,7 +58,7 @@ interface ChatStore {
   addUserMessage: (content: string) => void;
   startAssistantStream: () => void;
   appendDelta: (content: string) => void;
-  finishStream: (sources: ChatSource[]) => void;
+  finishStream: (sources: ChatSource[], sourcesUncertain?: boolean) => void;
   failStream: (errorMessage: string) => void;
 
   setActiveConversationId: (id: string | null) => void;
@@ -151,12 +153,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ),
     })),
 
-  finishStream: (sources) =>
+  finishStream: (sources, sourcesUncertain) =>
     set((s) => ({
       isStreaming: false,
       messages: s.messages.map((m, i) =>
         i === s.messages.length - 1 && m.isStreaming
-          ? { ...m, isStreaming: false, sources }
+          ? { ...m, isStreaming: false, sources, sourcesUncertain }
           : m
       ),
     })),
