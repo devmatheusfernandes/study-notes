@@ -8,7 +8,7 @@ import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { saveAnswer } from "@/app/(app)/jwpub-actions";
 import type { ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
-import { wrapTokenRange, getTokenRangeForSelection } from "@/lib/jwlibrary/paragraph-tokens";
+import { wrapTokenRange, getTokenRangeForSelection, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
 
 interface JwpubChapterViewProps {
   html: string;
@@ -25,18 +25,16 @@ interface JwpubChapterViewProps {
   /** "Anotar" mode (Fase 2) — while true, clicking any paragraph/heading (without selecting text) picks the whole thing for a new jwlibrary note instead of the normal footnote/bible-ref handling. Selecting a specific span works independently of this mode — see onPickParagraphSpan. */
   pickingParagraph?: boolean;
   onPickParagraph?: (pid: string) => void;
-  /** Selecting any text in the chapter (no mode needed) offers to anchor a new note to that exact span (Fase 2.5). `colorIndex` is set when the user tapped a color swatch directly instead of the plain note icon; `selectedText` is the raw selected text, for the editor's preview only. */
-  onPickParagraphSpan?: (
-    pid: string,
-    startToken: number,
-    endToken: number,
-    colorIndex?: number,
-    selectedText?: string
-  ) => void;
+  /** Selecting any text and tapping the plain note icon offers to anchor a new note to that exact span (no highlight color). `selectedText` is the raw selected text, for the editor's preview only. */
+  onPickParagraphSpan?: (pid: string, startToken: number, endToken: number, selectedText?: string) => void;
+  /** Selecting text and tapping a color swatch directly creates a highlight immediately — no editor, no note required (matches the real JW Library app's own behavior). */
+  onCreateHighlight?: (pid: string, startToken: number, endToken: number, colorIndex: number) => void;
   /** Imported JW Library highlights for this chapter (Fase 2.5) — see getChapterHighlights in jwlibrary-actions.ts. */
   highlights?: ParagraphHighlight[];
-  /** A highlight with an attached note was clicked. */
-  onHighlightNote?: (note: { id: string; title: string; content: string }) => void;
+  /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. */
+  onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string; colorIndex: number }) => void;
+  /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. */
+  onHighlightMark?: (highlight: ParagraphHighlight) => void;
 }
 
 const ANSWER_BASE_CLASS =
@@ -57,8 +55,10 @@ export function JwpubChapterView({
   pickingParagraph = false,
   onPickParagraph,
   onPickParagraphSpan,
+  onCreateHighlight,
   highlights = [],
   onHighlightNote,
+  onHighlightMark,
 }: JwpubChapterViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -108,17 +108,37 @@ export function JwpubChapterView({
         return;
       }
 
-      const highlightMark = el?.closest<HTMLElement>("[data-jwlibrary-note-id]");
-      if (highlightMark) {
-        const noteId = highlightMark.dataset.jwlibraryNoteId;
-        const note = highlights.find((h) => h.note?.id === noteId)?.note;
-        if (note) onHighlightNote?.(note);
+      const noteMark = el?.closest<HTMLElement>("[data-jwlibrary-note-id]");
+      if (noteMark) {
+        const noteId = noteMark.dataset.jwlibraryNoteId;
+        const highlight = highlights.find((h) => h.note?.id === noteId);
+        if (highlight?.note) {
+          onHighlightNote?.({ ...highlight.note, userMarkId: highlight.id, colorIndex: highlight.colorIndex });
+        }
+        return;
+      }
+
+      const usermarkEl = el?.closest<HTMLElement>("[data-jwlibrary-usermark-id]");
+      if (usermarkEl) {
+        const usermarkId = usermarkEl.dataset.jwlibraryUsermarkId;
+        const highlight = highlights.find((h) => h.id === usermarkId);
+        if (highlight) onHighlightMark?.(highlight);
       }
     }
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [onFootnote, onBibleRef, onPublicationRef, resolvedPubRefIds, pickingParagraph, onPickParagraph, highlights, onHighlightNote]);
+  }, [
+    onFootnote,
+    onBibleRef,
+    onPublicationRef,
+    resolvedPubRefIds,
+    pickingParagraph,
+    onPickParagraph,
+    highlights,
+    onHighlightNote,
+    onHighlightMark,
+  ]);
 
   // Upgrades resolved pubrefs to look clickable (accent + underline), same
   // treatment as footnotes/bible refs — done imperatively post-render, like
@@ -208,8 +228,11 @@ export function JwpubChapterView({
     const selectedText = selectionPrompt.range.toString();
     window.getSelection()?.removeAllRanges();
     setSelectionPrompt(null);
-    if (tokenRange) {
-      onPickParagraphSpan?.(selectionPrompt.pid, tokenRange.start, tokenRange.end, colorIndex, selectedText);
+    if (!tokenRange) return;
+    if (colorIndex !== undefined) {
+      onCreateHighlight?.(selectionPrompt.pid, tokenRange.start, tokenRange.end, colorIndex);
+    } else {
+      onPickParagraphSpan?.(selectionPrompt.pid, tokenRange.start, tokenRange.end, selectedText);
     }
   }
 
@@ -288,13 +311,20 @@ export function JwpubChapterView({
   // already listens for, so the marker is clickable for free.
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || highlights.length === 0) return;
+    if (!container) return;
+    // Always unwrap first — this effect re-runs whenever `highlights`
+    // changes (color edit, note attached/detached, add/remove), but the DOM
+    // built by dangerouslySetInnerHTML isn't reset just because that array
+    // changed, so redrawing without unwrapping would nest marks instead of
+    // replacing them.
+    unwrapHighlightMarks(container);
+    if (highlights.length === 0) return;
 
     for (const highlight of highlights) {
       const el = container.querySelector<HTMLElement>(`[data-pid="${highlight.pid}"]`);
       if (!el) continue;
       const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
-      const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.note?.id);
+      const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
 
       if (highlight.note && mark) {
         el.style.position = "relative";

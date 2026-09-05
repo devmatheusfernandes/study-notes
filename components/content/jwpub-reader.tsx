@@ -17,7 +17,7 @@ import {
 } from "@/app/(app)/jwpub-actions";
 import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
-import { getChapterHighlights, type ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
+import { getChapterHighlights, createJwlibraryHighlight, type ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
@@ -193,6 +193,9 @@ export function JwpubReader({
   // highlightEditMode, promoting the same note into the full editor vault.
   const [highlightNote, setHighlightNote] = useState<EditableJwlibraryNote | null>(null);
   const [highlightEditMode, setHighlightEditMode] = useState(false);
+  // Clicking a highlight with NO note (a "destaque puro") opens the same
+  // panel in its note-less mode (recolor/add note/delete) instead.
+  const [highlightMark, setHighlightMark] = useState<ParagraphHighlight | null>(null);
 
   // Fetched once per publication (not per chapter) — cheap, and every
   // chapter switch would otherwise re-fetch the whole set.
@@ -355,7 +358,7 @@ export function JwpubReader({
   );
 
   const handlePickParagraphSpan = useCallback(
-    (pid: string, startToken: number, endToken: number, colorIndex?: number, selectedText?: string) => {
+    (pid: string, startToken: number, endToken: number, selectedText?: string) => {
       setPickingParagraph(false);
       setPendingNoteLocation({
         blockType: 1,
@@ -372,12 +375,77 @@ export function JwpubReader({
         },
         label: `${publication.title} — ${activeChapter?.title ?? ""}`,
         tokenRange: { start: startToken, end: endToken },
-        initialColorIndex: colorIndex,
         selectedText,
       });
     },
     [publication, activeChapter]
   );
+
+  // Selecting text and tapping a color swatch directly (see
+  // jwpub-chapter-view.tsx's onCreateHighlight) creates a "destaque puro"
+  // right away — no editor vault, matching the real JW Library app. Drawn
+  // optimistically (a temp `optimistic:` id, same prefix convention as
+  // use-file-upload.ts's own optimistic cards) so the mark appears instantly
+  // instead of waiting on the round trip; refreshHighlights() afterward
+  // swaps it for the authoritative row (real id), or handleCreateHighlight's
+  // catch rolls it back on failure.
+  const handleCreateHighlight = useCallback(
+    (pid: string, startToken: number, endToken: number, colorIndex: number) => {
+      const tempId = `optimistic:${crypto.randomUUID()}`;
+      setHighlights((prev) => [...prev, { id: tempId, pid, colorIndex, startToken, endToken, note: null }]);
+
+      void createJwlibraryHighlight({
+        blockType: 1,
+        blockIdentifier: Number(pid),
+        location: {
+          bookNumber: null,
+          chapterNumber: null,
+          keySymbol: publication.symbol,
+          mepsLanguage: publication.mepsLanguageIndex,
+          issueTagNumber: publication.issueTagNumber,
+          mepsDocumentId: activeChapter?.mepsDocumentId ?? null,
+          track: null,
+          locationType: 0,
+        },
+        colorIndex,
+        startToken,
+        endToken,
+      }).then((result) => {
+        if (result.error) {
+          setHighlights((prev) => prev.filter((h) => h.id !== tempId));
+          notify.error("Não foi possível criar o destaque", result.error);
+          return;
+        }
+        refreshHighlights();
+      });
+    },
+    [publication, activeChapter, refreshHighlights]
+  );
+
+  // "Adicionar nota" inside the note-less highlight panel — opens the full
+  // editor vault attached to that highlight's existing UserMark (see
+  // JwlibraryNoteEditorVault's existingUserMarkId).
+  const handleAddNoteToHighlight = useCallback(() => {
+    if (!highlightMark) return;
+    setPendingNoteLocation({
+      blockType: 1,
+      blockIdentifier: Number(highlightMark.pid),
+      location: {
+        bookNumber: null,
+        chapterNumber: null,
+        keySymbol: publication.symbol,
+        mepsLanguage: publication.mepsLanguageIndex,
+        issueTagNumber: publication.issueTagNumber,
+        mepsDocumentId: activeChapter?.mepsDocumentId ?? null,
+        track: null,
+        locationType: 0,
+      },
+      label: `${publication.title} — ${activeChapter?.title ?? ""}`,
+      existingUserMarkId: highlightMark.id,
+      initialColorIndex: highlightMark.colorIndex,
+    });
+    setHighlightMark(null);
+  }, [highlightMark, publication, activeChapter]);
 
   /** Recovery path: re-download the original from Storage and parse it again. */
   async function reprocess() {
@@ -524,8 +592,10 @@ export function JwpubReader({
                   pickingParagraph={pickingParagraph}
                   onPickParagraph={handlePickParagraph}
                   onPickParagraphSpan={handlePickParagraphSpan}
+                  onCreateHighlight={handleCreateHighlight}
                   highlights={highlights}
                   onHighlightNote={setHighlightNote}
+                  onHighlightMark={setHighlightMark}
                 />
               )}
             </div>
@@ -637,12 +707,23 @@ export function JwpubReader({
       />
 
       <JwlibraryHighlightNotePanel
-        open={highlightNote !== null && !highlightEditMode}
+        open={(highlightNote !== null || highlightMark !== null) && !highlightEditMode}
         note={highlightNote}
-        onClose={() => setHighlightNote(null)}
+        highlightId={highlightMark?.id}
+        colorIndex={highlightMark?.colorIndex}
+        onClose={() => {
+          setHighlightNote(null);
+          setHighlightMark(null);
+        }}
         onEdit={() => setHighlightEditMode(true)}
+        onAddNote={handleAddNoteToHighlight}
+        onColorChanged={(colorIndex) => {
+          setHighlightMark((prev) => (prev ? { ...prev, colorIndex } : prev));
+          void refreshHighlights();
+        }}
         onDeleted={() => {
           setHighlightNote(null);
+          setHighlightMark(null);
           void refreshHighlights();
         }}
       />

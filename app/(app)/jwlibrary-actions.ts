@@ -308,6 +308,8 @@ export interface JwlibraryNoteView {
   content: string;
   blockType: number;
   blockIdentifier: number | null;
+  /** The attached UserMark's id, if any — lets the editor vault recolor it directly. */
+  userMarkId: string | null;
   colorIndex: number | null;
   location: JwlibraryLocation;
   resolvedPublicationId: string | null;
@@ -404,6 +406,7 @@ export async function listJwlibraryContent(): Promise<{
         content: decryptText(n.content) ?? "",
         blockType: n.block_type,
         blockIdentifier: n.block_identifier,
+        userMarkId: n.user_mark_id,
         colorIndex: n.user_mark_id ? (userMarkColorById.get(n.user_mark_id) ?? null) : null,
         location,
         resolvedPublicationId: resolved.publicationId,
@@ -470,8 +473,10 @@ export interface CreateJwlibraryNoteInput {
   blockType: number;
   blockIdentifier: number | null;
   location: JwlibraryLocation;
-  /** Set when the note is anchored to a selected text span (not just the whole paragraph) and the user picked a highlight color for it. */
+  /** Set when the note is anchored to a selected text span (not just the whole paragraph) and the user picked a highlight color for it. Creates a new UserMark/BlockRange pair. Mutually exclusive with attachToUserMarkId. */
   highlight?: { colorIndex: number; startToken: number; endToken: number } | null;
+  /** Set when attaching this note to a highlight that already exists (created standalone via createJwlibraryHighlight) — links to it instead of creating a new UserMark. Mutually exclusive with `highlight`. */
+  attachToUserMarkId?: string | null;
 }
 
 /**
@@ -481,6 +486,9 @@ export interface CreateJwlibraryNoteInput {
  * doesn't need to special-case these. When `input.highlight` is set, also
  * creates the UserMark/BlockRange pair backing the visible highlight and
  * links the note to it — same shape an imported note+highlight pair has.
+ * When `input.attachToUserMarkId` is set instead, links to that
+ * already-existing UserMark (see createJwlibraryHighlight) without creating
+ * a new one.
  */
 export async function createJwlibraryNote(
   input: CreateJwlibraryNoteInput
@@ -489,8 +497,8 @@ export async function createJwlibraryNote(
   if (!user) return { error: "Sessão expirada." };
   if (!input.title.trim() && !input.content.trim()) return { error: "A nota está vazia." };
 
-  let userMarkId: string | null = null;
-  if (input.highlight) {
+  let userMarkId: string | null = input.attachToUserMarkId ?? null;
+  if (!userMarkId && input.highlight) {
     const { data: mark, error: markError } = await supabase
       .from("jwlibrary_usermarks")
       .insert({
@@ -542,6 +550,79 @@ export async function createJwlibraryNote(
   return { id: data.id };
 }
 
+export interface CreateJwlibraryHighlightInput {
+  /** 0 = whole publication, 1 = publication paragraph, 2 = Bible verse — same convention as CreateJwlibraryNoteInput. */
+  blockType: number;
+  blockIdentifier: number | null;
+  location: JwlibraryLocation;
+  colorIndex: number;
+  startToken: number;
+  endToken: number;
+}
+
+/**
+ * Creates a highlight with no attached note ("destaque puro", matching the
+ * real JW Library app's own tap-a-color-to-highlight behavior) — just the
+ * UserMark/BlockRange pair, no jwlibrary_notes row. A note can be attached
+ * later via createJwlibraryNote's attachToUserMarkId.
+ */
+export async function createJwlibraryHighlight(
+  input: CreateJwlibraryHighlightInput
+): Promise<{ id?: string; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data: mark, error: markError } = await supabase
+    .from("jwlibrary_usermarks")
+    .insert({
+      user_id: user.id,
+      backup_id: null,
+      source_guid: randomUUID(),
+      color_index: input.colorIndex,
+      style_index: 0,
+      version: 1,
+      ...locationColumns(input.location),
+    })
+    .select("id")
+    .single();
+  if (markError || !mark) return { error: "Não foi possível criar o destaque." };
+
+  const { error: rangeError } = await supabase.from("jwlibrary_blockranges").insert({
+    user_id: user.id,
+    usermark_id: mark.id,
+    block_type: input.blockType,
+    identifier: input.blockIdentifier,
+    start_token: input.startToken,
+    end_token: input.endToken,
+  });
+  if (rangeError) return { error: "Não foi possível criar o destaque." };
+
+  return { id: mark.id };
+}
+
+/** Deletes a highlight's UserMark — its BlockRange cascades (migration 0009); a note pointing at it (if any) keeps existing with user_mark_id set to null (migration 0009's `on delete set null`), never deleted along with the mark. */
+export async function deleteJwlibraryHighlight(usermarkId: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("jwlibrary_usermarks").delete().eq("id", usermarkId);
+  return error ? { error: "Não foi possível excluir o destaque." } : {};
+}
+
+export async function updateJwlibraryHighlightColor(
+  usermarkId: string,
+  colorIndex: number
+): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase
+    .from("jwlibrary_usermarks")
+    .update({ color_index: colorIndex })
+    .eq("id", usermarkId);
+  return error ? { error: "Não foi possível trocar a cor." } : {};
+}
+
 export async function updateJwlibraryNote(
   id: string,
   patch: { title?: string; content?: string }
@@ -568,6 +649,8 @@ export async function deleteJwlibraryNote(id: string): Promise<{ error?: string 
 }
 
 export interface ParagraphHighlight {
+  /** The backing UserMark's id — always present, lets a note-less highlight still be edited/recolored/deleted. */
+  id: string;
   /** Matches a rendered chapter's `data-pid` attribute directly. */
   pid: string;
   colorIndex: number;
@@ -633,6 +716,7 @@ export async function getChapterHighlights(
     highlights: (ranges ?? [])
       .filter((r) => r.start_token !== null && r.end_token !== null)
       .map((r) => ({
+        id: r.usermark_id as string,
         pid: String(r.identifier),
         colorIndex: colorByMark.get(r.usermark_id) ?? 1,
         startToken: r.start_token as number,
@@ -643,6 +727,8 @@ export async function getChapterHighlights(
 }
 
 export interface BibleVerseHighlight {
+  /** The backing UserMark's id — always present, lets a note-less highlight still be edited/recolored/deleted. */
+  id: string;
   verse: number;
   colorIndex: number;
   startToken: number;
@@ -692,6 +778,7 @@ export async function getBibleChapterHighlights(
     highlights: (ranges ?? [])
       .filter((r) => r.start_token !== null && r.end_token !== null)
       .map((r) => ({
+        id: r.usermark_id as string,
         verse: Number(r.identifier),
         colorIndex: colorByMark.get(r.usermark_id) ?? 1,
         startToken: r.start_token as number,

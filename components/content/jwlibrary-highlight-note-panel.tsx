@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import {
   deleteJwlibraryNote,
+  deleteJwlibraryHighlight,
+  updateJwlibraryHighlightColor,
   listOwnJwlibraryTags,
   getJwlibraryNoteTagIds,
   type JwlibraryTagView,
@@ -22,16 +25,35 @@ interface JwlibraryHighlightNotePanelProps {
   onEdit: () => void;
   /** Called after the note is actually deleted, so the caller can drop its highlight/marker and refresh. */
   onDeleted: () => void;
+  /** The backing UserMark's id — when `note` is null and this is set, the panel shows the note-less highlight controls (recolor / add note / delete) instead of "Nota não encontrada.". */
+  highlightId?: string | null;
+  /** The highlight's current color, for the note-less controls below. */
+  colorIndex?: number;
+  /** Opens the full editor vault to attach a new note to this highlight (see jwpub-reader.tsx/bible-reader.tsx's `existingUserMarkId` wiring). Only relevant when `note` is null. */
+  onAddNote?: () => void;
+  /** Called after the highlight's color was changed (with the new index), so the caller can refresh its highlight list and keep this panel's own color state in sync. */
+  onColorChanged?: (colorIndex: number) => void;
 }
 
 /**
- * Read-only preview opened by clicking a highlight's margin marker in the
- * reader (see the `data-jwlibrary-note-id` wiring in jwpub-chapter-view.tsx)
- * — same side-panel/Vault shell as footnotes and Bible references. Edit
- * hands off to the full JwlibraryNoteEditorVault; delete confirms inline
- * through its own ConfirmVault, per the app's no-modal-dialogs rule.
+ * Opened by clicking a highlight's margin marker (note attached) or the
+ * highlight itself (no note) in the reader — same side-panel/Vault shell as
+ * footnotes and Bible references. With a note: read-only preview, edit hands
+ * off to the full JwlibraryNoteEditorVault, delete confirms inline. Without
+ * one: recolor / add a note / delete the bare highlight — all through this
+ * app's no-modal-dialogs rule (ConfirmVault for the destructive step).
  */
-export function JwlibraryHighlightNotePanel({ open, note, onClose, onEdit, onDeleted }: JwlibraryHighlightNotePanelProps) {
+export function JwlibraryHighlightNotePanel({
+  open,
+  note,
+  onClose,
+  onEdit,
+  onDeleted,
+  highlightId = null,
+  colorIndex,
+  onAddNote,
+  onColorChanged,
+}: JwlibraryHighlightNotePanelProps) {
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [tags, setTags] = useState<JwlibraryTagView[]>([]);
 
@@ -55,15 +77,26 @@ export function JwlibraryHighlightNotePanel({ open, note, onClose, onEdit, onDel
   }, [open, note]);
 
   async function handleDelete() {
-    if (!note) return;
-    await deleteJwlibraryNote(note.id);
     setConfirmDeleteOpen(false);
+    if (note) {
+      await deleteJwlibraryNote(note.id);
+    } else if (highlightId) {
+      await deleteJwlibraryHighlight(highlightId);
+    } else {
+      return;
+    }
     onDeleted();
+  }
+
+  async function handleColorChange(index: number) {
+    if (!highlightId) return;
+    await updateJwlibraryHighlightColor(highlightId, index);
+    onColorChanged?.(index);
   }
 
   return (
     <>
-      <JwpubSidePanel open={open} title="Nota" onClose={onClose}>
+      <JwpubSidePanel open={open} title={note ? "Nota" : "Destaque"} onClose={onClose}>
         {note ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-1.5 self-end">
@@ -106,6 +139,46 @@ export function JwlibraryHighlightNotePanel({ open, note, onClose, onEdit, onDel
               />
             )}
           </div>
+        ) : highlightId ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11.5px] text-muted-foreground">Cor do destaque</span>
+              <div className="flex items-center gap-1.5">
+                {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => void handleColorChange(Number(index))}
+                    aria-label={color.name}
+                    title={color.name}
+                    className="size-7 shrink-0 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
+                    style={{
+                      backgroundColor: color.hex,
+                      borderColor: colorIndex === Number(index) ? "var(--foreground)" : "transparent",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={onAddNote}
+                className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-[13px] text-accent transition-colors hover:bg-accent/10 self-start"
+              >
+                <Plus className="size-3.5" />
+                Adicionar nota
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteOpen(true)}
+                className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 self-start"
+              >
+                <Trash2 className="size-3.5" />
+                Excluir destaque
+              </button>
+            </div>
+          </div>
         ) : (
           <p className="text-[13.5px] text-muted-foreground">Nota não encontrada.</p>
         )}
@@ -114,8 +187,12 @@ export function JwlibraryHighlightNotePanel({ open, note, onClose, onEdit, onDel
       <ConfirmVault
         open={confirmDeleteOpen}
         onOpenChange={setConfirmDeleteOpen}
-        title="Excluir nota?"
-        description="O destaque associado deixa de mostrar essa nota. Essa ação não pode ser desfeita."
+        title={note ? "Excluir nota?" : "Excluir destaque?"}
+        description={
+          note
+            ? "O destaque associado deixa de mostrar essa nota. Essa ação não pode ser desfeita."
+            : "Essa ação não pode ser desfeita."
+        }
         confirmLabel="Excluir"
         onConfirm={() => void handleDelete()}
       />

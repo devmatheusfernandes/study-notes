@@ -125,23 +125,48 @@ function pointToCharIndex(root: HTMLElement, node: Node, offset: number, charLoc
 }
 
 /**
+ * Removes every `<mark class="jwlibrary-highlight">` (and its
+ * `.jwlibrary-note-marker` margin dot, if any) previously inserted by
+ * wrapTokenRange, restoring `container`'s text nodes to their pristine
+ * state. Must be called before re-running the highlight-drawing effect in
+ * jwpub-chapter-view.tsx/bible-chapter-view.tsx — those effects re-run
+ * whenever the `highlights` array changes (e.g. a highlight gets a note
+ * attached, or its color changes), but the underlying DOM (built once from
+ * `dangerouslySetInnerHTML`) is never reset just because that array changed.
+ * Redrawing without unwrapping first nests a new `<mark>` inside the
+ * previous one instead of replacing it — visible as the old color peeking
+ * out from the new mark's padding/border-radius.
+ */
+export function unwrapHighlightMarks(container: HTMLElement): void {
+  container.querySelectorAll(".jwlibrary-note-marker").forEach((marker) => marker.remove());
+  let mark: HTMLElement | null;
+  while ((mark = container.querySelector("mark.jwlibrary-highlight"))) {
+    mark.replaceWith(...mark.childNodes);
+  }
+}
+
+/**
  * Wraps tokens `[startToken, endToken]` (inclusive) of `root`'s rendered
  * text in a `<mark>` colored `colorHex`. Uses extractContents/insertNode
  * rather than Range.surroundContents, since a highlighted span routinely
  * crosses into a nested element (a Bible citation link partway through the
  * range) — surroundContents throws in that case, extractContents doesn't.
  *
- * `noteId`, when given, is stamped as `data-jwlibrary-note-id` so a click on
- * the mark can look the associated note up (see jwpub-chapter-view.tsx).
- * Returns the created `<mark>` (or null on failure) so the caller can read
- * its position — e.g. to place a margin marker at the exact line the
- * highlight starts on, not just the top of the paragraph.
+ * `usermarkId` is always stamped as `data-jwlibrary-usermark-id` so a click
+ * on the mark can look up the highlight (and, if it has no note, offer to
+ * recolor/delete/annotate it — see jwpub-chapter-view.tsx). `noteId`, when
+ * given, is additionally stamped as `data-jwlibrary-note-id` so a click can
+ * look the associated note up directly. Returns the created `<mark>` (or
+ * null on failure) so the caller can read its position — e.g. to place a
+ * margin marker at the exact line the highlight starts on, not just the top
+ * of the paragraph.
  */
 export function wrapTokenRange(
   root: HTMLElement,
   startToken: number,
   endToken: number,
   colorHex: string,
+  usermarkId: string,
   noteId?: string
 ): HTMLElement | null {
   const { tokens, charLocations } = buildTokenization(root);
@@ -168,9 +193,10 @@ export function wrapTokenRange(
   mark.style.color = "#1a1614"; // fixed dark text — these highlight colors are pastel, meant for a light background, not this app's own dark theme text color
   mark.style.borderRadius = "2px";
   mark.style.padding = "0 1px";
+  mark.dataset.jwlibraryUsermarkId = usermarkId;
+  mark.style.cursor = "pointer";
   if (noteId) {
     mark.dataset.jwlibraryNoteId = noteId;
-    mark.style.cursor = "pointer";
   }
 
   try {

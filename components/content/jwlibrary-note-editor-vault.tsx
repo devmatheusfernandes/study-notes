@@ -17,6 +17,7 @@ import {
   createJwlibraryNote,
   updateJwlibraryNote,
   deleteJwlibraryNote,
+  updateJwlibraryHighlightColor,
   listOwnPublications,
   listOwnJwlibraryTags,
   getJwlibraryNoteTagIds,
@@ -34,6 +35,10 @@ export interface EditableJwlibraryNote {
   id: string;
   title: string;
   content: string;
+  /** The attached UserMark's id, if any — lets the color dropdown below edit an existing highlight's color directly (via updateJwlibraryHighlightColor) instead of only being able to set one at creation time. */
+  userMarkId?: string | null;
+  /** The attached UserMark's current color, if any — initializes the dropdown when editing. */
+  colorIndex?: number | null;
 }
 
 /** A location already fully decided before the Vault opens — used when the user picked a paragraph while reading (see jwpub-reader.tsx's picking mode). Skips the location step entirely. */
@@ -45,10 +50,12 @@ export interface PrefilledJwlibraryLocation {
   label: string;
   /** Set when the user selected a specific span of text (not just clicked the paragraph) — lets them also pick a highlight color for it. */
   tokenRange?: { start: number; end: number };
-  /** Pre-selects a highlight color chip — set when the user tapped a color directly in the reader's selection popup instead of opening the editor first and choosing one there. */
+  /** Pre-selects a highlight color chip — set when the user tapped a color directly in the reader's selection popup instead of opening the editor first and choosing one there, or when attaching a note to a highlight that already has one (see existingUserMarkId). */
   initialColorIndex?: number;
   /** The raw selected text, for a preview only (not persisted) — lets the user confirm what they're about to highlight before picking a color. */
   selectedText?: string;
+  /** Set when adding a note to a highlight that already exists (see JwlibraryHighlightNotePanel's "Adicionar nota") — the note links to this UserMark instead of creating a new one. The color dropdown still shows (seeded from initialColorIndex above) but edits that UserMark directly instead of deferring to note creation. */
+  existingUserMarkId?: string;
 }
 
 interface JwlibraryNoteEditorVaultProps {
@@ -96,6 +103,15 @@ export function JwlibraryNoteEditorVault({
 }: JwlibraryNoteEditorVaultProps) {
   const isEdit = !!note;
   const isPrefilled = !!prefilledLocation;
+  // The UserMark this vault can recolor directly (immediately, via
+  // updateJwlibraryHighlightColor) rather than deferring to note creation —
+  // either a highlight a note is being attached to, or one an existing note
+  // already carries. Null when there's no highlight yet to recolor (a brand
+  // new span hasn't been turned into one until this note/highlight saves).
+  const activeUserMarkId = prefilledLocation?.existingUserMarkId ?? (isEdit ? (note?.userMarkId ?? null) : null);
+  // Whether there's any highlight to show/edit a color for — either a fresh
+  // span just selected (not a highlight yet) or an already-existing one.
+  const showColorPicker = Boolean(prefilledLocation?.tokenRange) || Boolean(activeUserMarkId);
 
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -132,7 +148,7 @@ export function JwlibraryNoteEditorVault({
       setMode("publication");
       setPublicationId("");
       setBibleRef(EMPTY_BIBLE_REF);
-      setHighlightColor(prefilledLocation?.initialColorIndex ?? null);
+      setHighlightColor(prefilledLocation?.initialColorIndex ?? note?.colorIndex ?? null);
       setNoteTagIds([]);
       setTagQuery("");
     }
@@ -235,8 +251,9 @@ export function JwlibraryNoteEditorVault({
         blockType: prefilledLocation.blockType,
         blockIdentifier: prefilledLocation.blockIdentifier,
         location: prefilledLocation.location,
+        attachToUserMarkId: prefilledLocation.existingUserMarkId,
         highlight:
-          prefilledLocation.tokenRange && highlightColor !== null
+          !prefilledLocation.existingUserMarkId && prefilledLocation.tokenRange && highlightColor !== null
             ? {
                 colorIndex: highlightColor,
                 startToken: prefilledLocation.tokenRange.start,
@@ -284,36 +301,64 @@ export function JwlibraryNoteEditorVault({
     };
   }
 
+  // Tracks the live debounce timer (if any) so closing the Vault can flush
+  // it immediately instead of just cancelling it — see handleClose below.
+  const pendingSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function performSave() {
+    setSaveState("saving");
+    if (createdId) {
+      const result = await updateJwlibraryNote(createdId, { title, content });
+      setSaveState(result.error ? "error" : "saved");
+      if (!result.error) onSaved();
+    } else {
+      const input = buildCreateInput();
+      if (!input) return;
+      const result = await createJwlibraryNote(input);
+      if (result.id) {
+        setCreatedId(result.id);
+        setSaveState("saved");
+        onSaved();
+      } else {
+        setSaveState("error");
+      }
+    }
+  }
+
   // Debounced autosave — same 600ms shape as note-editor.tsx's, just calling
-  // server actions directly (awaited inside the timeout) instead of a
-  // local-first store, since these notes have no offline outbox behind them.
+  // server actions directly instead of a local-first store, since these
+  // notes have no offline outbox behind them.
   useEffect(() => {
     if (!open || !locationReady) return;
     if (!title.trim() && !content.trim()) return;
 
-    const timer = setTimeout(async () => {
-      setSaveState("saving");
-      if (createdId) {
-        const result = await updateJwlibraryNote(createdId, { title, content });
-        setSaveState(result.error ? "error" : "saved");
-        if (!result.error) onSaved();
-      } else {
-        const input = buildCreateInput();
-        if (!input) return;
-        const result = await createJwlibraryNote(input);
-        if (result.id) {
-          setCreatedId(result.id);
-          setSaveState("saved");
-          onSaved();
-        } else {
-          setSaveState("error");
-        }
-      }
+    pendingSaveTimerRef.current = setTimeout(() => {
+      pendingSaveTimerRef.current = null;
+      void performSave();
     }, 600);
 
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- buildCreateInput closes over mode/publicationId/bibleRef/highlightColor, already listed below
+    return () => {
+      if (pendingSaveTimerRef.current) {
+        clearTimeout(pendingSaveTimerRef.current);
+        pendingSaveTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- performSave closes over mode/publicationId/bibleRef/highlightColor via buildCreateInput, already listed below
   }, [title, content, createdId, locationReady, open, mode, publicationId, bibleRef, highlightColor]);
+
+  // Closing the Vault (X button, backdrop tap, swipe-down, Escape — all
+  // funnel through Vault's own onOpenChange) used to just let the effect's
+  // cleanup above cancel any pending debounced save, silently dropping
+  // whatever was typed in the last 600ms. Flushing it here instead means the
+  // user never has to wait for "salvo" before it's safe to close.
+  function handleOpenChange(next: boolean) {
+    if (!next && pendingSaveTimerRef.current) {
+      clearTimeout(pendingSaveTimerRef.current);
+      pendingSaveTimerRef.current = null;
+      void performSave();
+    }
+    onOpenChange(next);
+  }
 
   async function handleDelete() {
     if (!note) return;
@@ -323,9 +368,24 @@ export function JwlibraryNoteEditorVault({
     onSaved();
   }
 
+  // When a UserMark already exists (editing a note that has one, or
+  // attaching a new note to a highlight created standalone), a color pick
+  // recolors it right away instead of waiting on note creation — there's no
+  // "Sem destaque" case here, an existing UserMark always has a real color.
+  // Otherwise (a fresh span not yet turned into a highlight), just stage the
+  // choice locally — buildCreateInput folds it into the highlight created
+  // alongside the note on first save.
+  async function handleColorSelect(index: number | null) {
+    setHighlightColor(index);
+    if (activeUserMarkId && index !== null) {
+      await updateJwlibraryHighlightColor(activeUserMarkId, index);
+      onSaved();
+    }
+  }
+
   return (
     <>
-      <Vault open={open} onOpenChange={onOpenChange}>
+      <Vault open={open} onOpenChange={handleOpenChange}>
         <VaultContent aria-label={isEdit ? "Editar nota" : "Nova nota"}>
           <VaultHeader showCloseButton={false}>
             <VaultTitle>{isEdit ? "Editar nota" : "Nova nota"}</VaultTitle>
@@ -387,16 +447,16 @@ export function JwlibraryNoteEditorVault({
                     aria-label="Título da nota"
                     className="flex-1"
                   />
-                  {isPrefilled && prefilledLocation.tokenRange && (
+                  {showColorPicker && (
                     <Select
                       value={highlightColor !== null ? String(highlightColor) : "none"}
-                      onValueChange={(v) => setHighlightColor(v === "none" ? null : Number(v))}
+                      onValueChange={(v) => void handleColorSelect(v === "none" ? null : Number(v))}
                     >
                       <SelectTrigger className="w-36 shrink-0" aria-label="Cor do destaque">
                         <SelectValue placeholder="Destacar" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Sem destaque</SelectItem>
+                        {!activeUserMarkId && <SelectItem value="none">Sem destaque</SelectItem>}
                         {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
                           <SelectItem key={index} value={index}>
                             <span className="flex items-center gap-2">

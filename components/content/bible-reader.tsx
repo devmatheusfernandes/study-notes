@@ -24,7 +24,7 @@ import {
   type BibleStudyNote,
   type BibleAppendixHeader,
 } from "@/app/(app)/bible-actions";
-import { getBibleChapterHighlights, type BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
+import { getBibleChapterHighlights, createJwlibraryHighlight, type BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
@@ -370,9 +370,12 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
   const [highlightNote, setHighlightNote] = useState<EditableJwlibraryNote | null>(null);
   const [highlightEditMode, setHighlightEditMode] = useState(false);
+  // Clicking a highlight with NO note (a "destaque puro") opens the same
+  // panel in its note-less mode (recolor/add note/delete) instead.
+  const [highlightMark, setHighlightMark] = useState<BibleVerseHighlight | null>(null);
 
   const handlePickVerseSpan = useCallback(
-    (verse: number, startToken: number, endToken: number, colorIndex?: number, selectedText?: string) => {
+    (verse: number, startToken: number, endToken: number, selectedText?: string) => {
       setPendingNoteLocation({
         blockType: 2,
         blockIdentifier: verse,
@@ -388,12 +391,74 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         },
         label: `${currentBook?.book ?? ""} ${chapter}:${verse}`,
         tokenRange: { start: startToken, end: endToken },
-        initialColorIndex: colorIndex,
         selectedText,
       });
     },
     [bookOrder, chapter, currentBook]
   );
+
+  // Selecting a span and tapping a color swatch directly creates a
+  // "destaque puro" right away — no editor vault (see bible-chapter-view.tsx's
+  // onCreateHighlight / jwpub-reader.tsx's mirrored handleCreateHighlight).
+  // Drawn optimistically (temp `optimistic:` id) so the mark appears
+  // instantly; refreshHighlights() afterward swaps it for the real row, or
+  // it's rolled back on failure.
+  const handleCreateHighlight = useCallback(
+    (verse: number, startToken: number, endToken: number, colorIndex: number) => {
+      const tempId = `optimistic:${crypto.randomUUID()}`;
+      setHighlights((prev) => [...prev, { id: tempId, verse, colorIndex, startToken, endToken, note: null }]);
+
+      void createJwlibraryHighlight({
+        blockType: 2,
+        blockIdentifier: verse,
+        location: {
+          bookNumber: bookOrder,
+          chapterNumber: chapter,
+          keySymbol: null,
+          mepsLanguage: null,
+          issueTagNumber: null,
+          mepsDocumentId: null,
+          track: null,
+          locationType: 0,
+        },
+        colorIndex,
+        startToken,
+        endToken,
+      }).then((result) => {
+        if (result.error) {
+          setHighlights((prev) => prev.filter((h) => h.id !== tempId));
+          notify.error("Não foi possível criar o destaque", result.error);
+          return;
+        }
+        refreshHighlights();
+      });
+    },
+    [bookOrder, chapter, refreshHighlights]
+  );
+
+  // "Adicionar nota" inside the note-less highlight panel — opens the full
+  // editor vault attached to that highlight's existing UserMark.
+  const handleAddNoteToHighlight = useCallback(() => {
+    if (!highlightMark) return;
+    setPendingNoteLocation({
+      blockType: 2,
+      blockIdentifier: highlightMark.verse,
+      location: {
+        bookNumber: bookOrder,
+        chapterNumber: chapter,
+        keySymbol: null,
+        mepsLanguage: null,
+        issueTagNumber: null,
+        mepsDocumentId: null,
+        track: null,
+        locationType: 0,
+      },
+      label: `${currentBook?.book ?? ""} ${chapter}:${highlightMark.verse}`,
+      existingUserMarkId: highlightMark.id,
+      initialColorIndex: highlightMark.colorIndex,
+    });
+    setHighlightMark(null);
+  }, [highlightMark, bookOrder, chapter, currentBook]);
 
   if (screen === "books") {
     return (
@@ -459,9 +524,11 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
             <BibleChapterView
               verses={verses ?? []}
               onPickVerseSpan={handlePickVerseSpan}
+              onCreateHighlight={handleCreateHighlight}
               onVerseSelected={handleVerseSelected}
               highlights={highlights}
               onHighlightNote={setHighlightNote}
+              onHighlightMark={setHighlightMark}
               targetVerse={targetVerse}
               footnoteCountByVerse={footnoteCountByVerse}
               studyNoteVerses={studyNoteVerses}
@@ -524,12 +591,23 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       />
 
       <JwlibraryHighlightNotePanel
-        open={highlightNote !== null && !highlightEditMode}
+        open={(highlightNote !== null || highlightMark !== null) && !highlightEditMode}
         note={highlightNote}
-        onClose={() => setHighlightNote(null)}
+        highlightId={highlightMark?.id}
+        colorIndex={highlightMark?.colorIndex}
+        onClose={() => {
+          setHighlightNote(null);
+          setHighlightMark(null);
+        }}
         onEdit={() => setHighlightEditMode(true)}
+        onAddNote={handleAddNoteToHighlight}
+        onColorChanged={(colorIndex) => {
+          setHighlightMark((prev) => (prev ? { ...prev, colorIndex } : prev));
+          void refreshHighlights();
+        }}
         onDeleted={() => {
           setHighlightNote(null);
+          setHighlightMark(null);
           void refreshHighlights();
         }}
       />

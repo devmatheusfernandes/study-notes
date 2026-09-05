@@ -6,18 +6,22 @@ import { NotebookPen } from "lucide-react";
 import type { BibleVerseRow } from "@/app/(app)/bible-actions";
 import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
-import { wrapTokenRange, getTokenRangeForSelection } from "@/lib/jwlibrary/paragraph-tokens";
+import { wrapTokenRange, getTokenRangeForSelection, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
 
 interface BibleChapterViewProps {
   verses: BibleVerseRow[];
-  /** Selecting a span by dragging offers to anchor a new note/highlight to it. `colorIndex` is set when a color swatch was tapped directly; `selectedText` is for the editor's preview only. */
-  onPickVerseSpan?: (verse: number, startToken: number, endToken: number, colorIndex?: number, selectedText?: string) => void;
+  /** Selecting a span by dragging and tapping the plain note icon offers to anchor a new note to it (no highlight color). `selectedText` is for the editor's preview only. */
+  onPickVerseSpan?: (verse: number, startToken: number, endToken: number, selectedText?: string) => void;
+  /** Selecting a span and tapping a color swatch directly creates a highlight immediately — no editor, no note required. */
+  onCreateHighlight?: (verse: number, startToken: number, endToken: number, colorIndex: number) => void;
   /** Fired whenever a verse is tapped or drag-selected — lets bible-reader.tsx refresh the references panel for whatever verse the reader is currently looking at, when that panel is open. A plain tap fires this without creating any actual text selection (see the click handler below) — it used to auto-select the whole verse, but that made every tap put the verse into an editable-looking selected state, which got in the way of just glancing at references. */
   onVerseSelected?: (verse: number) => void;
   /** Imported/created highlights for this chapter — see getBibleChapterHighlights in jwlibrary-actions.ts. */
   highlights?: BibleVerseHighlight[];
-  /** A highlight with an attached note was clicked. */
-  onHighlightNote?: (note: { id: string; title: string; content: string }) => void;
+  /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. */
+  onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string; colorIndex: number }) => void;
+  /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. */
+  onHighlightMark?: (highlight: BibleVerseHighlight) => void;
   /** Scrolls to and briefly flashes this verse on mount — deep link from a jwlibrary Bible note, or from picking a cross reference (see bible-reader.tsx's `?verse=`/navigateTo). */
   targetVerse?: number | null;
   /** How many footnotes each verse has, keyed by verse number. */
@@ -39,9 +43,11 @@ interface BibleChapterViewProps {
 export function BibleChapterView({
   verses,
   onPickVerseSpan,
+  onCreateHighlight,
   onVerseSelected,
   highlights = [],
   onHighlightNote,
+  onHighlightMark,
   targetVerse,
   footnoteCountByVerse,
   studyNoteVerses,
@@ -60,12 +66,24 @@ export function BibleChapterView({
     function handleClick(event: MouseEvent) {
       const el = event.target as HTMLElement | null;
 
-      const highlightMark = el?.closest<HTMLElement>("[data-jwlibrary-note-id]");
-      if (highlightMark) {
-        const noteId = highlightMark.dataset.jwlibraryNoteId;
-        const note = highlights.find((h) => h.note?.id === noteId)?.note;
-        if (note) onHighlightNote?.(note);
+      const noteMark = el?.closest<HTMLElement>("[data-jwlibrary-note-id]");
+      if (noteMark) {
+        const noteId = noteMark.dataset.jwlibraryNoteId;
+        const highlight = highlights.find((h) => h.note?.id === noteId);
+        if (highlight?.note) {
+          onHighlightNote?.({ ...highlight.note, userMarkId: highlight.id, colorIndex: highlight.colorIndex });
+        }
         return;
+      }
+
+      const usermarkEl = el?.closest<HTMLElement>("[data-jwlibrary-usermark-id]");
+      if (usermarkEl) {
+        const usermarkId = usermarkEl.dataset.jwlibraryUsermarkId;
+        const highlight = highlights.find((h) => h.id === usermarkId);
+        if (highlight) {
+          onHighlightMark?.(highlight);
+          return;
+        }
       }
 
       const selection = window.getSelection();
@@ -80,7 +98,7 @@ export function BibleChapterView({
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [highlights, onHighlightNote, onVerseSelected]);
+  }, [highlights, onHighlightNote, onHighlightMark, onVerseSelected]);
 
   // Same delayed selection-popup mechanics as jwpub-chapter-view.tsx —
   // deliberately duplicated rather than shared: that logic was only just
@@ -145,8 +163,11 @@ export function BibleChapterView({
     const selectedText = selectionPrompt.range.toString();
     window.getSelection()?.removeAllRanges();
     setSelectionPrompt(null);
-    if (tokenRange) {
-      onPickVerseSpan?.(selectionPrompt.verse, tokenRange.start, tokenRange.end, colorIndex, selectedText);
+    if (!tokenRange) return;
+    if (colorIndex !== undefined) {
+      onCreateHighlight?.(selectionPrompt.verse, tokenRange.start, tokenRange.end, colorIndex);
+    } else {
+      onPickVerseSpan?.(selectionPrompt.verse, tokenRange.start, tokenRange.end, selectedText);
     }
   }
 
@@ -154,13 +175,16 @@ export function BibleChapterView({
   // effect, keyed by verse number instead of a paragraph's data-pid.
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || highlights.length === 0) return;
+    if (!container) return;
+    // Always unwrap first — see jwpub-chapter-view.tsx's identical effect for why.
+    unwrapHighlightMarks(container);
+    if (highlights.length === 0) return;
 
     for (const highlight of highlights) {
       const el = container.querySelector<HTMLElement>(`[data-verse="${highlight.verse}"]`);
       if (!el) continue;
       const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
-      const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.note?.id);
+      const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
 
       if (highlight.note && mark) {
         el.style.position = "relative";
