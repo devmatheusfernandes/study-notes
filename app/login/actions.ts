@@ -1,7 +1,15 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+
+async function getOrigin() {
+  const headerList = await headers();
+  const host = headerList.get("host");
+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
+  return `${protocol}://${host}`;
+}
 
 export type AuthState = {
   error?: string;
@@ -31,7 +39,11 @@ export async function signUp(_prevState: AuthState, formData: FormData): Promise
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: `${await getOrigin()}/auth/callback` },
+  });
 
   if (error) {
     return { error: "Não foi possível criar sua conta. Tente novamente." };
