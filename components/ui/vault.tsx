@@ -161,7 +161,7 @@ const VaultContent = React.forwardRef<
                 )}
 
                 <div className={cn(
-                    "overflow-y-auto no-scrollbar",
+                    "overflow-y-auto overscroll-contain no-scrollbar",
                     !noPadding && "px-6 pb-6 pt-2"
                 )}>
                     {children}

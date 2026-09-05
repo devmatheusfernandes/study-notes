@@ -13,5 +13,7 @@ export const { dynamic, dynamicParams, revalidate, generateStaticParams, GET } =
       { url: "/", revision },
       { url: "/login", revision },
       { url: "/offline", revision },
+      { url: "/notes", revision },
+      { url: "/install", revision },
     ],
   });

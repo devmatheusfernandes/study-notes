@@ -123,9 +123,16 @@
   }
 }
 
+html,
 body {
   background: var(--background);
   color: var(--foreground);
+  /* Kills the browser's pull-to-refresh/rubber-band bounce on the main
+     document scroll so the app doesn't feel like a webpage in standalone
+     mode. Overlay scroll containers (Vault, chat, assistant surface, jwpub
+     panels) get their own overscroll-contain instead, so bouncing there
+     doesn't chain into the page behind them. */
+  overscroll-behavior-y: none;
 }
 
 /* Hide scrollbars globally across all elements and browsers */

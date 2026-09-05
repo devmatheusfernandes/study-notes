@@ -19,6 +19,7 @@ import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { getChapterHighlights, createJwlibraryHighlight, type ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
@@ -52,6 +53,9 @@ export function JwpubReader({
   const searchParams = useSearchParams();
   const notes = useNotesStore((s) => s.notes);
   const note = notes.find((n) => n.id === noteId);
+
+  // Long, hands-off reading — don't let the screen sleep mid-chapter.
+  useWakeLock(true);
 
   const [publication, setPublication] = useState(initialPublication);
   const [chapters, setChapters] = useState(initialChapters);
@@ -655,7 +659,7 @@ export function JwpubReader({
                   <X className="size-4" />
                 </button>
               </header>
-              <nav className="flex-1 overflow-y-auto p-3">
+              <nav className="flex-1 overflow-y-auto overscroll-contain p-3">
                 <ul className="flex flex-col gap-1">
                   {chapters.map((chapter, index) => (
                     <li key={chapter.documentId}>

@@ -3,6 +3,8 @@ import { Caprasimo, Figtree, JetBrains_Mono } from "next/font/google";
 import { SerwistProvider } from "@serwist/turbopack/react";
 import { Toaster } from "@/components/ui/toaster";
 import { DeviceListener } from "@/components/providers/device-listener";
+import { SwUpdateListener } from "@/components/providers/sw-update-listener";
+import { UpdateToast } from "@/components/providers/update-toast";
 import "./globals.css";
 
 const caprasimo = Caprasimo({
@@ -48,6 +50,10 @@ export const viewport: Viewport = {
   // the Vault drawer end up stranded mid-screen once the keyboard closed.
   // "resizes-content" makes the keyboard behave like a real layout resize.
   interactiveWidget: "resizes-content",
+  // Opts into drawing under the notch/status bar/home indicator on iOS —
+  // required for the env(safe-area-inset-*) paddings already used across the
+  // app (sidebar, assistant dock, headers) to resolve to anything but 0.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -58,7 +64,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
         <DeviceListener />
-        <SerwistProvider swUrl="/serwist/sw.js">
+        {/* reloadOnOnline defaults to true and force-calls location.reload() on
+            every "online" event — DeviceListener already handles reconnection
+            gracefully via the offline outbox, so a full reload here would just
+            discard in-progress state the outbox was designed to preserve. */}
+        <SerwistProvider swUrl="/serwist/sw.js" reloadOnOnline={false}>
+          <SwUpdateListener />
+          <UpdateToast />
           {children}
           <Toaster />
         </SerwistProvider>

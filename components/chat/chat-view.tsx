@@ -144,7 +144,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
   return (
     <div className="relative flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
       {/* Scrollable conversation messages container */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-32 sm:px-6">
         <div className="mx-auto flex max-w-2xl sm:max-w-3xl flex-col gap-4">
           {messages.length === 0 && !hasPendingQuery && (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">

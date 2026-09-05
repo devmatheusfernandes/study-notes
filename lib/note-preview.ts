@@ -99,6 +99,12 @@ export function parseNotePreview(body: string): NotePreview {
   return { imageUrl, html: html || undefined };
 }
 
+/** Full plain-text rendering of a note body — unlike parseNotePreview, not truncated (used for sharing, not card display). */
+export function bodyToPlainText(body: string): string {
+  const doc = new DOMParser().parseFromString(body, "text/html");
+  return (doc.body.textContent ?? "").trim();
+}
+
 /**
  * Flips one checklist item's checked state directly in the stored HTML,
  * keyed by its index among ALL task items (not just the ones a preview

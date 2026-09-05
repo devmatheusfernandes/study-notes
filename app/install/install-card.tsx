@@ -5,49 +5,29 @@ import { motion } from "framer-motion";
 import { CheckCircle2, Download, Share, SquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-}
+import { useDevice, useDeviceStore } from "@/hooks/ui/use-device";
 
 type Platform = "ios" | "android" | "desktop";
 
 export function InstallCard() {
   const [platform, setPlatform] = useState<Platform>("desktop");
-  const [isStandalone, setIsStandalone] = useState(false);
-  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
+  const { isStandalone, isInstallable } = useDevice();
 
   useEffect(() => {
     const ua = window.navigator.userAgent;
     const isIOS = /iPad|iPhone|iPod/.test(ua) && !("MSStream" in window);
     const isAndroid = /Android/.test(ua);
-    queueMicrotask(() => {
-      setPlatform(isIOS ? "ios" : isAndroid ? "android" : "desktop");
-      setIsStandalone(window.matchMedia("(display-mode: standalone)").matches);
-    });
-
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallEvent(event as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => setInstalled(true);
-
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
+    setPlatform(isIOS ? "ios" : isAndroid ? "android" : "desktop");
   }, []);
 
   async function handleInstall() {
-    if (!installEvent) return;
-    await installEvent.prompt();
-    const { outcome } = await installEvent.userChoice;
-    if (outcome === "accepted") setInstalled(true);
-    setInstallEvent(null);
+    // isStandalone only flips once the browser actually relaunches the page
+    // in standalone mode — after an accepted prompt that can lag behind this
+    // same tab, so track it locally too for immediate feedback.
+    const hadPrompt = !!useDeviceStore.getState().deferredPrompt;
+    await useDeviceStore.getState().install();
+    if (hadPrompt && !useDeviceStore.getState().deferredPrompt) setInstalled(true);
   }
 
   const alreadyInstalled = isStandalone || installed;
@@ -106,7 +86,7 @@ export function InstallCard() {
                   Escolha <strong className="text-foreground">Adicionar à Tela de Início</strong>
                 </Step>
               </div>
-            ) : installEvent ? (
+            ) : isInstallable ? (
               <Button size="lg" fullWidth leftIcon={<Download />} onClick={handleInstall}>
                 Instalar app
               </Button>

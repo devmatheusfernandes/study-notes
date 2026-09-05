@@ -64,7 +64,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: 
                 <X className="size-4" />
               </button>
             </header>
-            <div className="flex-1 overflow-y-auto p-5">{children}</div>
+            <div className="flex-1 overflow-y-auto overscroll-contain p-5">{children}</div>
           </div>
         </motion.aside>
       )}

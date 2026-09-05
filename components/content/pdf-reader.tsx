@@ -7,6 +7,7 @@ import { ArrowLeft, ExternalLink, FileText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { notify } from "@/components/ui/toaster";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { useNotesStore, type Note } from "@/lib/store/notes-store";
 import type { NoteRow } from "@/app/(app)/notes-actions";
@@ -23,6 +24,9 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
   const storeNote = notes.find((n) => n.id === noteId);
 
   const note = storeNote ?? initialNote;
+
+  // Long, hands-off reading — don't let the screen sleep mid-document.
+  useWakeLock(true);
 
   const [url, setUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);

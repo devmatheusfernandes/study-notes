@@ -14,7 +14,7 @@ interface HeaderProps {
 
 export function Header({ variant, title, searchPlaceholder }: HeaderProps) {
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:gap-3 sm:px-6">
+    <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-border bg-background/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 sm:px-6">
       <SidebarToggleButton />
 
       {variant === "search" ? (

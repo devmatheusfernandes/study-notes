@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { SidebarToggleButton } from "@/components/layout/sidebar-toggle-button";
 import { UserMenuClient } from "@/components/layout/user-menu-client";
 import {
@@ -69,7 +70,7 @@ interface BibleTopHeaderProps {
  */
 function BibleTopHeader({ title, onBack, studyOpen, onToggleStudy, userEmail }: BibleTopHeaderProps) {
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:gap-3 sm:px-6">
+    <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-border bg-background/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 sm:px-6">
       <SidebarToggleButton />
       {onBack && (
         <button
@@ -118,6 +119,9 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  // Long, hands-off reading — don't let the screen sleep mid-chapter.
+  useWakeLock(true);
 
   const [books, setBooks] = useState<BibleBook[] | null>(null);
   useEffect(() => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUp, Plus, Search, Tags, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,15 @@ export function HeaderSearchInput({ placeholder }: { placeholder?: string }) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const searchParams = useSearchParams();
+
+  // Lets the manifest's "Buscar" app shortcut (app/manifest.ts) land the
+  // user with the search field already focused instead of just on /notes.
+  useEffect(() => {
+    if (searchParams.get("focus") === "search") searchInputRef.current?.focus();
+  }, [searchParams]);
 
   useEffect(() => {
     if (!panelOpen) return;
@@ -86,6 +96,7 @@ export function HeaderSearchInput({ placeholder }: { placeholder?: string }) {
     <div ref={containerRef} className="relative min-w-0 flex-1 sm:max-w-sm">
       <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={searchInputRef}
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}

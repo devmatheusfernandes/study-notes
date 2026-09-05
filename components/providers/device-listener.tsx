@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useDeviceStore } from "@/hooks/ui/use-device";
-import { useNotesStore } from "@/lib/store/notes-store";
+import { useDeviceStore, type BeforeInstallPromptEvent } from "@/hooks/ui/use-device";
+import { useNotesStore, usePendingSyncCount } from "@/lib/store/notes-store";
 
 const MOBILE_QUERY = "(max-width: 767px)";
 const STANDALONE_QUERY = "(display-mode: standalone)";
@@ -11,6 +11,8 @@ export function DeviceListener() {
   const setIsMobile = useDeviceStore((s) => s.setIsMobile);
   const setStandalone = useDeviceStore((s) => s.setStandalone);
   const setIsOnline = useDeviceStore((s) => s.setIsOnline);
+  const setDeferredPrompt = useDeviceStore((s) => s.setDeferredPrompt);
+  const pendingSyncCount = usePendingSyncCount();
 
   useEffect(() => {
     const mobileQuery = window.matchMedia(MOBILE_QUERY);
@@ -70,6 +72,37 @@ export function DeviceListener() {
       clearInterval(poll);
     };
   }, [setIsOnline]);
+
+  // Centralizes install-prompt capture so both the sidebar nudge and
+  // /install's card can trigger the native prompt via useDeviceStore
+  // instead of each keeping its own listener.
+  useEffect(() => {
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredPrompt(event as BeforeInstallPromptEvent);
+    };
+    const onInstalled = () => setDeferredPrompt(null);
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, [setDeferredPrompt]);
+
+  // Badges the installed app icon with the offline-outbox size — a real,
+  // already-computed signal (also shown in sidebar-content.tsx's status
+  // card), not a fabricated use case for a feature that normally needs push.
+  useEffect(() => {
+    if (!("setAppBadge" in navigator)) return;
+    try {
+      if (pendingSyncCount > 0) void navigator.setAppBadge(pendingSyncCount);
+      else void navigator.clearAppBadge();
+    } catch {
+      // ignore — badging can throw in some embedded/unsupported contexts
+    }
+  }, [pendingSyncCount]);
 
   return null;
 }

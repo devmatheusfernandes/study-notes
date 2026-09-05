@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUp, NotebookPen } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { hapticSuccess } from "@/lib/haptics";
 import { useAssistantStore } from "@/lib/store/assistant-store";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
 
@@ -200,6 +201,7 @@ export function AssistantDock({ variant = "floating" }: AssistantDockProps) {
     resetGesture();
 
     if (shouldCommit) {
+      hapticSuccess();
       const params = new URLSearchParams();
       if (draft) params.set("q", draft);
       // Creating from inside a folder keeps the new note in that folder.

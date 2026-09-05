@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { hapticSuccess } from "@/lib/haptics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Vault, VaultContent, VaultHeader, VaultTitle, VaultDescription, VaultIcon } from "@/components/ui/vault";
@@ -51,6 +52,7 @@ export function ConfirmVault({
 
   function confirm() {
     if (!canConfirm) return;
+    if (destructive) hapticSuccess();
     onConfirm();
     onOpenChange(false);
   }

@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, ImagePlus, Pin } from "lucide-react";
+import { ArrowLeft, ImagePlus, Pin, Share } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { notify } from "@/components/ui/toaster";
 import { SyncStatusIndicator } from "@/components/content/sync-status";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/content/rich-text-editor";
 import { NoteReferenceSurface } from "@/components/content/note-reference-surface";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { bodyToPlainText } from "@/lib/note-preview";
+import { shareNote } from "@/lib/share";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { listPublicationSymbols } from "@/app/(app)/jwpub-actions";
 import type { PublicationOption } from "@/lib/notes/reference-suggestions";
@@ -125,6 +128,17 @@ export function NoteEditor({ noteId, initialNote }: NoteEditorProps) {
             Voltar
           </Button>
           <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                const result = await shareNote(title || "Nova nota", bodyToPlainText(body));
+                if (result === "copied") notify.success("Copiado", "O conteúdo da nota foi copiado.");
+              }}
+              aria-label="Compartilhar nota"
+              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <Share className="size-4" />
+            </button>
             <button
               type="button"
               onClick={() => editorRef.current?.openImagePicker()}

@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { hapticTap } from "@/lib/haptics";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { notify } from "@/components/ui/toaster";
 import { NoteCard } from "./note-card";
@@ -235,7 +236,7 @@ export function NotesCollection({
         selectionMode={selectionMode}
         selected={isSelected(note.id)}
         tags={note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
-        onToggleSelect={isOptimistic ? undefined : toggleSelect}
+        onToggleSelect={isOptimistic ? undefined : (id) => { hapticTap(); toggleSelect(id); }}
         onOpen={() => void openNote(note)}
         onTogglePin={!isOptimistic && status === "active" ? () => togglePin(note.id) : undefined}
         onArchive={!isOptimistic && status === "active" ? () => archive(note.id) : undefined}
@@ -243,7 +244,7 @@ export function NotesCollection({
         onDelete={isOptimistic ? undefined : isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
         onManageTags={isOptimistic ? undefined : () => setManageTagsNoteId(note.id)}
         onMoveToFolder={isOptimistic || !showFolders ? undefined : () => setMoveFolderNoteId(note.id)}
-        onToggleChecklistItem={(index) => toggleChecklistItem(note.id, index)}
+        onToggleChecklistItem={(index) => { hapticTap(); toggleChecklistItem(note.id, index); }}
         onDragStart={isOptimistic || !showFolders ? undefined : (e) => handleNoteDragStart(e, note)}
       />
     );

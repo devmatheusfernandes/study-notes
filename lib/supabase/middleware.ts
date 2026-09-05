@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_ROUTES = ["/", "/login", "/auth", "/install", "/offline"];
+// /share-target is here so the OS's top-level POST navigation (from another
+// app's share sheet) never gets redirected to /login before the route
+// handler even runs — see app/share-target/route.ts for the auth check.
+const PUBLIC_ROUTES = ["/", "/login", "/auth", "/install", "/offline", "/share-target"];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });

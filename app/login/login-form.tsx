@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Eye, EyeOff } from "lucide-react";
 import { Field } from "@/components/ui/field";
@@ -16,8 +16,17 @@ const initialState: AuthState = undefined;
 export function LoginForm() {
   const [mode, setMode] = useState<Mode>("signin");
   const [showPassword, setShowPassword] = useState(false);
+  const [sharedDropped, setSharedDropped] = useState(false);
   const [signInState, signInAction, signInPending] = useActionState(signIn, initialState);
   const [signUpState, signUpAction, signUpPending] = useActionState(signUp, initialState);
+
+  // Read via window.location rather than useSearchParams so this stays a
+  // plain client read (no Suspense boundary needed on an otherwise static
+  // page) — see app/share-target/route.ts, which redirects here with this
+  // param when a shared item arrived while signed out.
+  useEffect(() => {
+    setSharedDropped(new URLSearchParams(window.location.search).get("shared") === "dropped");
+  }, []);
 
   const isSignIn = mode === "signin";
   const state = isSignIn ? signInState : signUpState;
@@ -65,6 +74,15 @@ export function LoginForm() {
                   : "Leva menos de um minuto. Suas notas ficam disponíveis offline, sempre."}
               </p>
             </div>
+
+            {sharedDropped && (
+              <Alert>
+                <AlertDescription>
+                  Você precisa entrar para salvar o conteúdo compartilhado — compartilhe
+                  novamente depois de entrar.
+                </AlertDescription>
+              </Alert>
+            )}
 
             <form action={action} className="flex w-full flex-col gap-3.5">
               <Field label="E-mail">
