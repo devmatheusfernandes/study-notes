@@ -199,21 +199,37 @@ export async function saveJwlibraryBackup(
       for (const row of inserted) noteIdByGuid.set(row.source_guid, row.id);
     }
 
-    // 3. Tags — local id only used to link TagMap rows below, not persisted.
+    // 3. Tags — deduped per user by (tag_type, name): JW Library only allows
+    // one tag per name plus a single special "Favorite" tag, and the export
+    // carries no stable id for a tag to key off instead (see migration 0023).
+    // Local id only used to link TagMap rows below, not persisted.
     const tagIdByLocalId = new Map<number, string>();
     if (parsed.tags.length > 0) {
       const rows = parsed.tags.map((tag) => ({
         user_id: user.id,
         backup_id: backup.id,
         tag_type: tag.tagType,
-        name: tag.name,
+        name: tag.name ?? "",
       }));
-      const { data: inserted, error } = await supabase.from("jwlibrary_tags").insert(rows).select("id");
-      if (error) throw new Error(`Falha ao gravar tags: ${error.message}`);
-      (inserted ?? []).forEach((row, i) => tagIdByLocalId.set(parsed.tags[i].localId, row.id));
+      const inserted = await upsertInBatchesReturning<{ id: string; tag_type: number; name: string }>(
+        supabase,
+        "jwlibrary_tags",
+        rows,
+        "user_id,tag_type,name",
+        "id, tag_type, name"
+      );
+      // Match back by the same (tag_type, name) key rather than array
+      // position — upsert doesn't guarantee returned rows keep insert order.
+      const idByKey = new Map(inserted.map((row) => [`${row.tag_type}|${row.name}`, row.id]));
+      for (const tag of parsed.tags) {
+        const id = idByKey.get(`${tag.tagType}|${tag.name ?? ""}`);
+        if (id) tagIdByLocalId.set(tag.localId, id);
+      }
     }
 
-    // 4. TagMap — either a note (by guid) or a bare location.
+    // 4. TagMap — either a note (by guid) or a bare location. Deduped per
+    // (tag_id, effective note/location) so re-importing the same tag
+    // assignment from another backup updates in place instead of doubling up.
     if (parsed.tagMaps.length > 0) {
       const rows = parsed.tagMaps
         .map((tm) => {
@@ -231,10 +247,12 @@ export async function saveJwlibraryBackup(
           };
         })
         .filter((row): row is NonNullable<typeof row> => row !== null);
-      if (rows.length > 0) await insertInBatches(supabase, "jwlibrary_tag_map", rows);
+      if (rows.length > 0) await insertInBatches(supabase, "jwlibrary_tag_map", rows, "user_id,tag_id,dedupe_key");
     }
 
-    // 5. Bookmarks
+    // 5. Bookmarks — deduped per (user, slot + location): JW Library scopes
+    // a bookmark slot to one publication/location, so the same slot from a
+    // later backup replaces the earlier one instead of adding a duplicate.
     if (parsed.bookmarks.length > 0) {
       const rows = parsed.bookmarks.map((b) => {
         const resolved = index.resolve(b.location);
@@ -251,7 +269,7 @@ export async function saveJwlibraryBackup(
           resolved_chapter_id: resolved.chapterId,
         };
       });
-      await insertInBatches(supabase, "jwlibrary_bookmarks", rows);
+      await insertInBatches(supabase, "jwlibrary_bookmarks", rows, "user_id,dedupe_key");
     }
 
     // 6. Input fields — plus a best-effort cross-write into jwpub_answers
@@ -273,7 +291,7 @@ export async function saveJwlibraryBackup(
           resolved_chapter_id: resolved.chapterId,
         };
       });
-      await insertInBatches(supabase, "jwlibrary_input_fields", rows);
+      await insertInBatches(supabase, "jwlibrary_input_fields", rows, "user_id,dedupe_key");
 
       const resolvedFields = parsed.inputFields
         .map((f) => ({ field: f, resolved: index.resolve(f.location) }))
@@ -362,7 +380,9 @@ export async function listJwlibraryContent(): Promise<{
     await Promise.all([
       supabase.from("jwlibrary_notes").select("*"),
       supabase.from("jwlibrary_usermarks").select("id, color_index"),
-      supabase.from("jwlibrary_tags").select("id, tag_type, name"),
+      // tag_type = 0 is the imported "Favorito" system tag — unused, hidden
+      // from the UI everywhere (see listOwnJwlibraryTags for the other spot).
+      supabase.from("jwlibrary_tags").select("id, tag_type, name").eq("tag_type", 1),
       supabase.from("jwlibrary_tag_map").select("tag_id, note_id").not("note_id", "is", null),
       supabase.from("jwpub_publications").select("id, note_id, title"),
       supabase.from("jwpub_chapters").select("id, document_id"),
@@ -717,8 +737,10 @@ export async function listOwnJwlibraryTags(): Promise<{ tags?: JwlibraryTagView[
 
   const { data, error } = await supabase
     .from("jwlibrary_tags")
+    // tag_type = 0 is the imported "Favorito" system tag — unused, hidden
+    // from the UI everywhere (see listJwlibraryContent for the other spot).
     .select("id, tag_type, name")
-    .order("tag_type", { ascending: true })
+    .eq("tag_type", 1)
     .order("name", { ascending: true });
   if (error) return { error: "Não foi possível carregar as tags." };
 
