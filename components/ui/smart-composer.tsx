@@ -125,10 +125,12 @@ export function SmartComposer(props: SmartComposerProps) {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const notesInputRef = useRef<HTMLInputElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPoint = useRef<{ x: number; y: number } | null>(null);
   const armedRef = useRef(false);
   const dragYRef = useRef(0);
+  const downOnInputRef = useRef(false);
 
   const gestureEnabled = variant === "notes";
   const isPanel = variant === "panel";
@@ -289,6 +291,13 @@ export function SmartComposer(props: SmartComposerProps) {
     if (!gestureEnabled) return;
     if ((event.target as HTMLElement).closest("[data-no-drag]")) return;
 
+    // Suppress the browser's default "focus on pointerdown" for the text
+    // input — otherwise a touch press-and-hold opens the keyboard before the
+    // hold timer below even fires. A plain tap still focuses it manually
+    // from handlePointerUp once we know no drag/hold gesture happened.
+    downOnInputRef.current = event.target === notesInputRef.current;
+    if (downOnInputRef.current) event.preventDefault();
+
     const rect = dockRef.current?.getBoundingClientRect();
     if (rect) {
       setRipples((prev) => [
@@ -332,8 +341,11 @@ export function SmartComposer(props: SmartComposerProps) {
   function handlePointerUp() {
     if (!gestureEnabled) return;
     const shouldCommit = armedRef.current && dragYRef.current > COMMIT_PX;
+    const wasArmed = armedRef.current;
+    const wasOnInput = downOnInputRef.current;
     const draft = value.trim();
     resetGesture();
+    downOnInputRef.current = false;
 
     if (shouldCommit) {
       const params = new URLSearchParams();
@@ -341,6 +353,11 @@ export function SmartComposer(props: SmartComposerProps) {
       if (activeFolderId) params.set("folder", activeFolderId);
       const qs = params.toString();
       router.push(qs ? `/notes/new?${qs}` : "/notes/new");
+    } else if (wasOnInput && !wasArmed) {
+      // Plain tap on the input (never held long enough to arm the
+      // drag-to-create gesture) — focus it manually since we suppressed
+      // the browser's default pointerdown focus above.
+      notesInputRef.current?.focus();
     }
   }
 
@@ -679,6 +696,7 @@ export function SmartComposer(props: SmartComposerProps) {
           />
         ) : (
           <input
+            ref={notesInputRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
