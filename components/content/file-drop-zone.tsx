@@ -7,12 +7,20 @@ import { useDevice } from "@/hooks/ui/use-device";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { extractDiscoveredItems } from "@/lib/import-notes";
+import { notify } from "@/components/ui/toaster";
 
 /**
  * Desktop file uploads & note import: drop anywhere over the content area or onto folders.
  * Mobile uses the header's upload button instead (no drag source there).
  */
-export function FileDropZone({ children }: { children: React.ReactNode }) {
+export function FileDropZone({
+  children,
+  blockJwlibrary = false,
+}: {
+  children: React.ReactNode;
+  /** Main /notes screen only — .jwlibrary backups aren't notes, they belong on /jwlibrary. */
+  blockJwlibrary?: boolean;
+}) {
   const { isMobile } = useDevice();
   const [dragging, setDragging] = useState(false);
   // dragenter/dragleave fire for every child element, so count depth instead of toggling.
@@ -57,7 +65,15 @@ export function FileDropZone({ children }: { children: React.ReactNode }) {
 
         void extractDiscoveredItems(e.dataTransfer).then((discovered) => {
           if (discovered.length === 0) return;
-          void processDiscoveredItems(discovered, activeFolderId ?? undefined);
+          if (!blockJwlibrary) {
+            void processDiscoveredItems(discovered, activeFolderId ?? undefined);
+            return;
+          }
+          const allowed = discovered.filter((d) => !d.file.name.toLowerCase().endsWith(".jwlibrary"));
+          if (allowed.length < discovered.length) {
+            notify.info("Backups do JW Library vão em outro lugar", 'Importe pelo botão "Importar backup" em Estudo Pessoal.');
+          }
+          if (allowed.length > 0) void processDiscoveredItems(allowed, activeFolderId ?? undefined);
         });
       }}
     >

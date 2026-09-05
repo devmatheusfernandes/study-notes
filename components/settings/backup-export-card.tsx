@@ -11,8 +11,12 @@ export function BackupExportCard() {
   const folders = useNotesStore((s) => s.folders);
   const [isExporting, setIsExporting] = useState(false);
 
-  // Filter out JWPUB publications from backup
-  const backupNotes = notes.filter((n) => n.type !== "jwpub");
+  // Filter out JWPUB publications and JW Library backups — neither's real
+  // content lives in this row (a publication's chapters, or a backup's own
+  // notes/highlights, live in their own tables), so exporting the row alone
+  // would just be a useless stub. JW Library backups also get their own
+  // management section below (BackupsCard) instead.
+  const backupNotes = notes.filter((n) => n.type !== "jwpub" && n.type !== "jwlibrary");
   const notesCount = backupNotes.filter((n) => n.type === "nota").length;
   const filesCount = backupNotes.filter((n) => n.type !== "nota").length;
 

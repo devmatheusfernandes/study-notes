@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { BookMarked, Download, Plus, RefreshCw, Search, Settings2, Tag, Upload } from "lucide-react";
+import { BookMarked, Download, Plus, RefreshCw, Search, Settings2, Sparkles, Tag, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,9 +22,12 @@ import { useFileUpload } from "@/hooks/use-file-upload";
 import { useSearchStore } from "@/lib/store/search-store";
 import { useJwlibrarySelectionStore } from "@/lib/store/jwlibrary-selection-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
+import { useNotesStore } from "@/lib/store/notes-store";
+import { useDevice } from "@/hooks/ui/use-device";
 import { parseNotePreview } from "@/lib/note-preview";
 import { listJwlibraryContent, type JwlibraryNoteView, type JwlibraryTagView } from "@/app/(app)/jwlibrary-actions";
-import { JWLIBRARY_HIGHLIGHT_COLORS, getPublicationFallbackTitle } from "@/lib/jwlibrary/constants";
+import { JWLIBRARY_HIGHLIGHT_COLORS, getPublicationFallbackTitle, firstWords } from "@/lib/jwlibrary/constants";
+import { ProcessingShimmer, UploadWaveProgress } from "./upload-progress-indicators";
 
 /** Strips tags for search matching — a note's content may be plain text (imported from a real backup) or Tiptap HTML (created here), same as notes.body elsewhere in the app. */
 function plainText(html: string): string {
@@ -74,6 +77,17 @@ function referenceLabel(note: JwlibraryNoteView): string {
   return "Nota geral";
 }
 
+/** Groups by resolved publication id when the .jwpub is already imported, else by keySymbol — null for Bible-only/general notes, which have neither. */
+function publicationKey(note: JwlibraryNoteView): string | null {
+  return note.resolvedPublicationId ?? note.location.keySymbol;
+}
+
+function publicationLabel(note: JwlibraryNoteView): string {
+  if (note.publicationTitle) return note.publicationTitle;
+  if (note.location.keySymbol) return getPublicationFallbackTitle(note.location.keySymbol);
+  return "";
+}
+
 function ColorChip({
   colorIndex,
   active,
@@ -104,6 +118,7 @@ export function JwlibraryNotesCollection() {
   const query = useSearchStore((s) => s.query);
   const fileInput = useRef<HTMLInputElement>(null);
   const { upload, isUploading } = useFileUpload();
+  const { isMobile } = useDevice();
 
   const [notes, setNotes] = useState<JwlibraryNoteView[] | null>(null);
   const [tags, setTags] = useState<JwlibraryTagView[]>([]);
@@ -111,6 +126,7 @@ export function JwlibraryNotesCollection() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedColors, setSelectedColors] = useState<Set<number>>(new Set());
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [selectedPublicationKeys, setSelectedPublicationKeys] = useState<Set<string>>(new Set());
   const [editingNote, setEditingNote] = useState<JwlibraryNoteView | null>(null);
   const [creatingNote, setCreatingNote] = useState(false);
   const editorOpen = editingNote !== null || creatingNote;
@@ -158,6 +174,22 @@ export function JwlibraryNotesCollection() {
     };
   }, []);
 
+  // The uploaded-backup note card lives in the main library grid
+  // (notes-collection.tsx), not on this page — so this page needs its own
+  // "please wait" indicator for the same processing/uploadProgress state
+  // (see hooks/use-file-upload.ts) to tell the user something's happening.
+  const processingBackup = useNotesStore((s) => s.notes).find((n) => n.type === "jwlibrary" && n.processing);
+
+  // Once `processing` actually flips off, use-file-upload.ts's ingest POST
+  // has already fully resolved server-side — refresh right away instead of
+  // waiting on pollAfterUpload's next tick (kept below as a fallback net).
+  const wasProcessingBackup = useRef(false);
+  useEffect(() => {
+    const isProcessing = !!processingBackup;
+    if (wasProcessingBackup.current && !isProcessing) void refresh();
+    wasProcessingBackup.current = isProcessing;
+  }, [processingBackup]);
+
   // Ingesting a backup (thousands of highlights isn't unusual) can take a
   // while after the upload itself finishes — there's no server push here, so
   // once the upload settles, poll a few times for the import to land instead
@@ -182,6 +214,18 @@ export function JwlibraryNotesCollection() {
     [notes]
   );
 
+  const usedPublications = useMemo(() => {
+    const byKey = new Map<string, { label: string; symbol: string | null }>();
+    for (const note of notes ?? []) {
+      const key = publicationKey(note);
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, { label: publicationLabel(note), symbol: note.location.keySymbol });
+    }
+    return [...byKey.entries()]
+      .map(([key, { label, symbol }]) => ({ key, label, symbol }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [notes]);
+
   // Narrows which tag chips show in the horizontal-scroll filter row — purely
   // visual/local, doesn't touch selectedTagIds (which chips filter notes by).
   const visibleTags = useMemo(() => {
@@ -196,9 +240,13 @@ export function JwlibraryNotesCollection() {
       if (!matchesQuery(note, query)) return false;
       if (selectedColors.size > 0 && (note.colorIndex === null || !selectedColors.has(note.colorIndex))) return false;
       if (selectedTagIds.size > 0 && !note.tagIds.some((id) => selectedTagIds.has(id))) return false;
+      if (selectedPublicationKeys.size > 0) {
+        const key = publicationKey(note);
+        if (!key || !selectedPublicationKeys.has(key)) return false;
+      }
       return true;
     });
-  }, [notes, query, selectedColors, selectedTagIds]);
+  }, [notes, query, selectedColors, selectedTagIds, selectedPublicationKeys]);
 
   // Keeps "Selecionar todas" scoped to whatever's currently visible — same
   // pattern as notes-collection.tsx's own sync effect.
@@ -222,6 +270,15 @@ export function JwlibraryNotesCollection() {
       const next = new Set(prev);
       if (next.has(tagId)) next.delete(tagId);
       else next.add(tagId);
+      return next;
+    });
+  }
+
+  function togglePublication(key: string) {
+    setSelectedPublicationKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -279,6 +336,9 @@ export function JwlibraryNotesCollection() {
           <Button variant="ghost" size="sm" leftIcon={<Settings2 />} render={<Link href="/jwlibrary/tags" />}>
             Gerenciar tags
           </Button>
+          <Button variant="ghost" size="sm" leftIcon={<Sparkles />} render={<Link href="/jwlibrary/tag-ai" />}>
+            Organizar com IA
+          </Button>
           <Button variant="ghost" size="sm" leftIcon={<Download />} render={<a href="/jwlibrary/export" />}>
             Exportar
           </Button>
@@ -297,12 +357,36 @@ export function JwlibraryNotesCollection() {
     </div>
   );
 
+  // Same wave-then-shimmer language as NoteCard for a jwpub/jwlibrary file
+  // (components/content/upload-progress-indicators.tsx) — shown here too
+  // since the backup-file card itself lives in the main library grid, not
+  // on this page, so this page would otherwise give no sign anything is
+  // happening while a backup is uploading/importing.
+  const uploadBanner = processingBackup && (
+    <div className="relative flex items-center gap-3 overflow-hidden rounded-2xl border border-accent/30 bg-surface px-4 py-3">
+      {processingBackup.id.startsWith("optimistic:") ? (
+        <UploadWaveProgress progress={processingBackup.uploadProgress ?? 0} />
+      ) : (
+        <ProcessingShimmer />
+      )}
+      <span className="relative flex size-2 shrink-0 rounded-full bg-accent">
+        <span className="absolute inset-0 animate-ping rounded-full bg-accent opacity-75" />
+      </span>
+      <span className="relative text-[13px] text-foreground">
+        {processingBackup.id.startsWith("optimistic:")
+          ? "Enviando arquivo…"
+          : "Processando backup — pode levar um tempo se ele tiver muitas notas e marcações…"}
+      </span>
+    </div>
+  );
+
   if (notes === null) {
     return (
       <FileDropZone>
         {fileInputEl}
         <div className="flex flex-col gap-4 px-4 py-5 sm:px-6">
           {toolbar}
+          {uploadBanner}
           <JwlibraryNotesSkeleton />
         </div>
       </FileDropZone>
@@ -315,6 +399,7 @@ export function JwlibraryNotesCollection() {
         {fileInputEl}
         <div className="flex flex-col gap-4 px-4 py-5 sm:px-6">
           {toolbar}
+          {uploadBanner}
           <p className="py-10 text-center text-[13px] text-destructive">{error}</p>
         </div>
       </FileDropZone>
@@ -327,6 +412,7 @@ export function JwlibraryNotesCollection() {
         {fileInputEl}
         <div className="flex flex-col gap-4 px-4 py-5 sm:px-6">
           {toolbar}
+          {uploadBanner}
           <Empty className="py-16">
             <EmptyHeader>
               <EmptyMedia>
@@ -367,7 +453,8 @@ export function JwlibraryNotesCollection() {
       <div className="flex min-w-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col gap-4 px-4 py-5 sm:px-6">
         {toolbar}
-        {(usedColors.length > 0 || tags.length > 0) && (
+        {uploadBanner}
+        {(usedColors.length > 0 || usedPublications.length > 0 || tags.length > 0) && (
           <div className="flex flex-col gap-2">
             {usedColors.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -379,6 +466,34 @@ export function JwlibraryNotesCollection() {
                     onClick={() => toggleColor(colorIndex)}
                   />
                 ))}
+              </div>
+            )}
+            {usedPublications.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {usedPublications.map((pub) => {
+                  // Mobile stays to the bare symbol (no room for real words);
+                  // desktop shows the first few words of the real title.
+                  const chipLabel = isMobile
+                    ? pub.symbol?.toUpperCase() || "?"
+                    : firstWords(pub.label || "Sem título", 3);
+                  return (
+                    <button
+                      key={pub.key}
+                      type="button"
+                      onClick={() => togglePublication(pub.key)}
+                      title={pub.label || undefined}
+                      className={cn(
+                        "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition-colors",
+                        selectedPublicationKeys.has(pub.key)
+                          ? "border-accent bg-accent/10 text-foreground"
+                          : "border-border text-muted-foreground hover:bg-secondary"
+                      )}
+                    >
+                      <BookMarked className="size-3" />
+                      {chipLabel}
+                    </button>
+                  );
+                })}
               </div>
             )}
             {tags.length > 0 && (
@@ -403,6 +518,12 @@ export function JwlibraryNotesCollection() {
             )}
           </div>
         )}
+
+        <p className="text-[12.5px] text-muted-foreground">
+          {filteredNotes.length === notes.length
+            ? `${notes.length} ${notes.length === 1 ? "nota" : "notas"}`
+            : `${filteredNotes.length} de ${notes.length} ${notes.length === 1 ? "nota" : "notas"}`}
+        </p>
 
         <div
           className={

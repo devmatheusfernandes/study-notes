@@ -375,6 +375,19 @@ export async function deletePublicationMediaForNote(noteId: string): Promise<{ e
  * against a real archive), so `data-pid` scoped to its document is the only
  * stable key. Fetched once per publication (not per chapter) since it's cheap
  * and every chapter switch would otherwise re-fetch.
+ *
+ * Merges two sources, live, every call — so it's correct regardless of import
+ * order (a .jwpub processed before or after a .jwlibrary backup that answers
+ * one of its fields both end up showing the text):
+ *  - `jwpub_answers`: typed directly into this app's own reader.
+ *  - `jwlibrary_input_fields`: imported from a `.jwlibrary` backup, matched
+ *    to this publication's chapters by Location (KeySymbol/MepsLanguage/
+ *    IssueTagNumber/MepsDocumentId — see lib/jwlibrary/resolve.ts for the
+ *    same matching convention used on note/highlight import).
+ * `jwpub_answers` wins on a key both have — it's the value the user
+ * currently sees and last touched in this app; InputField carries no
+ * modification timestamp to compare against (see data/jwlibrary_schema.md),
+ * so this app's own edit is treated as authoritative rather than guessing.
  */
 export async function getAnswers(
   publicationId: string
@@ -382,17 +395,53 @@ export async function getAnswers(
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data, error } = await supabase
-    .from("jwpub_answers")
-    .select("document_id, pid, answer")
-    .eq("publication_id", publicationId);
-
+  const [{ data: answerRows, error }, { data: publication }, { data: chapters }] = await Promise.all([
+    supabase.from("jwpub_answers").select("document_id, pid, answer").eq("publication_id", publicationId),
+    supabase
+      .from("jwpub_publications")
+      .select("symbol, meps_language_index, issue_tag_number")
+      .eq("id", publicationId)
+      .single(),
+    supabase
+      .from("jwpub_chapters")
+      .select("document_id, meps_document_id")
+      .eq("publication_id", publicationId)
+      .not("meps_document_id", "is", null),
+  ]);
   if (error) return { error: "Não foi possível carregar as respostas." };
 
   const answers: Record<string, string> = {};
-  for (const row of data ?? []) {
+
+  if (publication && chapters && chapters.length > 0) {
+    const documentIdByMepsId = new Map(chapters.map((c) => [c.meps_document_id as number, c.document_id as number]));
+    let importedFieldsQuery = supabase
+      .from("jwlibrary_input_fields")
+      .select("text_tag, value, meps_document_id")
+      .eq("key_symbol", publication.symbol)
+      .in("meps_document_id", [...documentIdByMepsId.keys()]);
+    importedFieldsQuery =
+      publication.meps_language_index === null
+        ? importedFieldsQuery.is("meps_language", null)
+        : importedFieldsQuery.eq("meps_language", publication.meps_language_index);
+    importedFieldsQuery =
+      publication.issue_tag_number === null
+        ? importedFieldsQuery.is("issue_tag_number", null)
+        : importedFieldsQuery.eq("issue_tag_number", publication.issue_tag_number);
+
+    const { data: importedFields } = await importedFieldsQuery;
+
+    for (const row of importedFields ?? []) {
+      const documentId = row.meps_document_id !== null ? documentIdByMepsId.get(row.meps_document_id) : undefined;
+      if (documentId === undefined) continue;
+      answers[`${documentId}:${row.text_tag}`] = row.value ?? "";
+    }
+  }
+
+  // jwpub_answers last, so it overwrites any imported value on the same key.
+  for (const row of answerRows ?? []) {
     answers[`${row.document_id}:${row.pid}`] = decryptText(row.answer) ?? "";
   }
+
   return { answers };
 }
 

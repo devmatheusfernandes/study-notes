@@ -22,6 +22,7 @@ import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
+import { BackupsCard } from "@/components/settings/backups-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 
 interface SettingsViewProps {
@@ -170,10 +171,13 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               {/* Row 4: Full Width Tags Card */}
               <TagsSettingsCard />
 
-              {/* Row 5: Full Width Backup Export Card */}
+              {/* Row 5: Full Width JW Library Backups Card */}
+              <BackupsCard />
+
+              {/* Row 6: Full Width Backup Export Card */}
               <BackupExportCard />
 
-              {/* Row 6: Full Width Danger Zone Card */}
+              {/* Row 7: Full Width Danger Zone Card */}
               <DangerZoneCard />
             </div>
           )}

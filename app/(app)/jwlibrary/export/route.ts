@@ -52,6 +52,9 @@ export async function GET() {
     { data: tagMapRows, error: tagMapError },
     { data: bookmarkRows, error: bookmarksError },
     { data: inputFieldRows, error: inputFieldsError },
+    { data: answerRows, error: answersError },
+    { data: publicationRows, error: publicationsError },
+    { data: chapterRows, error: chaptersError },
   ] = await Promise.all([
     supabase
       .from("jwlibrary_notes")
@@ -62,9 +65,18 @@ export async function GET() {
     supabase.from("jwlibrary_tag_map").select(`tag_id, note_id, ${LOCATION_SELECT}`),
     supabase.from("jwlibrary_bookmarks").select(`title, snippet, slot, block_type, block_identifier, ${LOCATION_SELECT}`),
     supabase.from("jwlibrary_input_fields").select(`text_tag, value, ${LOCATION_SELECT}`),
+    // "Your answer" fields typed directly in this app's own jwpub reader —
+    // stored separately from jwlibrary_input_fields (see app/(app)/jwpub-actions.ts's
+    // getAnswers), so they need their own Location built from the owning
+    // publication/chapter before they can be written into the export.
+    supabase.from("jwpub_answers").select("publication_id, document_id, pid, answer"),
+    supabase.from("jwpub_publications").select("id, symbol, meps_language_index, issue_tag_number"),
+    supabase.from("jwpub_chapters").select("publication_id, document_id, meps_document_id").not("meps_document_id", "is", null),
   ]);
 
-  const firstError = notesError ?? marksError ?? rangesError ?? tagsError ?? tagMapError ?? bookmarksError ?? inputFieldsError;
+  const firstError =
+    notesError ?? marksError ?? rangesError ?? tagsError ?? tagMapError ?? bookmarksError ?? inputFieldsError ??
+    answersError ?? publicationsError ?? chaptersError;
   if (firstError) return Response.json({ error: "Não foi possível carregar seus dados." }, { status: 500 });
 
   const usermarkGuidById = new Map((markRows ?? []).map((m) => [m.id, m.source_guid as string]));
@@ -115,11 +127,47 @@ export async function GET() {
     location: readLocation(b),
   }));
 
-  const inputFields = (inputFieldRows ?? []).map((f) => ({
-    textTag: f.text_tag,
-    value: f.value,
-    location: readLocation(f),
-  }));
+  // Merge both answer sources into one InputField list — imported ones first,
+  // then this app's own reader answers overwriting on the same key (same
+  // priority convention as getAnswers in app/(app)/jwpub-actions.ts: no
+  // modification timestamp exists to compare against, so an in-app edit is
+  // treated as authoritative over whatever was last imported).
+  function inputFieldKey(loc: JwlibraryLocation, textTag: string): string {
+    return `${loc.keySymbol ?? ""}|${loc.mepsLanguage ?? ""}|${loc.issueTagNumber ?? ""}|${loc.mepsDocumentId ?? ""}|${textTag}`;
+  }
+
+  const inputFieldsByKey = new Map<string, { textTag: string; value: string; location: JwlibraryLocation }>();
+  for (const f of inputFieldRows ?? []) {
+    const location = readLocation(f);
+    inputFieldsByKey.set(inputFieldKey(location, f.text_tag), { textTag: f.text_tag, value: f.value, location });
+  }
+
+  const publicationById = new Map((publicationRows ?? []).map((p) => [p.id, p]));
+  const mepsDocumentIdByPublicationAndDocument = new Map(
+    (chapterRows ?? []).map((c) => [`${c.publication_id}:${c.document_id}`, c.meps_document_id as number])
+  );
+  for (const a of answerRows ?? []) {
+    const publication = publicationById.get(a.publication_id);
+    const mepsDocumentId = mepsDocumentIdByPublicationAndDocument.get(`${a.publication_id}:${a.document_id}`);
+    if (!publication || mepsDocumentId === undefined) continue; // chapter not (re)processed since migration 0008 — can't address it without MepsDocumentId
+    const location: JwlibraryLocation = {
+      bookNumber: null,
+      chapterNumber: null,
+      keySymbol: publication.symbol,
+      mepsLanguage: publication.meps_language_index,
+      issueTagNumber: publication.issue_tag_number,
+      mepsDocumentId,
+      track: null,
+      locationType: 0,
+    };
+    inputFieldsByKey.set(inputFieldKey(location, a.pid), {
+      textTag: a.pid,
+      value: decryptText(a.answer) ?? "",
+      location,
+    });
+  }
+
+  const inputFields = [...inputFieldsByKey.values()];
 
   try {
     const dbBytes = await buildJwlibraryDatabase({ notes, userMarks, tags, tagMaps, bookmarks, inputFields });

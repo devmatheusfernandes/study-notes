@@ -29,6 +29,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SyncStatusIndicator, type SyncStatus } from "./sync-status";
 import { parseNotePreview } from "@/lib/note-preview";
 import { TagDot, TagPill } from "./tag-pill";
+import { ProcessingShimmer, UploadWaveProgress } from "./upload-progress-indicators";
 import type { Tag } from "@/lib/store/notes-store";
 
 /** Cards only render a handful of tag pills before collapsing the rest into "+N". */
@@ -98,43 +99,6 @@ export interface NoteCardProps {
   onToggleChecklistItem?: (index: number) => void;
   /** Native HTML5 drag start, for dragging this card onto a FolderCard to move it. Parent decides the drag payload (single vs. multi-select) and omits this entirely for cards that shouldn't be draggable (optimistic/processing). */
   onDragStart?: (event: React.DragEvent) => void;
-}
-
-/** Sheen sweeping across a card while a .jwpub/.jwlibrary is being parsed after upload — the parent must be `relative overflow-hidden` for this to clip to its rounded corners. */
-function ProcessingShimmer() {
-  return (
-    <span
-      aria-hidden
-      className="animate-shimmer pointer-events-none absolute inset-0 bg-[length:200%_100%] bg-gradient-to-r from-transparent via-foreground/12 to-transparent"
-    />
-  );
-}
-
-/**
- * A wave that rises to fill the card as its upload progresses (0-100,
- * simulated — see hooks/use-file-upload.ts, Server Actions don't expose real
- * byte progress) — monotonic, never dips back down. The horizontal ripple
- * keeps drifting continuously just for texture; only its height reflects
- * actual progress. The parent must be `relative overflow-hidden`.
- */
-function UploadWaveProgress({ progress }: { progress: number }) {
-  return (
-    <span aria-hidden className="pointer-events-none absolute inset-0">
-      <span
-        className="absolute inset-x-0 bottom-0 transition-[top] duration-300 ease-out"
-        style={{ top: `${100 - Math.max(0, Math.min(100, progress))}%` }}
-      >
-        <span className="absolute inset-x-0 bottom-0 top-2 bg-accent/15" />
-        <svg
-          className="animate-wave-scroll absolute inset-x-0 top-0 h-3 w-[200%] text-accent/30"
-          viewBox="0 0 200 20"
-          preserveAspectRatio="none"
-        >
-          <path d="M0 10 C 25 20, 75 0, 100 10 S 175 20, 200 10 L200 20 L0 20 Z" fill="currentColor" />
-        </svg>
-      </span>
-    </span>
-  );
 }
 
 export function NoteCard({

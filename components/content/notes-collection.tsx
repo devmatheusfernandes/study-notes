@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
@@ -111,7 +111,16 @@ export function NotesCollection({
     return () => clearSelection();
   }, [status, activeFolder, clearSelection]);
 
-  const notes = useNotesStore((s) => s.notes);
+  // .jwlibrary backups aren't notes/files a user browses here — they're a
+  // collection of many notes/highlights managed on their own /jwlibrary
+  // screen (see components/settings/backups-card.tsx for where they live
+  // instead). Excluded at the source so pinned/others, folder item counts,
+  // and "select all" never see them.
+  const allNotesIncludingBackups = useNotesStore((s) => s.notes);
+  const notes = useMemo(
+    () => allNotesIncludingBackups.filter((n) => n.type !== "jwlibrary"),
+    [allNotesIncludingBackups]
+  );
   const folders = useNotesStore((s) => s.folders);
   const tags = useNotesStore((s) => s.tags);
   const [manageTagsNoteId, setManageTagsNoteId] = useState<string | null>(null);
@@ -352,7 +361,7 @@ export function NotesCollection({
 
   return (
     <>
-    <FileDropZone>
+    <FileDropZone blockJwlibrary>
       <div className="flex flex-1 flex-col gap-7 px-4 py-6 sm:px-6">
         {openFolder && (
           <button

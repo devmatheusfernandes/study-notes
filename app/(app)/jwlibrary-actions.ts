@@ -272,12 +272,13 @@ export async function saveJwlibraryBackup(
       await insertInBatches(supabase, "jwlibrary_bookmarks", rows, "user_id,dedupe_key");
     }
 
-    // 6. Input fields — plus a best-effort cross-write into jwpub_answers
-    // (the "Your answer" fields the reader already renders) when the
-    // TextTag turns out to match a data-pid actually present in that
-    // chapter's stored HTML. Unverified against a real export (no confirmed
-    // sample with overlapping InputField + already-imported publication),
-    // so this only fires when the text genuinely matches — never guesses.
+    // 6. Input fields — imported as-is. getAnswers (app/(app)/jwpub-actions.ts)
+    // joins these live against a publication's chapters by Location every
+    // time the reader loads, so they show up under "Your answer" boxes
+    // regardless of whether the matching .jwpub was already ingested at
+    // import time or only gets ingested later — no eager cross-write into
+    // jwpub_answers here (that used to be import-order-dependent, and could
+    // never be corrected by a later re-import once written).
     if (parsed.inputFields.length > 0) {
       const rows = parsed.inputFields.map((f) => {
         const resolved = index.resolve(f.location);
@@ -292,37 +293,6 @@ export async function saveJwlibraryBackup(
         };
       });
       await insertInBatches(supabase, "jwlibrary_input_fields", rows, "user_id,dedupe_key");
-
-      const resolvedFields = parsed.inputFields
-        .map((f) => ({ field: f, resolved: index.resolve(f.location) }))
-        .filter((x) => x.resolved.chapterId !== null);
-
-      const chapterIds = [...new Set(resolvedFields.map((x) => x.resolved.chapterId!))];
-      if (chapterIds.length > 0) {
-        const { data: chapters } = await supabase
-          .from("jwpub_chapters")
-          .select("id, publication_id, document_id, content_html")
-          .in("id", chapterIds);
-        const chapterById = new Map((chapters ?? []).map((c) => [c.id, c]));
-
-        const answerRows = resolvedFields
-          .map(({ field, resolved }) => {
-            const chapter = chapterById.get(resolved.chapterId!);
-            if (!chapter?.content_html?.includes(`data-pid="${field.textTag}"`)) return null;
-            return {
-              user_id: user.id,
-              publication_id: chapter.publication_id,
-              document_id: chapter.document_id,
-              pid: field.textTag,
-              answer: encryptText(field.value),
-            };
-          })
-          .filter((row): row is NonNullable<typeof row> => row !== null);
-
-        if (answerRows.length > 0) {
-          await insertInBatches(supabase, "jwpub_answers", answerRows, "publication_id,document_id,pid");
-        }
-      }
     }
   } catch (error) {
     await supabase.from("jwlibrary_backups").delete().eq("id", backup.id);
@@ -780,6 +750,51 @@ export async function deleteJwlibraryTag(id: string): Promise<{ error?: string }
 
   const { error } = await supabase.from("jwlibrary_tags").delete().eq("id", id).eq("tag_type", 1);
   return error ? { error: "Não foi possível excluir a tag." } : {};
+}
+
+/**
+ * Folds `sourceId` into `targetId`: every note tagged with the source ends up
+ * tagged with the target instead, then the source tag is deleted. Notes
+ * already carrying both tags would otherwise trip the (tag_id, note_id)
+ * unique index (migration 0014) when re-pointing source rows at the target
+ * — those source rows are dropped instead of moved, since the note already
+ * has the target tag anyway. `tag_type = 1` guard as the other tag actions.
+ */
+export async function mergeJwlibraryTags(sourceId: string, targetId: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  if (sourceId === targetId) return { error: "Selecione duas tags diferentes." };
+
+  const [{ data: source }, { data: target }] = await Promise.all([
+    supabase.from("jwlibrary_tags").select("id").eq("id", sourceId).eq("tag_type", 1).single(),
+    supabase.from("jwlibrary_tags").select("id").eq("id", targetId).eq("tag_type", 1).single(),
+  ]);
+  if (!source || !target) return { error: "Tag não encontrada." };
+
+  const { data: targetNoteRows } = await supabase
+    .from("jwlibrary_tag_map")
+    .select("note_id")
+    .eq("tag_id", targetId)
+    .not("note_id", "is", null);
+  const targetNoteIds = new Set((targetNoteRows ?? []).map((row) => row.note_id as string));
+
+  const { data: sourceRows } = await supabase.from("jwlibrary_tag_map").select("id, note_id").eq("tag_id", sourceId);
+  const alreadyOnTarget = (sourceRows ?? []).filter((row) => row.note_id && targetNoteIds.has(row.note_id));
+  const movable = (sourceRows ?? []).filter((row) => !row.note_id || !targetNoteIds.has(row.note_id));
+
+  if (alreadyOnTarget.length > 0) {
+    await supabase.from("jwlibrary_tag_map").delete().in("id", alreadyOnTarget.map((row) => row.id));
+  }
+  if (movable.length > 0) {
+    const { error: moveError } = await supabase
+      .from("jwlibrary_tag_map")
+      .update({ tag_id: targetId })
+      .in("id", movable.map((row) => row.id));
+    if (moveError) return { error: "Não foi possível mesclar as tags." };
+  }
+
+  const { error } = await supabase.from("jwlibrary_tags").delete().eq("id", sourceId).eq("tag_type", 1);
+  return error ? { error: "Não foi possível excluir a tag de origem após mesclar." } : {};
 }
 
 export async function getJwlibraryNoteTagIds(noteId: string): Promise<{ tagIds?: string[]; error?: string }> {
