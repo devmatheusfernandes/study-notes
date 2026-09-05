@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ChevronLeft, ChevronRight, List, NotebookPen, RefreshCw, X } from "lucide-react";
@@ -15,9 +15,15 @@ import {
   resolveJwpubReferences,
   type ResolvedJwpubReference,
 } from "@/app/(app)/jwpub-actions";
-import { getBibleVerses, type BibleVerseRow } from "@/app/(app)/bible-actions";
+import { getBibleVerses, getBibleVersesBatch, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
-import { getChapterHighlights, createJwlibraryHighlight, type ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
+import {
+  getChapterHighlights,
+  getBibleChapterHighlights,
+  createJwlibraryHighlight,
+  type ParagraphHighlight,
+  type BibleVerseHighlight,
+} from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
@@ -175,6 +181,16 @@ export function JwpubReader({
   const [bibleVerses, setBibleVerses] = useState<BibleVerseRow[] | null>(null);
   const [bibleError, setBibleError] = useState<string | null>(null);
   const [isLoadingBible, setIsLoadingBible] = useState(false);
+  const [bibleHighlights, setBibleHighlights] = useState<BibleVerseHighlight[]>([]);
+
+  // Caches keyed by "firstVerseId-lastVerseId" / "bookOrder-chapter" — filled
+  // eagerly by the prefetch effect below (every citation the chapter's own
+  // HTML carries, resolved in one batched round trip as soon as it loads),
+  // so tapping a reference that's already on screen is a cache hit instead
+  // of a fresh network request. Refs, not state: purely a perf cache, never
+  // rendered directly, so there's no reason to trigger a re-render for it.
+  const bibleRangeCache = useRef(new Map<string, BibleVerseRow[]>());
+  const bibleHighlightCache = useRef(new Map<string, BibleVerseHighlight[]>());
 
   // Cross-references to other publications (e.g. "th study 5") — resolved
   // dynamically per chapter against the user's own library, not baked in at
@@ -199,7 +215,7 @@ export function JwpubReader({
   const [highlightEditMode, setHighlightEditMode] = useState(false);
   // Clicking a highlight with NO note (a "destaque puro") opens the same
   // panel in its note-less mode (recolor/add note/delete) instead.
-  const [highlightMark, setHighlightMark] = useState<ParagraphHighlight | null>(null);
+  const [highlightMark, setHighlightMark] = useState<(ParagraphHighlight & { text?: string }) | null>(null);
 
   // Fetched once per publication (not per chapter) — cheap, and every
   // chapter switch would otherwise re-fetch the whole set.
@@ -292,6 +308,70 @@ export function JwpubReader({
     };
   }, [html]);
 
+  // Prefetches every distinct Bible citation the chapter's own HTML carries
+  // (rewriteJwpubLinks already baked `data-jwpub-bible-first/last` into the
+  // stored HTML at ingest time — see lib/jwpub/sanitize.ts) in one batched
+  // round trip, then their chapters' highlights/notes in a second batch —
+  // instead of paying a fresh Server Action round trip (which always
+  // includes a `supabase.auth.getUser()` network check, the main source of
+  // per-click latency) for every reference the user actually taps. Silently
+  // best-effort: a miss just falls back to the old per-click fetch in
+  // handleBibleRef below, so a failure here never blocks reading.
+  useEffect(() => {
+    bibleRangeCache.current = new Map();
+    bibleHighlightCache.current = new Map();
+    if (!html) return;
+
+    const ranges = [
+      ...new Map(
+        [...html.matchAll(/data-jwpub-bible-first="(\d+)" data-jwpub-bible-last="(\d+)"/g)].map((m) => [
+          `${m[1]}-${m[2]}`,
+          { firstVerseId: Number(m[1]), lastVerseId: Number(m[2]) },
+        ])
+      ).values(),
+    ];
+    if (ranges.length === 0) return;
+
+    let cancelled = false;
+    void getBibleVersesBatch(ranges).then((result) => {
+      if (cancelled || !result.verses) return;
+
+      const chapterKeys = new Map<string, { bookOrder: number; chapter: number }>();
+      for (const { firstVerseId, lastVerseId } of ranges) {
+        const verses = result.verses.filter((v) => v.id >= firstVerseId && v.id <= lastVerseId);
+        bibleRangeCache.current.set(`${firstVerseId}-${lastVerseId}`, verses);
+        for (const v of verses) chapterKeys.set(`${v.bookOrder}-${v.chapter}`, { bookOrder: v.bookOrder, chapter: v.chapter });
+      }
+
+      for (const [key, { bookOrder, chapter }] of chapterKeys) {
+        void getBibleChapterHighlights(bookOrder, chapter).then((r) => {
+          if (!cancelled) bibleHighlightCache.current.set(key, r.highlights ?? []);
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [html]);
+
+  /** Resolves + caches a Bible range's highlights (one request per distinct chapter, skipped for whatever the prefetch effect above already cached) and pushes them into state for the currently open sidebar. */
+  const loadBibleHighlightsFor = useCallback((verses: BibleVerseRow[]) => {
+    const chapterKeys = new Map<string, { bookOrder: number; chapter: number }>();
+    for (const v of verses) chapterKeys.set(`${v.bookOrder}-${v.chapter}`, { bookOrder: v.bookOrder, chapter: v.chapter });
+
+    setBibleHighlights([]);
+    void Promise.all(
+      [...chapterKeys.entries()].map(async ([key, { bookOrder, chapter }]) => {
+        const cached = bibleHighlightCache.current.get(key);
+        if (cached) return cached;
+        const result = await getBibleChapterHighlights(bookOrder, chapter);
+        const highlights = result.highlights ?? [];
+        bibleHighlightCache.current.set(key, highlights);
+        return highlights;
+      })
+    ).then((groups) => setBibleHighlights(groups.flat()));
+  }, []);
+
   const handlePublicationRef = useCallback(
     (mepsDocumentId: number, pid?: string) => {
       const resolved = resolvedPubRefs.get(mepsDocumentId);
@@ -327,17 +407,32 @@ export function JwpubReader({
     [publication.id]
   );
 
-  const handleBibleRef = useCallback((firstVerseId: number, lastVerseId: number) => {
-    setBibleOpen(true);
-    setBibleVerses(null);
-    setBibleError(null);
-    setIsLoadingBible(true);
-    void getBibleVerses(firstVerseId, lastVerseId).then((result) => {
-      setBibleVerses(result.verses ?? null);
-      setBibleError(result.error ?? null);
-      setIsLoadingBible(false);
-    });
-  }, []);
+  const handleBibleRef = useCallback(
+    (firstVerseId: number, lastVerseId: number) => {
+      setBibleOpen(true);
+      setBibleError(null);
+
+      const cached = bibleRangeCache.current.get(`${firstVerseId}-${lastVerseId}`);
+      if (cached) {
+        // Cache hit — same reference the prefetch effect already resolved
+        // for this chapter, so the sidebar opens with no network wait at all.
+        setBibleVerses(cached);
+        setIsLoadingBible(false);
+        loadBibleHighlightsFor(cached);
+        return;
+      }
+
+      setBibleVerses(null);
+      setIsLoadingBible(true);
+      void getBibleVerses(firstVerseId, lastVerseId).then((result) => {
+        setBibleVerses(result.verses ?? null);
+        setBibleError(result.error ?? null);
+        setIsLoadingBible(false);
+        if (result.verses) loadBibleHighlightsFor(result.verses);
+      });
+    },
+    [loadBibleHighlightsFor]
+  );
 
   const handlePickParagraph = useCallback(
     (pid: string) => {
@@ -700,6 +795,7 @@ export function JwpubReader({
         error={bibleError}
         isLoading={isLoadingBible}
         onClose={() => setBibleOpen(false)}
+        highlights={bibleHighlights}
       />
 
       <JwpubReferenceSurface
@@ -715,6 +811,7 @@ export function JwpubReader({
         note={highlightNote}
         highlightId={highlightMark?.id}
         colorIndex={highlightMark?.colorIndex}
+        highlightText={highlightMark?.text}
         onClose={() => {
           setHighlightNote(null);
           setHighlightMark(null);
@@ -722,8 +819,12 @@ export function JwpubReader({
         onEdit={() => setHighlightEditMode(true)}
         onAddNote={handleAddNoteToHighlight}
         onColorChanged={(colorIndex) => {
+          // Local patch, no refetch — instant, matching the optimistic
+          // creation flow above. highlightMark's own colorIndex is kept in
+          // sync too, so the swatch border reflects the pick right away.
+          const id = highlightMark?.id;
           setHighlightMark((prev) => (prev ? { ...prev, colorIndex } : prev));
-          void refreshHighlights();
+          if (id) setHighlights((prev) => prev.map((h) => (h.id === id ? { ...h, colorIndex } : h)));
         }}
         onDeleted={() => {
           setHighlightNote(null);
@@ -744,6 +845,9 @@ export function JwpubReader({
         note={highlightEditMode ? highlightNote : null}
         prefilledLocation={pendingNoteLocation}
         onSaved={refreshHighlights}
+        onHighlightColorChanged={(userMarkId, colorIndex) => {
+          setHighlights((prev) => prev.map((h) => (h.id === userMarkId ? { ...h, colorIndex } : h)));
+        }}
       />
     </div>
   );

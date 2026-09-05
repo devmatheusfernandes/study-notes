@@ -66,6 +66,8 @@ interface JwlibraryNoteEditorVaultProps {
   prefilledLocation?: PrefilledJwlibraryLocation | null;
   /** Called after any successful create/update/delete so the caller can refresh its list. */
   onSaved: () => void;
+  /** Fired synchronously the moment a color is picked for an *existing* UserMark (see activeUserMarkId below) — before the server call resolves — so a caller showing the live highlighted text (jwpub-reader.tsx/bible-reader.tsx) can recolor it instantly instead of waiting on a round trip. Callers without a live highlight to patch (the /jwlibrary list) can omit this and rely on onSaved instead. */
+  onHighlightColorChanged?: (userMarkId: string, colorIndex: number) => void;
 }
 
 type LocationMode = "publication" | "bible";
@@ -100,6 +102,7 @@ export function JwlibraryNoteEditorVault({
   note,
   prefilledLocation,
   onSaved,
+  onHighlightColorChanged,
 }: JwlibraryNoteEditorVaultProps) {
   const isEdit = !!note;
   const isPrefilled = !!prefilledLocation;
@@ -372,12 +375,23 @@ export function JwlibraryNoteEditorVault({
   // attaching a new note to a highlight created standalone), a color pick
   // recolors it right away instead of waiting on note creation — there's no
   // "Sem destaque" case here, an existing UserMark always has a real color.
+  // Optimistic when the caller passed onHighlightColorChanged (jwpub-reader.tsx/
+  // bible-reader.tsx, which can patch the live highlighted text instantly):
+  // fire it before the server call resolves, only falling back to onSaved's
+  // full refresh if the update actually fails. Callers with no live highlight
+  // to patch (the /jwlibrary list) keep the old await-then-refresh shape.
   // Otherwise (a fresh span not yet turned into a highlight), just stage the
   // choice locally — buildCreateInput folds it into the highlight created
   // alongside the note on first save.
   async function handleColorSelect(index: number | null) {
     setHighlightColor(index);
-    if (activeUserMarkId && index !== null) {
+    if (!activeUserMarkId || index === null) return;
+
+    if (onHighlightColorChanged) {
+      onHighlightColorChanged(activeUserMarkId, index);
+      const result = await updateJwlibraryHighlightColor(activeUserMarkId, index);
+      if (result.error) onSaved();
+    } else {
       await updateJwlibraryHighlightColor(activeUserMarkId, index);
       onSaved();
     }

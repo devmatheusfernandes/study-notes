@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 export interface BibleVerseRow {
   id: number;
   book: string;
+  /** Canonical 1-66 book order (bible_verses.book_order) — lets a caller that already has a verse row look up its chapter's highlights/notes without a separate book-name lookup. */
+  bookOrder: number;
   chapter: number;
   verse: number | null;
   text: string | null;
@@ -35,7 +37,7 @@ export async function getBibleVerses(
 
   const { data, error } = await supabase
     .from("bible_verses")
-    .select("id, book, chapter, verse, text, is_superscription")
+    .select("id, book, book_order, chapter, verse, text, is_superscription")
     .gte("id", firstVerseId)
     .lte("id", lastVerseId)
     .order("id", { ascending: true });
@@ -47,6 +49,63 @@ export async function getBibleVerses(
     verses: data.map((row) => ({
       id: row.id,
       book: row.book,
+      bookOrder: row.book_order,
+      chapter: row.chapter,
+      verse: row.verse,
+      text: row.text,
+      isSuperscription: row.is_superscription,
+    })),
+  };
+}
+
+const MAX_BATCH_RANGES = 100; // a heavily cross-referenced chapter still stays well under this
+
+/**
+ * Same resolution as getBibleVerses, batched over every distinct citation a
+ * whole jwpub chapter carries — one auth check + one query instead of one
+ * per reference tapped. See components/content/jwpub-reader.tsx, which scans
+ * a chapter's HTML for every `data-jwpub-bible-first/last` pair as soon as it
+ * loads and prefetches them all here, so opening the Bible sidebar for any
+ * reference already on screen is a cache hit instead of a fresh round trip.
+ */
+export async function getBibleVersesBatch(
+  ranges: { firstVerseId: number; lastVerseId: number }[]
+): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  if (ranges.length === 0) return { verses: [] };
+  if (ranges.length > MAX_BATCH_RANGES) return { error: "Muitas referências de uma vez." };
+
+  const filters: string[] = [];
+  for (const { firstVerseId, lastVerseId } of ranges) {
+    if (
+      !Number.isFinite(firstVerseId) ||
+      !Number.isFinite(lastVerseId) ||
+      firstVerseId > lastVerseId ||
+      lastVerseId - firstVerseId > MAX_RANGE
+    ) {
+      return { error: "Referência bíblica inválida." };
+    }
+    filters.push(`and(id.gte.${firstVerseId},id.lte.${lastVerseId})`);
+  }
+
+  const { data, error } = await supabase
+    .from("bible_verses")
+    .select("id, book, book_order, chapter, verse, text, is_superscription")
+    .or(filters.join(","))
+    .order("id", { ascending: true });
+
+  if (error) return { error: "Não foi possível carregar o texto bíblico." };
+
+  return {
+    verses: (data ?? []).map((row) => ({
+      id: row.id,
+      book: row.book,
+      bookOrder: row.book_order,
       chapter: row.chapter,
       verse: row.verse,
       text: row.text,
@@ -74,7 +133,7 @@ export async function getBibleVerseByReference(
 
   let query = supabase
     .from("bible_verses")
-    .select("id, book, chapter, verse, text, is_superscription")
+    .select("id, book, book_order, chapter, verse, text, is_superscription")
     .eq("book_order", bookNumber)
     .eq("chapter", chapter);
 
@@ -89,6 +148,7 @@ export async function getBibleVerseByReference(
     verse: {
       id: data.id,
       book: data.book,
+      bookOrder: data.book_order,
       chapter: data.chapter,
       verse: data.verse,
       text: data.text,
@@ -110,7 +170,7 @@ export async function getBibleChapterVerses(
 
   const { data, error } = await supabase
     .from("bible_verses")
-    .select("id, book, chapter, verse, text, is_superscription")
+    .select("id, book, book_order, chapter, verse, text, is_superscription")
     .eq("book_order", bookOrder)
     .eq("chapter", chapter)
     .order("id", { ascending: true });
@@ -122,6 +182,7 @@ export async function getBibleChapterVerses(
     verses: data.map((row) => ({
       id: row.id,
       book: row.book,
+      bookOrder: row.book_order,
       chapter: row.chapter,
       verse: row.verse,
       text: row.text,
@@ -381,7 +442,7 @@ export async function getBibleVerseRange(
 
   let query = supabase
     .from("bible_verses")
-    .select("id, book, chapter, verse, text, is_superscription")
+    .select("id, book, book_order, chapter, verse, text, is_superscription")
     .eq("book_order", bookOrder)
     .eq("chapter", chapter);
   query = endVerse ? query.gte("verse", startVerse).lte("verse", endVerse) : query.eq("verse", startVerse);
@@ -395,6 +456,7 @@ export async function getBibleVerseRange(
     verses: data.map((row) => ({
       id: row.id,
       book: row.book,
+      bookOrder: row.book_order,
       chapter: row.chapter,
       verse: row.verse,
       text: row.text,

@@ -376,7 +376,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   const [highlightEditMode, setHighlightEditMode] = useState(false);
   // Clicking a highlight with NO note (a "destaque puro") opens the same
   // panel in its note-less mode (recolor/add note/delete) instead.
-  const [highlightMark, setHighlightMark] = useState<BibleVerseHighlight | null>(null);
+  const [highlightMark, setHighlightMark] = useState<(BibleVerseHighlight & { text?: string }) | null>(null);
 
   const handlePickVerseSpan = useCallback(
     (verse: number, startToken: number, endToken: number, selectedText?: string) => {
@@ -599,6 +599,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         note={highlightNote}
         highlightId={highlightMark?.id}
         colorIndex={highlightMark?.colorIndex}
+        highlightText={highlightMark?.text}
         onClose={() => {
           setHighlightNote(null);
           setHighlightMark(null);
@@ -606,8 +607,11 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         onEdit={() => setHighlightEditMode(true)}
         onAddNote={handleAddNoteToHighlight}
         onColorChanged={(colorIndex) => {
+          // Local patch, no refetch — instant, matching the optimistic
+          // creation flow above.
+          const id = highlightMark?.id;
           setHighlightMark((prev) => (prev ? { ...prev, colorIndex } : prev));
-          void refreshHighlights();
+          if (id) setHighlights((prev) => prev.map((h) => (h.id === id ? { ...h, colorIndex } : h)));
         }}
         onDeleted={() => {
           setHighlightNote(null);
@@ -628,6 +632,9 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         note={highlightEditMode ? highlightNote : null}
         prefilledLocation={pendingNoteLocation}
         onSaved={refreshHighlights}
+        onHighlightColorChanged={(userMarkId, colorIndex) => {
+          setHighlights((prev) => prev.map((h) => (h.id === userMarkId ? { ...h, colorIndex } : h)));
+        }}
       />
     </div>
   );

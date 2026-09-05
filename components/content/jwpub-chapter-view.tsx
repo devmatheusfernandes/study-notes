@@ -33,8 +33,8 @@ interface JwpubChapterViewProps {
   highlights?: ParagraphHighlight[];
   /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. */
   onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string; colorIndex: number }) => void;
-  /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. */
-  onHighlightMark?: (highlight: ParagraphHighlight) => void;
+  /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. `text` is the highlighted span's own plain text (read off the rendered `<mark>`), shown in place of a note since there isn't one. */
+  onHighlightMark?: (highlight: ParagraphHighlight & { text?: string }) => void;
 }
 
 const ANSWER_BASE_CLASS =
@@ -122,7 +122,7 @@ export function JwpubChapterView({
       if (usermarkEl) {
         const usermarkId = usermarkEl.dataset.jwlibraryUsermarkId;
         const highlight = highlights.find((h) => h.id === usermarkId);
-        if (highlight) onHighlightMark?.(highlight);
+        if (highlight) onHighlightMark?.({ ...highlight, text: usermarkEl.dataset.jwlibraryText });
       }
     }
 
@@ -325,6 +325,10 @@ export function JwpubChapterView({
       if (!el) continue;
       const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
       const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
+      // Stamped so a note-less highlight's click handler can show the
+      // highlighted text itself (there's no note to display instead) —
+      // see JwlibraryHighlightNotePanel's highlightText prop.
+      if (mark) mark.dataset.jwlibraryText = mark.textContent ?? "";
 
       if (highlight.note && mark) {
         el.style.position = "relative";

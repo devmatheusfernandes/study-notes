@@ -20,8 +20,8 @@ interface BibleChapterViewProps {
   highlights?: BibleVerseHighlight[];
   /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. */
   onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string; colorIndex: number }) => void;
-  /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. */
-  onHighlightMark?: (highlight: BibleVerseHighlight) => void;
+  /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. `text` is the highlighted span's own plain text (read off the rendered `<mark>`), shown in place of a note since there isn't one. */
+  onHighlightMark?: (highlight: BibleVerseHighlight & { text?: string }) => void;
   /** Scrolls to and briefly flashes this verse on mount — deep link from a jwlibrary Bible note, or from picking a cross reference (see bible-reader.tsx's `?verse=`/navigateTo). */
   targetVerse?: number | null;
   /** How many footnotes each verse has, keyed by verse number. */
@@ -81,7 +81,7 @@ export function BibleChapterView({
         const usermarkId = usermarkEl.dataset.jwlibraryUsermarkId;
         const highlight = highlights.find((h) => h.id === usermarkId);
         if (highlight) {
-          onHighlightMark?.(highlight);
+          onHighlightMark?.({ ...highlight, text: usermarkEl.dataset.jwlibraryText });
           return;
         }
       }
@@ -185,6 +185,9 @@ export function BibleChapterView({
       if (!el) continue;
       const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
       const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
+      // Stamped so a note-less highlight's click handler can show the
+      // highlighted text itself — see JwlibraryHighlightNotePanel's highlightText prop.
+      if (mark) mark.dataset.jwlibraryText = mark.textContent ?? "";
 
       if (highlight.note && mark) {
         el.style.position = "relative";

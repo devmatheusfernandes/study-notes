@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { notify } from "@/components/ui/toaster";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import {
   deleteJwlibraryNote,
@@ -29,6 +30,8 @@ interface JwlibraryHighlightNotePanelProps {
   highlightId?: string | null;
   /** The highlight's current color, for the note-less controls below. */
   colorIndex?: number;
+  /** The highlighted span's own plain text — shown in place of a note when there isn't one, so the user can still see what they highlighted. */
+  highlightText?: string;
   /** Opens the full editor vault to attach a new note to this highlight (see jwpub-reader.tsx/bible-reader.tsx's `existingUserMarkId` wiring). Only relevant when `note` is null. */
   onAddNote?: () => void;
   /** Called after the highlight's color was changed (with the new index), so the caller can refresh its highlight list and keep this panel's own color state in sync. */
@@ -51,6 +54,7 @@ export function JwlibraryHighlightNotePanel({
   onDeleted,
   highlightId = null,
   colorIndex,
+  highlightText,
   onAddNote,
   onColorChanged,
 }: JwlibraryHighlightNotePanelProps) {
@@ -88,10 +92,18 @@ export function JwlibraryHighlightNotePanel({
     onDeleted();
   }
 
-  async function handleColorChange(index: number) {
+  // Optimistic: tells the caller right away (so it can recolor the live
+  // highlighted text and this panel's own swatch border instantly) instead
+  // of waiting on the round trip — the update itself still happens, just in
+  // the background. A rare failure just leaves the DB one step behind the
+  // screen until the next natural refetch; not worth a rollback for a
+  // low-stakes cosmetic action.
+  function handleColorChange(index: number) {
     if (!highlightId) return;
-    await updateJwlibraryHighlightColor(highlightId, index);
     onColorChanged?.(index);
+    void updateJwlibraryHighlightColor(highlightId, index).then((result) => {
+      if (result.error) notify.error("Não foi possível trocar a cor", result.error);
+    });
   }
 
   return (
@@ -141,6 +153,11 @@ export function JwlibraryHighlightNotePanel({
           </div>
         ) : highlightId ? (
           <div className="flex flex-col gap-4">
+            {highlightText && (
+              <blockquote className="rounded-xl border-l-2 border-accent/50 bg-secondary/50 px-3 py-2 text-[13px] italic leading-relaxed text-muted-foreground">
+                “{highlightText}”
+              </blockquote>
+            )}
             <div className="flex flex-col gap-1.5">
               <span className="text-[11.5px] text-muted-foreground">Cor do destaque</span>
               <div className="flex items-center gap-1.5">
@@ -148,7 +165,7 @@ export function JwlibraryHighlightNotePanel({
                   <button
                     key={index}
                     type="button"
-                    onClick={() => void handleColorChange(Number(index))}
+                    onClick={() => handleColorChange(Number(index))}
                     aria-label={color.name}
                     title={color.name}
                     className="size-7 shrink-0 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
