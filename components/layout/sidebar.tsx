@@ -1,7 +1,6 @@
 "use client";
 
 import { Drawer } from "vaul";
-import { PanelLeftClose, PanelLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDevice } from "@/hooks/ui/use-device";
 import { useSidebarStore } from "@/lib/store/sidebar-store";
@@ -30,24 +29,23 @@ export function Sidebar() {
 
   return (
     <aside
+      // No visible collapse/expand button anymore — the sidebar itself is
+      // the toggle target instead. `e.target === e.currentTarget` only fires
+      // for clicks that land on the aside's own empty space (the gaps
+      // between nav items, the header padding, the bottom spacer), not on
+      // any nav link/button inside SidebarContent, so this never hijacks a
+      // normal navigation click.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) toggleDesktop();
+      }}
+      aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
+      title={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
       className={cn(
-        "sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-border bg-[#161413] pb-5 transition-[width] duration-200 md:flex",
+        "sticky top-0 hidden h-dvh shrink-0 cursor-pointer flex-col border-r border-border bg-[#161413] pb-5 transition-[width] duration-200 md:flex",
         desktopCollapsed ? "w-[76px] px-3" : "w-[232px] px-4"
       )}
     >
       <SidebarContent collapsed={desktopCollapsed} />
-      {/* <button
-        type="button"
-        onClick={toggleDesktop}
-        aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
-        className={cn(
-          "mt-4 flex items-center gap-2 rounded-full px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
-          desktopCollapsed && "justify-center px-0"
-        )}
-      >
-        {desktopCollapsed ? <PanelLeft className="size-4" /> : <PanelLeftClose className="size-4" />}
-        {!desktopCollapsed && "Recolher"}
-      </button> */}
     </aside>
   );
 }
