@@ -14,6 +14,9 @@ export const { dynamic, dynamicParams, revalidate, generateStaticParams, GET } =
       { url: "/login", revision },
       { url: "/offline", revision },
       { url: "/notes", revision },
+      // Fallback body for a failed /notes/<id> navigation while offline —
+      // see the matcher in app/sw.ts's `fallbacks` config.
+      { url: "/notes-offline", revision },
       { url: "/install", revision },
     ],
   });

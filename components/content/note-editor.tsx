@@ -26,9 +26,18 @@ interface NoteEditorProps {
     title: string;
     body: string;
   } | null;
+  /**
+   * Overrides the "Voltar" button's navigation. Used by OfflineNoteView (the
+   * Service Worker's fallback body for a failed /notes/[id] navigation — see
+   * app/sw.ts): that page's embedded route tree is /notes-offline's own, not
+   * /notes/[id]'s, so a Next `router.push` from there would navigate against
+   * a mismatched client router state. A real `window.location` assignment
+   * (full reload) sidesteps that entirely.
+   */
+  onBack?: () => void;
 }
 
-export function NoteEditor({ noteId, initialNote }: NoteEditorProps) {
+export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
   const router = useRouter();
   const hydrated = useHydrated();
   // Read client-side (not as server searchParams) so /notes/new stays a
@@ -123,7 +132,7 @@ export function NoteEditor({ noteId, initialNote }: NoteEditorProps) {
             variant="ghost"
             size="sm"
             leftIcon={<ArrowLeft />}
-            onClick={() => router.push("/notes")}
+            onClick={() => (onBack ? onBack() : router.push("/notes"))}
           >
             Voltar
           </Button>

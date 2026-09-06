@@ -102,6 +102,19 @@ const serwist = new Serwist({
   runtimeCaching: [supabaseMediaCaching, wasmCaching, ...rscCacheKeyFix, ...defaultCache],
   fallbacks: {
     entries: [
+      // More specific — checked first. A failed /notes/<id> navigation (the
+      // RSC fetch missed cache and Next's nav-failure-handler forced a hard
+      // reload — see the rscCacheKeyFix comment above) gets a body that can
+      // still render that exact note from the local offline-first store,
+      // instead of the generic "you're offline" dead end. Never matches
+      // /notes/new (handled fine on its own) or /notes itself (the list).
+      {
+        url: "/notes-offline",
+        matcher({ request }) {
+          const { pathname } = new URL(request.url);
+          return request.destination === "document" && /^\/notes\/[^/]+$/.test(pathname);
+        },
+      },
       {
         url: "/offline",
         matcher({ request }) {
