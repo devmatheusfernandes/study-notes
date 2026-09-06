@@ -69,7 +69,7 @@ export function BulkActionBar({ status, showFolders = false }: BulkActionBarProp
               </Button>
             )}
 
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {status === "active" && (
               <Button
                 variant="ghost"

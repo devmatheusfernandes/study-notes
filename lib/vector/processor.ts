@@ -10,7 +10,7 @@ export const EMBEDDING_BATCH_SIZE = 100;
 export const MAX_TICK_DURATION_MS = 45_000;
 
 /** How many queue items one tick claims — deliberately small; a huge publication can still eat a whole tick's time budget on its own. */
-const DEFAULT_CLAIM_BATCH_SIZE = 5;
+const DEFAULT_CLAIM_BATCH_SIZE = 20;
 
 interface ClaimedQueueRow {
   id: string;
