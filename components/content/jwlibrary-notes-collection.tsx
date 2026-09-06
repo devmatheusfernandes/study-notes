@@ -122,6 +122,11 @@ export function JwlibraryNotesCollection() {
 
   const [notes, setNotes] = useState<JwlibraryNoteView[] | null>(null);
   const [tags, setTags] = useState<JwlibraryTagView[]>([]);
+  // A highlight with no note attached (a bare color tap, no "Anotar") never
+  // shows up in `notes` — that list is built purely from jwlibrary_notes
+  // rows — so this is what tells the toolbar/empty-state there's still
+  // exportable data even when `notes` is empty. See listJwlibraryContent.
+  const [hasHighlights, setHasHighlights] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedColors, setSelectedColors] = useState<Set<number>>(new Set());
@@ -155,6 +160,7 @@ export function JwlibraryNotesCollection() {
     if (result.error) setError(result.error);
     setNotes(result.notes ?? []);
     setTags(result.tags ?? []);
+    setHasHighlights(result.hasHighlights ?? false);
     setRefreshing(false);
   }
 
@@ -168,6 +174,7 @@ export function JwlibraryNotesCollection() {
       if (result.error) setError(result.error);
       setNotes(result.notes ?? []);
       setTags(result.tags ?? []);
+      setHasHighlights(result.hasHighlights ?? false);
     });
     return () => {
       cancelled = true;
@@ -331,14 +338,15 @@ export function JwlibraryNotesCollection() {
       <Button variant="outline" size="sm" leftIcon={<Plus />} onClick={() => setCreatingNote(true)}>
         Nova nota
       </Button>
-      {notes !== null && notes.length > 0 && (
+      {/* Exportar/Atualizar need to show whenever there's ANY exportable
+          data — a bare highlight with no note attached never shows up in
+          `notes` (that list is jwlibrary_notes rows only), so checking
+          notes.length alone used to hide the export button entirely for a
+          user who only ever tapped a color, never "Anotar". Gerenciar
+          tags/Organizar com IA/the view toggle are genuinely note-only
+          features, so those stay gated on notes.length. */}
+      {notes !== null && (notes.length > 0 || hasHighlights) && (
         <>
-          <Button variant="ghost" size="sm" leftIcon={<Settings2 />} render={<Link href="/jwlibrary/tags" />}>
-            Gerenciar tags
-          </Button>
-          <Button variant="ghost" size="sm" leftIcon={<Sparkles />} render={<Link href="/jwlibrary/tag-ai" />}>
-            Organizar com IA
-          </Button>
           <Button variant="ghost" size="sm" leftIcon={<Download />} render={<a href="/jwlibrary/export" />}>
             Exportar
           </Button>
@@ -350,6 +358,16 @@ export function JwlibraryNotesCollection() {
             onClick={() => void refresh()}
           >
             Atualizar
+          </Button>
+        </>
+      )}
+      {notes !== null && notes.length > 0 && (
+        <>
+          <Button variant="ghost" size="sm" leftIcon={<Settings2 />} render={<Link href="/jwlibrary/tags" />}>
+            Gerenciar tags
+          </Button>
+          <Button variant="ghost" size="sm" leftIcon={<Sparkles />} render={<Link href="/jwlibrary/tag-ai" />}>
+            Organizar com IA
           </Button>
           <ViewModeToggle value={jwlibraryViewMode} onChange={setJwlibraryViewMode} />
         </>

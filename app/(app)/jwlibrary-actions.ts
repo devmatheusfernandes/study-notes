@@ -352,6 +352,8 @@ export interface JwlibraryTagView {
 export async function listJwlibraryContent(): Promise<{
   notes?: JwlibraryNoteView[];
   tags?: JwlibraryTagView[];
+  /** True when this user has at least one highlight (UserMark) with no note attached — the "notes" list above only reflects jwlibrary_notes rows, so a highlight created via a bare color tap (no "Anotar") is otherwise invisible to any caller checking `notes.length` alone, even though it's still real, exportable data (see app/(app)/jwlibrary/export/route.ts). */
+  hasHighlights?: boolean;
   error?: string;
 }> {
   const { supabase, user } = await requireUser();
@@ -448,6 +450,7 @@ export async function listJwlibraryContent(): Promise<{
       };
     }),
     tags: (tags ?? []).map((t) => ({ id: t.id, tagType: t.tag_type, name: t.name })),
+    hasHighlights: (usermarks ?? []).length > 0,
   };
 }
 
