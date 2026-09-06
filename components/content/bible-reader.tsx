@@ -429,15 +429,18 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         startToken,
         endToken,
       }).then((result) => {
-        if (result.error) {
+        if (result.error || !result.id) {
           setHighlights((prev) => prev.filter((h) => h.id !== tempId));
           notify.error("Não foi possível criar o destaque", result.error);
           return;
         }
-        refreshHighlights();
+        // See the identical comment in jwpub-reader.tsx's handleCreateHighlight
+        // — patches the optimistic id in place instead of a second round trip.
+        const realId = result.id;
+        setHighlights((prev) => prev.map((h) => (h.id === tempId ? { ...h, id: realId } : h)));
       });
     },
-    [bookOrder, chapter, refreshHighlights]
+    [bookOrder, chapter]
   );
 
   // "Adicionar nota" inside the note-less highlight panel — opens the full

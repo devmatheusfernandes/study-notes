@@ -510,15 +510,22 @@ export function JwpubReader({
         startToken,
         endToken,
       }).then((result) => {
-        if (result.error) {
+        if (result.error || !result.id) {
           setHighlights((prev) => prev.filter((h) => h.id !== tempId));
           notify.error("Não foi possível criar o destaque", result.error);
           return;
         }
-        refreshHighlights();
+        // Patches the optimistic entry's id in place with the real one
+        // instead of a second round trip (refreshHighlights) to fetch the
+        // same data again — createJwlibraryHighlight already returns it.
+        // Shortens the window where the mark's own click handler still has
+        // to ignore it (see jwpub-chapter-view.tsx's optimistic-id guard)
+        // to a single request instead of two back to back.
+        const realId = result.id;
+        setHighlights((prev) => prev.map((h) => (h.id === tempId ? { ...h, id: realId } : h)));
       });
     },
-    [publication, activeChapter, refreshHighlights]
+    [publication, activeChapter]
   );
 
   // "Adicionar nota" inside the note-less highlight panel — opens the full
