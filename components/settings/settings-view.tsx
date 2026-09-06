@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   LogOut,
   Palette,
@@ -10,6 +11,7 @@ import {
   Sliders,
   CheckCircle2,
   Lock,
+  BookOpen,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { signOut } from "@/app/login/actions";
@@ -74,6 +76,24 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
             Sair da conta
           </Button>
         </div>
+      </section>
+
+      {/* Docs — deliberately not in the sidebar, only reachable from here */}
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-border bg-card p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
+            <BookOpen className="size-4" />
+          </span>
+          <div className="flex min-w-0 flex-col">
+            <span className="text-sm font-medium text-foreground">Documentação</span>
+            <span className="truncate text-[12.5px] text-muted-foreground">
+              Como usar as telas do app e decisões técnicas do funcionamento offline.
+            </span>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" render={<Link href="/docs" />} className="rounded-full text-[12.5px] max-sm:w-full">
+          Ver documentação
+        </Button>
       </section>
 
       {/* Tabs Navigation */}

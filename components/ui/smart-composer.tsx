@@ -705,6 +705,17 @@ export function SmartComposer(props: SmartComposerProps) {
                 handleSubmit();
               }
             }}
+            // A long press that lands on this input otherwise also triggers
+            // Android's native text-selection "Paste" bubble, on top of the
+            // custom drag-to-create gesture — preventDefault() on the
+            // pointerdown handler above doesn't suppress that OS-level
+            // long-press affordance, only disabling selection on the input
+            // itself does. Nothing here needs text selection anyway (single-
+            // line, controlled field), so it's safe to disable unconditionally.
+            onContextMenu={(e) => {
+              if (gestureEnabled) e.preventDefault();
+            }}
+            style={gestureEnabled ? { userSelect: "none", WebkitUserSelect: "none" } : undefined}
             placeholder={
               placeholder ??
               (isPanel ? "Continue a conversa…" : "Pergunte às suas notas ou dê um comando…")
