@@ -11,14 +11,14 @@ export const metadata: Metadata = {
 
 export default function OfflinePage() {
   return (
-    <div className="flex min-h-dvh w-full">
+    <div className="flex h-dvh w-full overflow-hidden">
       <OfflineStoreHydration />
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-border bg-background/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 sm:px-6">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-background/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 sm:px-6">
           <SidebarToggleButton />
         </header>
-        <main className="flex flex-1 flex-col items-center justify-center gap-4 bg-background px-4 text-center">
+        <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-hidden bg-background px-4 text-center">
           <FadeIn className="flex flex-col items-center gap-4">
             <div className="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
               <WifiOff className="size-6" />
