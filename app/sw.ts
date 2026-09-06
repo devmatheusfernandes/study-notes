@@ -1,8 +1,51 @@
 /// <reference lib="esnext" />
 /// <reference lib="webworker" />
-import { defaultCache } from "@serwist/turbopack/worker";
-import type { PrecacheEntry, RuntimeCaching, SerwistGlobalConfig } from "serwist";
+import { defaultCache, PAGES_CACHE_NAME } from "@serwist/turbopack/worker";
+import type { PrecacheEntry, RuntimeCaching, SerwistGlobalConfig, SerwistPlugin } from "serwist";
 import { CacheFirst, ExpirationPlugin, NetworkFirst, Serwist } from "serwist";
+
+// Every RSC fetch Next's client router makes carries a `_rsc=<hash>` cache-busting
+// query param derived from the current router state tree (see
+// node_modules/next/dist/client/components/router-reducer/set-cache-busting-search-param.js),
+// so the exact same page opened from a different navigation context hashes
+// differently. defaultCache's pages-rsc(-prefetch) rules key their cache purely
+// by request URL, so a page visited online under one hash is a guaranteed miss
+// when reopened offline under another — the failed fetch then trips Next's
+// nav-failure-handler into a hard `window.location.href` reload, which the SW
+// has never cached a full HTML document for either, landing on /offline even
+// for notes the user opened moments ago. Stripping `_rsc` before it's used as
+// the cache key collapses every hash variant of the same URL onto one entry.
+const stripRscCacheBuster: SerwistPlugin = {
+  cacheKeyWillBeUsed: ({ request }) => {
+    const url = new URL(request.url);
+    url.searchParams.delete("_rsc");
+    return url.href;
+  },
+};
+
+// Shadow defaultCache's own pages-rsc(-prefetch) rules (matched first, so
+// these win) — same matchers and cache names, just with the plugin above added.
+const rscCacheKeyFix: RuntimeCaching[] = [
+  {
+    matcher: ({ request, url: { pathname }, sameOrigin }) =>
+      request.headers.get("RSC") === "1" &&
+      request.headers.get("Next-Router-Prefetch") === "1" &&
+      sameOrigin &&
+      !pathname.startsWith("/api/"),
+    handler: new NetworkFirst({
+      cacheName: PAGES_CACHE_NAME.rscPrefetch,
+      plugins: [stripRscCacheBuster, new ExpirationPlugin({ maxEntries: 32, maxAgeSeconds: 24 * 60 * 60 })],
+    }),
+  },
+  {
+    matcher: ({ request, url: { pathname }, sameOrigin }) =>
+      request.headers.get("RSC") === "1" && sameOrigin && !pathname.startsWith("/api/"),
+    handler: new NetworkFirst({
+      cacheName: PAGES_CACHE_NAME.rsc,
+      plugins: [stripRscCacheBuster, new ExpirationPlugin({ maxEntries: 32, maxAgeSeconds: 24 * 60 * 60 })],
+    }),
+  },
+];
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -56,7 +99,7 @@ const serwist = new Serwist({
   skipWaiting: false,
   clientsClaim: true,
   navigationPreload: true,
-  runtimeCaching: [supabaseMediaCaching, wasmCaching, ...defaultCache],
+  runtimeCaching: [supabaseMediaCaching, wasmCaching, ...rscCacheKeyFix, ...defaultCache],
   fallbacks: {
     entries: [
       {
