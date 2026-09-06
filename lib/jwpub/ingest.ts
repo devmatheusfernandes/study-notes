@@ -7,6 +7,35 @@ import { uploadMedia, rewriteMediaUrls } from "./media";
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "./sanitize";
 
 /**
+ * Recent periodicals (Watchtower Study, Awake!) embed the issue's own
+ * 2-digit year straight into `Publication.Symbol` inside the .jwpub itself
+ * ("w26", not "w") — confirmed against a real archive (its own Symbol column
+ * literally reads "w26") and, independently, against that same publication's
+ * OWN natively-created jwlibrary Location row (inspected directly in a live
+ * JW Library userData.db): `KeySymbol` there is the bare "w", with the year
+ * carried only by `IssueTagNumber`. Storing the raw year-suffixed symbol
+ * works fine for everything *inside* Study Notes (this app only ever
+ * compares its own stored symbol against itself), but a note/highlight
+ * exported with "w26" as `Location.KeySymbol` doesn't match anything in the
+ * real app's own publication catalog (keyed by "w") — surfaces as a note
+ * that saves fine but never resolves to its publication after import.
+ * Stripping the suffix only when it matches THIS publication's own parsed
+ * `Year` (rather than blindly regexing any trailing digits) avoids
+ * mis-firing on a symbol that just happens to end in two digits for an
+ * unrelated reason. Deliberately applied here, after parseJwpub has already
+ * returned — not inside it — since `deriveJwpubKeys` needs the untouched raw
+ * symbol to derive the correct decryption key; by this point every chapter
+ * is already decrypted, so normalizing what gets *stored* is safe.
+ */
+function stripYearSuffix(symbol: string, year: number | null): string {
+  if (year === null) return symbol;
+  const suffix = String(year % 100).padStart(2, "0");
+  return symbol.length > suffix.length && symbol.toLowerCase().endsWith(suffix)
+    ? symbol.slice(0, -suffix.length)
+    : symbol;
+}
+
+/**
  * Parses a `.jwpub` in the browser and persists the result.
  *
  * Deliberately non-fatal: by the time this runs the note row and the Storage
@@ -25,7 +54,7 @@ export async function ingestJwpub(
 
     const { publicationId, error } = await savePublication({
       noteId,
-      symbol: parsed.symbol,
+      symbol: stripYearSuffix(parsed.symbol, parsed.year),
       title: parsed.title,
       mepsLanguageIndex: parsed.mepsLanguageIndex,
       year: parsed.year,
