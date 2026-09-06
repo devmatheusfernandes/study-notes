@@ -71,7 +71,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="pt-BR"
       className={`${caprasimo.variable} ${figtree.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+      <body
+        // Anecdotally keeps Chrome's "Touch to Search" long-press banner
+        // from covering the UI on some Android/Chrome versions — no
+        // documented mechanism behind it (Chromium's own team says there's
+        // no supported way to disable long-press Touch to Search short of
+        // making text unselectable, which this app can't do — see
+        // jwpub-chapter-view.tsx's whole highlight/note flow), so treat this
+        // as a harmless, unverified try rather than a guaranteed fix.
+        tabIndex={-1}
+        className="min-h-full flex flex-col bg-background text-foreground font-sans"
+      >
         <DeviceListener />
         {/* reloadOnOnline defaults to true and force-calls location.reload() on
             every "online" event — DeviceListener already handles reconnection
