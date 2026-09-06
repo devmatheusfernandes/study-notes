@@ -62,6 +62,30 @@ function Body({
     for (const highlight of highlights) {
       const el = container.querySelector<HTMLElement>(`[data-verse="${highlight.verse}"]`);
       if (!el) continue;
+
+      // A note created via "Anotar sem destaque" has no UserMark at all
+      // (colorIndex/startToken/endToken all null) — see the identical branch
+      // in jwpub-chapter-view.tsx.
+      if (highlight.colorIndex === null || highlight.startToken === null || highlight.endToken === null) {
+        if (!highlight.note) continue;
+        el.style.position = "relative";
+        const marker = document.createElement("span");
+        marker.className = "jwlibrary-note-marker";
+        marker.dataset.jwlibraryNoteId = highlight.note.id;
+        Object.assign(marker.style, {
+          position: "absolute",
+          left: "-14px",
+          top: "0px",
+          width: "8px",
+          height: "8px",
+          borderRadius: "2px",
+          backgroundColor: "var(--muted-foreground)",
+          cursor: "pointer",
+        });
+        el.insertBefore(marker, el.firstChild);
+        continue;
+      }
+
       const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
       const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
 

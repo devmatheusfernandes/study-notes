@@ -18,8 +18,8 @@ interface BibleChapterViewProps {
   onVerseSelected?: (verse: number) => void;
   /** Imported/created highlights for this chapter — see getBibleChapterHighlights in jwlibrary-actions.ts. */
   highlights?: BibleVerseHighlight[];
-  /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. */
-  onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string; colorIndex: number }) => void;
+  /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. `colorIndex`/`userMarkId` are meaningless for a note created via "Anotar sem destaque" (no real UserMark) — see the identical comment in jwpub-chapter-view.tsx. */
+  onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string | null; colorIndex: number | null }) => void;
   /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. `text` is the highlighted span's own plain text (read off the rendered `<mark>`), shown in place of a note since there isn't one. */
   onHighlightMark?: (highlight: BibleVerseHighlight & { text?: string }) => void;
   /** Scrolls to and briefly flashes this verse on mount — deep link from a jwlibrary Bible note, or from picking a cross reference (see bible-reader.tsx's `?verse=`/navigateTo). */
@@ -71,7 +71,15 @@ export function BibleChapterView({
         const noteId = noteMark.dataset.jwlibraryNoteId;
         const highlight = highlights.find((h) => h.note?.id === noteId);
         if (highlight?.note) {
-          onHighlightNote?.({ ...highlight.note, userMarkId: highlight.id, colorIndex: highlight.colorIndex });
+          // See the identical guard in jwpub-chapter-view.tsx — highlight.id
+          // is a placeholder (`note:<id>`), not a real UserMark id, for a
+          // note created via "Anotar sem destaque".
+          const hasRealMark = highlight.colorIndex !== null;
+          onHighlightNote?.({
+            ...highlight.note,
+            userMarkId: hasRealMark ? highlight.id : null,
+            colorIndex: highlight.colorIndex,
+          });
         }
         return;
       }
@@ -79,6 +87,12 @@ export function BibleChapterView({
       const usermarkEl = el?.closest<HTMLElement>("[data-jwlibrary-usermark-id]");
       if (usermarkEl) {
         const usermarkId = usermarkEl.dataset.jwlibraryUsermarkId;
+        // See the identical guard in jwpub-chapter-view.tsx — a highlight
+        // just created still carries its optimistic temp id until the
+        // create round trip resolves; ignore a click that lands in that
+        // window instead of letting "Adicionar nota" send a fake id to the
+        // server.
+        if (usermarkId?.startsWith("optimistic:")) return;
         const highlight = highlights.find((h) => h.id === usermarkId);
         if (highlight) {
           onHighlightMark?.({ ...highlight, text: usermarkEl.dataset.jwlibraryText });
@@ -183,6 +197,30 @@ export function BibleChapterView({
     for (const highlight of highlights) {
       const el = container.querySelector<HTMLElement>(`[data-verse="${highlight.verse}"]`);
       if (!el) continue;
+
+      // A note created via "Anotar sem destaque" has no UserMark at all
+      // (colorIndex/startToken/endToken all null) — see the identical branch
+      // in jwpub-chapter-view.tsx.
+      if (highlight.colorIndex === null || highlight.startToken === null || highlight.endToken === null) {
+        if (!highlight.note) continue;
+        el.style.position = "relative";
+        const marker = document.createElement("span");
+        marker.className = "jwlibrary-note-marker";
+        marker.dataset.jwlibraryNoteId = highlight.note.id;
+        Object.assign(marker.style, {
+          position: "absolute",
+          left: "-14px",
+          top: "0px",
+          width: "8px",
+          height: "8px",
+          borderRadius: "2px",
+          backgroundColor: "var(--muted-foreground)",
+          cursor: "pointer",
+        });
+        el.insertBefore(marker, el.firstChild);
+        continue;
+      }
+
       const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
       const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
       // Stamped so a note-less highlight's click handler can show the

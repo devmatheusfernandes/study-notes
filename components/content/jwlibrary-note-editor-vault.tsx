@@ -51,7 +51,7 @@ export interface PrefilledJwlibraryLocation {
   /** Set when the user selected a specific span of text (not just clicked the paragraph) — lets them also pick a highlight color for it. */
   tokenRange?: { start: number; end: number };
   /** Pre-selects a highlight color chip — set when the user tapped a color directly in the reader's selection popup instead of opening the editor first and choosing one there, or when attaching a note to a highlight that already has one (see existingUserMarkId). */
-  initialColorIndex?: number;
+  initialColorIndex?: number | null;
   /** The raw selected text, for a preview only (not persisted) — lets the user confirm what they're about to highlight before picking a color. */
   selectedText?: string;
   /** Set when adding a note to a highlight that already exists (see JwlibraryHighlightNotePanel's "Adicionar nota") — the note links to this UserMark instead of creating a new one. The color dropdown still shows (seeded from initialColorIndex above) but edits that UserMark directly instead of deferring to note creation. */

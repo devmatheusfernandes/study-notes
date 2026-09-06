@@ -29,7 +29,7 @@ interface JwlibraryHighlightNotePanelProps {
   /** The backing UserMark's id — when `note` is null and this is set, the panel shows the note-less highlight controls (recolor / add note / delete) instead of "Nota não encontrada.". */
   highlightId?: string | null;
   /** The highlight's current color, for the note-less controls below. */
-  colorIndex?: number;
+  colorIndex?: number | null;
   /** The highlighted span's own plain text — shown in place of a note when there isn't one, so the user can still see what they highlighted. */
   highlightText?: string;
   /** Opens the full editor vault to attach a new note to this highlight (see jwpub-reader.tsx/bible-reader.tsx's `existingUserMarkId` wiring). Only relevant when `note` is null. */

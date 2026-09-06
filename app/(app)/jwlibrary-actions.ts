@@ -16,6 +16,22 @@ async function requireUser() {
   return { supabase, user };
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A highlight rendered right after creation still carries its client-side
+ * optimistic id (`optimistic:<uuid>` — see jwpub-reader.tsx's
+ * handleCreateHighlight) until the create round trip resolves. Clicking it
+ * fast enough used to let an id in that shape reach here as
+ * attachToUserMarkId/usermarkId, which Postgres would reject as an invalid
+ * uuid (or worse, silently mismatch) — the client now ignores that click
+ * window too (see the chapter views' click handlers), but this is the actual
+ * boundary that must never accept anything except a real row id.
+ */
+function isRealUserMarkId(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
 const BATCH_SIZE = 200;
 // A real backup can carry thousands of highlights (one user's test file had
 // ~7000 UserMark/BlockRange rows) — inserting batches one at a time made the
@@ -497,7 +513,19 @@ export async function createJwlibraryNote(
   if (!user) return { error: "Sessão expirada." };
   if (!input.title.trim() && !input.content.trim()) return { error: "A nota está vazia." };
 
-  let userMarkId: string | null = input.attachToUserMarkId ?? null;
+  // Same resolution the import path runs (see buildPublicationIndex's own
+  // doc comment) — content created directly here used to skip this
+  // entirely, leaving resolved_publication_id/resolved_chapter_id null even
+  // when the referenced .jwpub was already sitting in this same user's
+  // library. Harmless today (every reader re-resolves live off the raw
+  // location columns instead of trusting this snapshot — see
+  // listJwlibraryContent), but worth keeping in parity with import so the
+  // stored columns mean what their name says.
+  const index = await buildPublicationIndex(supabase);
+  const resolved = index.resolve(input.location);
+
+  let userMarkId: string | null =
+    input.attachToUserMarkId && isRealUserMarkId(input.attachToUserMarkId) ? input.attachToUserMarkId : null;
   if (!userMarkId && input.highlight) {
     const { data: mark, error: markError } = await supabase
       .from("jwlibrary_usermarks")
@@ -509,6 +537,8 @@ export async function createJwlibraryNote(
         style_index: 0,
         version: 1,
         ...locationColumns(input.location),
+        resolved_publication_id: resolved.publicationId,
+        resolved_chapter_id: resolved.chapterId,
       })
       .select("id")
       .single();
@@ -541,6 +571,8 @@ export async function createJwlibraryNote(
       source_created_at: now,
       source_last_modified: now,
       ...locationColumns(input.location),
+      resolved_publication_id: resolved.publicationId,
+      resolved_chapter_id: resolved.chapterId,
     })
     .select("id")
     .single();
@@ -572,6 +604,10 @@ export async function createJwlibraryHighlight(
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
+  // See the identical comment in createJwlibraryNote — same parity fix.
+  const index = await buildPublicationIndex(supabase);
+  const resolved = index.resolve(input.location);
+
   const { data: mark, error: markError } = await supabase
     .from("jwlibrary_usermarks")
     .insert({
@@ -582,6 +618,8 @@ export async function createJwlibraryHighlight(
       style_index: 0,
       version: 1,
       ...locationColumns(input.location),
+      resolved_publication_id: resolved.publicationId,
+      resolved_chapter_id: resolved.chapterId,
     })
     .select("id")
     .single();
@@ -604,6 +642,7 @@ export async function createJwlibraryHighlight(
 export async function deleteJwlibraryHighlight(usermarkId: string): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
+  if (!isRealUserMarkId(usermarkId)) return { error: "Destaque ainda sendo criado — tente de novo em instantes." };
 
   const { error } = await supabase.from("jwlibrary_usermarks").delete().eq("id", usermarkId);
   return error ? { error: "Não foi possível excluir o destaque." } : {};
@@ -615,6 +654,7 @@ export async function updateJwlibraryHighlightColor(
 ): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
+  if (!isRealUserMarkId(usermarkId)) return { error: "Destaque ainda sendo criado — tente de novo em instantes." };
 
   const { error } = await supabase
     .from("jwlibrary_usermarks")
@@ -649,14 +689,15 @@ export async function deleteJwlibraryNote(id: string): Promise<{ error?: string 
 }
 
 export interface ParagraphHighlight {
-  /** The backing UserMark's id — always present, lets a note-less highlight still be edited/recolored/deleted. */
+  /** The backing UserMark's id when this came from one, else `note:<jwlibrary_notes.id>` for a note created via "Anotar sem destaque" (no UserMark at all) — that prefix is what tells the reader not to treat `id` as a real UserMark id (see the click handler in jwpub-chapter-view.tsx). */
   id: string;
   /** Matches a rendered chapter's `data-pid` attribute directly. */
   pid: string;
-  colorIndex: number;
-  startToken: number;
-  endToken: number;
-  /** The note attached to this highlight's UserMark, if any — shown in a side panel when the mark is clicked (see jwlibrary-highlight-note-surface.tsx). */
+  /** `null` for a highlight-less note — nothing to color, since there's no UserMark. */
+  colorIndex: number | null;
+  startToken: number | null;
+  endToken: number | null;
+  /** The note attached to this highlight's UserMark, if any — shown in a side panel when the mark is clicked (see jwlibrary-highlight-note-surface.tsx). Always set when colorIndex is null (that's the only reason a highlight-less entry exists at all). */
   note: { id: string; title: string; content: string } | null;
 }
 
@@ -668,6 +709,13 @@ export interface ParagraphHighlight {
  * comment for the same reasoning applied to note resolution). Includes each
  * highlight's attached note (if any), fetched up front so clicking a mark in
  * the reader doesn't need a second round trip.
+ *
+ * Also includes notes created via "Anotar sem destaque" (no UserMark at all,
+ * see createJwlibraryNote) as colorless entries — without this, a note
+ * anchored to a paragraph but never given a highlight color was completely
+ * invisible while reading (no mark, no margin marker), even though it's
+ * right there in the Estudo Pessoal list. The reader draws a neutral marker
+ * for these instead of a colored `<mark>` (there's no span to wrap).
  */
 export async function getChapterHighlights(
   symbol: string,
@@ -679,17 +727,48 @@ export async function getChapterHighlights(
   if (!user) return { error: "Sessão expirada." };
   if (mepsDocumentId === null) return { highlights: [] };
 
-  let query = supabase
+  let markQuery = supabase
     .from("jwlibrary_usermarks")
     .select("id, color_index")
     .eq("key_symbol", symbol)
     .eq("meps_document_id", mepsDocumentId);
-  query = mepsLanguage === null ? query.is("meps_language", null) : query.eq("meps_language", mepsLanguage);
-  query = issueTagNumber === null ? query.is("issue_tag_number", null) : query.eq("issue_tag_number", issueTagNumber);
+  markQuery =
+    mepsLanguage === null ? markQuery.is("meps_language", null) : markQuery.eq("meps_language", mepsLanguage);
+  markQuery =
+    issueTagNumber === null ? markQuery.is("issue_tag_number", null) : markQuery.eq("issue_tag_number", issueTagNumber);
 
-  const { data: usermarks, error } = await query;
-  if (error) return { error: "Não foi possível carregar as marcações." };
-  if (!usermarks || usermarks.length === 0) return { highlights: [] };
+  let looseNoteQuery = supabase
+    .from("jwlibrary_notes")
+    .select("id, block_identifier, title, content")
+    .eq("key_symbol", symbol)
+    .eq("meps_document_id", mepsDocumentId)
+    .eq("block_type", 1)
+    .is("user_mark_id", null);
+  looseNoteQuery =
+    mepsLanguage === null ? looseNoteQuery.is("meps_language", null) : looseNoteQuery.eq("meps_language", mepsLanguage);
+  looseNoteQuery =
+    issueTagNumber === null
+      ? looseNoteQuery.is("issue_tag_number", null)
+      : looseNoteQuery.eq("issue_tag_number", issueTagNumber);
+
+  const [{ data: usermarks, error }, { data: looseNotes, error: looseNotesError }] = await Promise.all([
+    markQuery,
+    looseNoteQuery,
+  ]);
+  if (error || looseNotesError) return { error: "Não foi possível carregar as marcações." };
+
+  const looseNoteHighlights: ParagraphHighlight[] = (looseNotes ?? [])
+    .filter((n) => n.block_identifier !== null)
+    .map((n) => ({
+      id: `note:${n.id}`,
+      pid: String(n.block_identifier),
+      colorIndex: null,
+      startToken: null,
+      endToken: null,
+      note: { id: n.id, title: decryptText(n.title) ?? "", content: decryptText(n.content) ?? "" },
+    }));
+
+  if (!usermarks || usermarks.length === 0) return { highlights: looseNoteHighlights };
 
   const colorByMark = new Map(usermarks.map((m) => [m.id, m.color_index as number]));
   const markIds = [...colorByMark.keys()];
@@ -713,30 +792,39 @@ export async function getChapterHighlights(
   );
 
   return {
-    highlights: (ranges ?? [])
-      .filter((r) => r.start_token !== null && r.end_token !== null)
-      .map((r) => ({
-        id: r.usermark_id as string,
-        pid: String(r.identifier),
-        colorIndex: colorByMark.get(r.usermark_id) ?? 1,
-        startToken: r.start_token as number,
-        endToken: r.end_token as number,
-        note: noteByMark.get(r.usermark_id) ?? null,
-      })),
+    highlights: [
+      ...(ranges ?? [])
+        .filter((r) => r.start_token !== null && r.end_token !== null)
+        .map((r) => ({
+          id: r.usermark_id as string,
+          pid: String(r.identifier),
+          colorIndex: colorByMark.get(r.usermark_id) ?? 1,
+          startToken: r.start_token as number,
+          endToken: r.end_token as number,
+          note: noteByMark.get(r.usermark_id) ?? null,
+        })),
+      ...looseNoteHighlights,
+    ],
   };
 }
 
 export interface BibleVerseHighlight {
-  /** The backing UserMark's id — always present, lets a note-less highlight still be edited/recolored/deleted. */
+  /** The backing UserMark's id when this came from one, else `note:<jwlibrary_notes.id>` for a note created via "Anotar sem destaque" (no UserMark at all) — see the identical convention in ParagraphHighlight. */
   id: string;
   verse: number;
-  colorIndex: number;
-  startToken: number;
-  endToken: number;
+  /** `null` for a highlight-less note — nothing to color, since there's no UserMark. */
+  colorIndex: number | null;
+  startToken: number | null;
+  endToken: number | null;
   note: { id: string; title: string; content: string } | null;
 }
 
-/** Sibling of getChapterHighlights, for Bible chapters (UserMark.BlockType = 2) instead of publication paragraphs — see components/content/bible-chapter-view.tsx. */
+/**
+ * Sibling of getChapterHighlights, for Bible chapters (UserMark.BlockType = 2)
+ * instead of publication paragraphs — see components/content/bible-chapter-view.tsx.
+ * Also includes highlight-less notes (see getChapterHighlights' identical
+ * addition) as colorless entries.
+ */
 export async function getBibleChapterHighlights(
   bookNumber: number,
   chapterNumber: number
@@ -744,14 +832,33 @@ export async function getBibleChapterHighlights(
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data: usermarks, error } = await supabase
-    .from("jwlibrary_usermarks")
-    .select("id, color_index")
-    .eq("book_number", bookNumber)
-    .eq("chapter_number", chapterNumber);
+  const [
+    { data: usermarks, error },
+    { data: looseNotes, error: looseNotesError },
+  ] = await Promise.all([
+    supabase.from("jwlibrary_usermarks").select("id, color_index").eq("book_number", bookNumber).eq("chapter_number", chapterNumber),
+    supabase
+      .from("jwlibrary_notes")
+      .select("id, block_identifier, title, content")
+      .eq("book_number", bookNumber)
+      .eq("chapter_number", chapterNumber)
+      .eq("block_type", 2)
+      .is("user_mark_id", null),
+  ]);
+  if (error || looseNotesError) return { error: "Não foi possível carregar as marcações." };
 
-  if (error) return { error: "Não foi possível carregar as marcações." };
-  if (!usermarks || usermarks.length === 0) return { highlights: [] };
+  const looseNoteHighlights: BibleVerseHighlight[] = (looseNotes ?? [])
+    .filter((n) => n.block_identifier !== null)
+    .map((n) => ({
+      id: `note:${n.id}`,
+      verse: Number(n.block_identifier),
+      colorIndex: null,
+      startToken: null,
+      endToken: null,
+      note: { id: n.id, title: decryptText(n.title) ?? "", content: decryptText(n.content) ?? "" },
+    }));
+
+  if (!usermarks || usermarks.length === 0) return { highlights: looseNoteHighlights };
 
   const colorByMark = new Map(usermarks.map((m) => [m.id, m.color_index as number]));
   const markIds = [...colorByMark.keys()];
@@ -775,16 +882,19 @@ export async function getBibleChapterHighlights(
   );
 
   return {
-    highlights: (ranges ?? [])
-      .filter((r) => r.start_token !== null && r.end_token !== null)
-      .map((r) => ({
-        id: r.usermark_id as string,
-        verse: Number(r.identifier),
-        colorIndex: colorByMark.get(r.usermark_id) ?? 1,
-        startToken: r.start_token as number,
-        endToken: r.end_token as number,
-        note: noteByMark.get(r.usermark_id) ?? null,
-      })),
+    highlights: [
+      ...(ranges ?? [])
+        .filter((r) => r.start_token !== null && r.end_token !== null)
+        .map((r) => ({
+          id: r.usermark_id as string,
+          verse: Number(r.identifier),
+          colorIndex: colorByMark.get(r.usermark_id) ?? 1,
+          startToken: r.start_token as number,
+          endToken: r.end_token as number,
+          note: noteByMark.get(r.usermark_id) ?? null,
+        })),
+      ...looseNoteHighlights,
+    ],
   };
 }
 
