@@ -260,8 +260,11 @@ export function VectorQueueCard() {
         </div>
       )}
 
-      {/* Item List Container */}
-      <div className="flex flex-col gap-2.5 pt-1">
+      {/* Item List Container — its own scroll area, capped at a fixed height,
+          so a big queue (dozens/hundreds of items, easily reached once real
+          notes + a jwlibrary/jwpub backup queue up) scrolls in place instead
+          of pushing the rest of the Settings page down with it. */}
+      <div className="flex max-h-[420px] flex-col gap-2.5 overflow-y-auto overscroll-contain pt-1 pr-1">
         {isLoading ? (
           Array.from({ length: 2 }).map((_, i) => (
             <div
