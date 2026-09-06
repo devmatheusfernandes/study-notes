@@ -54,6 +54,15 @@ export const viewport: Viewport = {
   // required for the env(safe-area-inset-*) paddings already used across the
   // app (sidebar, assistant dock, headers) to resolve to anything but 0.
   viewportFit: "cover",
+  // Pinch-to-zoom was left on by default (Next doesn't set maximumScale/
+  // userScalable unless asked), which read as a browser tab rather than the
+  // native-feeling app this is meant to be — every screen here is already
+  // built to fit/scroll on its own, so there's nothing users need pinch-zoom
+  // *for*. Android Chrome honors this; iOS Safari has ignored it since iOS
+  // 10 for accessibility reasons, so this is a one-way improvement there,
+  // never a regression.
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
