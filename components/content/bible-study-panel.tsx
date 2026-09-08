@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { Gem } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
@@ -13,7 +14,16 @@ import type {
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleReferencesList, CROSS_REFERENCE_SOURCE_LABELS } from "./bible-references-panel";
 
-export type BibleStudyTab = "referencias" | "notas" | "rodape";
+export type BibleStudyTab = "referencias" | "notas" | "rodape" | "pessoal";
+
+/** A personal annotation (typed here or imported from a .jwlibrary backup), as opposed to `BibleStudyNote`'s official JW.org commentary. */
+export interface BiblePersonalNote {
+  id: string;
+  title: string;
+  content: string;
+  userMarkId: string | null;
+  colorIndex: number | null;
+}
 
 /** Whatever verse each item belongs to — needed for the whole-chapter view's headings. */
 type WithVerse<T> = T & { verse: number | null };
@@ -49,6 +59,10 @@ interface BibleStudyPanelProps {
   onOpenBibleRef: (bookOrder: number, chapter: number, verse: number) => void;
   /** A `data-bible-appendix-ref` link inside a study note was clicked — 422 of them exist. */
   onOpenAppendix: (mepsDocumentId: number) => void;
+
+  personalNotes: WithVerse<BiblePersonalNote>[];
+  /** Opens the tapped personal note in its full editor/panel (same one a click on the highlighted text itself opens). */
+  onOpenPersonalNote: (note: BiblePersonalNote) => void;
 }
 
 /**
@@ -132,6 +146,8 @@ export function BibleStudyPanel({
   studyLoading,
   onOpenBibleRef,
   onOpenAppendix,
+  personalNotes,
+  onOpenPersonalNote,
 }: BibleStudyPanelProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -175,6 +191,7 @@ export function BibleStudyPanel({
   const refGroups = useMemo(() => groupByVerse(refs), [refs]);
   const footnoteGroups = useMemo(() => groupByVerse(footnotes), [footnotes]);
   const studyNoteGroups = useMemo(() => groupByVerse(studyNotes), [studyNotes]);
+  const personalNoteGroups = useMemo(() => groupByVerse(personalNotes), [personalNotes]);
 
   // A superscription has no verse number, so its heading is a label, not a
   // filter target — there is nothing to narrow to.
@@ -214,6 +231,13 @@ export function BibleStudyPanel({
               Rodapé
               {footnotes.length > 0 && (
                 <span className="ml-1 font-mono text-[10px] text-accent">{footnotes.length}</span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="pessoal">
+              <Gem className="size-3" />
+              Pessoal
+              {personalNotes.length > 0 && (
+                <span className="ml-1 font-mono text-[10px] text-accent">{personalNotes.length}</span>
               )}
             </TabsTrigger>
           </TabsList>
@@ -319,6 +343,41 @@ export function BibleStudyPanel({
                         </li>
                       ))}
                     </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="pessoal">
+            {personalNotes.length === 0 ? (
+              <EmptyHint>
+                {whole
+                  ? "Este capítulo não tem notas pessoais."
+                  : "Este versículo não tem notas pessoais."}
+              </EmptyHint>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {personalNoteGroups.map((group) => (
+                  <div key={group.verse ?? "sup"} className="flex flex-col gap-1.5">
+                    {whole && <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />}
+                    {group.items.map((note) => (
+                      <button
+                        key={note.id}
+                        type="button"
+                        onClick={() => onOpenPersonalNote(note)}
+                        className="flex flex-col gap-1 rounded-2xl bg-secondary px-4 py-3 text-left transition-colors hover:bg-surface"
+                      >
+                        {note.title && (
+                          <span className="text-[13px] font-medium text-foreground/90">{note.title}</span>
+                        )}
+                        {note.content && (
+                          <span className="line-clamp-3 whitespace-pre-line text-[13px] leading-relaxed text-muted-foreground">
+                            {note.content}
+                          </span>
+                        )}
+                      </button>
+                    ))}
                   </div>
                 ))}
               </div>

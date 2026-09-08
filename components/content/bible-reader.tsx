@@ -371,6 +371,25 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     [studyNotes, selectedVerse]
   );
 
+  // The user's own annotations (typed directly here, or imported from a
+  // .jwlibrary backup) for this chapter — `highlights` already carries them
+  // (see getBibleChapterHighlights), so this is just the subset that has a
+  // note attached, reshaped for the study panel's "Pessoal" tab instead of
+  // needing a whole separate sidebar just to list them.
+  const panelPersonalNotes = useMemo(() => {
+    const withNotes = highlights
+      .filter((h): h is typeof h & { note: NonNullable<(typeof h)["note"]> } => h.note !== null)
+      .map((h) => ({
+        id: h.note.id,
+        title: h.note.title,
+        content: h.note.content,
+        userMarkId: h.colorIndex !== null ? h.id : null,
+        colorIndex: h.colorIndex,
+        verse: h.verse,
+      }));
+    return selectedVerse === null ? withNotes : withNotes.filter((n) => n.verse === selectedVerse);
+  }, [highlights, selectedVerse]);
+
   const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
   const [highlightNote, setHighlightNote] = useState<EditableJwlibraryNote | null>(null);
   const [highlightEditMode, setHighlightEditMode] = useState(false);
@@ -386,7 +405,14 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         location: {
           bookNumber: bookOrder,
           chapterNumber: chapter,
-          keySymbol: null,
+          // This reader always presents the Study Bible experience (the
+          // permanent "Estudo" panel with cross-references/notes/footnotes,
+          // never a bare plain-NWT view) — so a note/highlight made here
+          // should carry the same KeySymbol the real app writes for one made
+          // in its own Study Bible screen ("nwtsty"), not a bare "Nota
+          // geral" (which null previously produced unconditionally, mislabeling
+          // every Bible note/highlight made in this app).
+          keySymbol: "nwtsty",
           mepsLanguage: null,
           issueTagNumber: null,
           mepsDocumentId: null,
@@ -418,7 +444,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         location: {
           bookNumber: bookOrder,
           chapterNumber: chapter,
-          keySymbol: null,
+          keySymbol: "nwtsty", // see the comment on the identical field above
           mepsLanguage: null,
           issueTagNumber: null,
           mepsDocumentId: null,
@@ -453,7 +479,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       location: {
         bookNumber: bookOrder,
         chapterNumber: chapter,
-        keySymbol: null,
+        keySymbol: "nwtsty", // see the comment on the identical field above
         mepsLanguage: null,
         issueTagNumber: null,
         mepsDocumentId: null,
@@ -585,6 +611,8 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         studyLoading={isLoadingStudy}
         onOpenBibleRef={enterReading}
         onOpenAppendix={setOpenAppendixId}
+        personalNotes={panelPersonalNotes}
+        onOpenPersonalNote={setHighlightNote}
       />
 
       <BibleAppendixSurface
