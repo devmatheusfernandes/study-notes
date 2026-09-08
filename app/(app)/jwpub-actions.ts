@@ -220,6 +220,44 @@ export async function getChapter(
   return { html: data.content_html ?? "" };
 }
 
+/** Escapes Postgres LIKE/ILIKE metacharacters so a literal "%" or "_" typed by the user doesn't act as a wildcard. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * Note ids whose `.jwpub` publication contains `query` in a chapter or
+ * footnote — the notes-page search bar only ever sees `notes.title`/`body`
+ * (see lib/search.ts), and for a jwpub-type note `body` is just an encrypted
+ * file-size string, never the real publication text (that lives here,
+ * unencrypted per the migration's own note). This is the one extra
+ * server round-trip that closes that gap: called debounced from
+ * notes-collection.tsx and merged into the client-side title/body match.
+ */
+export async function searchJwpubContent(query: string): Promise<{ noteIds: string[] }> {
+  const { supabase, user } = await requireUser();
+  const trimmed = query.trim();
+  if (!user || trimmed.length < 2) return { noteIds: [] };
+
+  const pattern = `%${escapeLikePattern(trimmed)}%`;
+  const [{ data: chapterRows }, { data: footnoteRows }] = await Promise.all([
+    supabase.from("jwpub_chapters").select("publication_id").ilike("content_html", pattern),
+    supabase.from("jwpub_footnotes").select("publication_id").ilike("content_html", pattern),
+  ]);
+
+  const publicationIds = [
+    ...new Set([...(chapterRows ?? []), ...(footnoteRows ?? [])].map((row) => row.publication_id)),
+  ];
+  if (publicationIds.length === 0) return { noteIds: [] };
+
+  const { data: publications } = await supabase
+    .from("jwpub_publications")
+    .select("note_id")
+    .in("id", publicationIds);
+
+  return { noteIds: [...new Set((publications ?? []).map((p) => p.note_id))] };
+}
+
 export interface ResolvedJwpubReference {
   mepsDocumentId: number;
   noteId: string;

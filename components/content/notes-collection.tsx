@@ -23,6 +23,7 @@ import { TagPickerVault } from "./tag-picker-vault";
 import { FolderPickerVault } from "./folder-picker-vault";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { getFileUrl } from "@/app/(app)/files-actions";
+import { searchJwpubContent } from "@/app/(app)/jwpub-actions";
 import { NOTE_DRAG_MIME, hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
 
 interface NotesCollectionProps {
@@ -143,13 +144,46 @@ export function NotesCollection({
   const query = useSearchStore((s) => s.query);
   const selectedTagIds = useSearchStore((s) => s.selectedTagIds);
   const isSearching = query.trim().length > 0;
+
+  // The notes-page search bar otherwise only ever sees `note.title`/`body`
+  // (matchesSearch below) — for a .jwpub note `body` is just an encrypted
+  // file-size string, never the real publication text, so a word that only
+  // appears inside a publication's chapters/footnotes would silently never
+  // match. This debounced, best-effort lookup (see searchJwpubContent) fills
+  // that gap; a stale/failed/offline response just leaves it empty rather
+  // than surfacing an error, since the title/body match above still works.
+  const [jwpubMatchIds, setJwpubMatchIds] = useState<Set<string>>(new Set());
+  const jwpubSearchSeq = useRef(0);
+  useEffect(() => {
+    const trimmed = query.trim();
+    const seq = ++jwpubSearchSeq.current;
+    // Short queries resolve on the next tick rather than synchronously in the
+    // effect body (React flags setState-during-effect as a footgun even when
+    // the value can't actually cascade here) — the delay is imperceptible.
+    const timeout = setTimeout(() => {
+      if (jwpubSearchSeq.current !== seq) return;
+      if (trimmed.length < 2) {
+        setJwpubMatchIds(new Set());
+        return;
+      }
+      searchJwpubContent(trimmed)
+        .then(({ noteIds }) => {
+          if (jwpubSearchSeq.current === seq) setJwpubMatchIds(new Set(noteIds));
+        })
+        .catch(() => {});
+    }, trimmed.length < 2 ? 0 : 300);
+    return () => clearTimeout(timeout);
+  }, [query]);
+
+  // A search should find a note no matter which folder it's tucked into —
+  // scoping to `activeFolder` only makes sense while just browsing.
   const { pinned: allPinned, others: allOthers } = selectByStatus(
     notes,
     status,
-    showFolders ? { folderId: activeFolder } : undefined
+    showFolders && !isSearching ? { folderId: activeFolder } : undefined
   );
   const matchesNote = (note: Note) =>
-    matchesSearch(query, note.title, note.body) &&
+    (matchesSearch(query, note.title, note.body) || jwpubMatchIds.has(note.id)) &&
     (selectedTagIds.length === 0 || selectedTagIds.some((id) => note.tagIds.includes(id)));
   const pinned = allPinned.filter(matchesNote);
   const others = allOthers.filter(matchesNote);
