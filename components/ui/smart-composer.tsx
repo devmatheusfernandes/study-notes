@@ -688,7 +688,7 @@ export function SmartComposer(props: SmartComposerProps) {
               placeholder ??
               (props.variant === "chat" && props.disabled
                 ? "Gerando resposta…"
-                : "Pergunte às suas notas ou vídeos…")
+                : "Pergunte aqui…")
             }
             disabled={props.variant === "chat" ? props.disabled : false}
             rows={1}
@@ -718,7 +718,7 @@ export function SmartComposer(props: SmartComposerProps) {
             style={gestureEnabled ? { userSelect: "none", WebkitUserSelect: "none" } : undefined}
             placeholder={
               placeholder ??
-              (isPanel ? "Continue a conversa…" : "Pergunte às suas notas ou dê um comando…")
+              (isPanel ? "Continue a conversa…" : "Pergunte aqui…")
             }
             aria-label="Perguntar ao assistente"
             className="min-w-0 flex-1 bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-muted-foreground/60"

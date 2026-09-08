@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { generateSingleEmbedding } from "@/lib/vector/openai";
 import {
+  buildRagSystemPrompt,
   fetchExactMetadataMatches,
   formatAllowedSourcesLabel,
   rerankMatches,
@@ -196,56 +197,11 @@ export async function POST(
         }
         const sources = Array.from(sourcesMap.values());
 
-        // 4. Build system prompt — RAG-only, no hallucination
-        let systemPrompt: string;
+        // 4. Build system prompt — shared with assistant/stream/route.ts so
+        // the "nothing found" / "list of named matches" / "answer from
+        // content" styles stay in sync.
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
-
-        if (matchRows.length > 0) {
-          const contextText = matchRows
-            .map((m, idx) => {
-              const label = m.metadata?.chapterTitle
-                ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
-                : m.metadata?.title || "Conteúdo";
-              return `[Fonte ${idx + 1}: ${label}]\n${m.content}`;
-            })
-            .join("\n\n---\n\n");
-
-          // A similarity this high only happens for a forced exact match
-          // (fetchExactMetadataMatches' year/número/category hits start at
-          // 0.99, and the wantsLatest boost pushes the winner past that) —
-          // i.e. cases where the retrieval layer has *already* confirmed
-          // relevance, not just a semantic guess. Telling the model it's
-          // still free to hedge with "não foi encontrado" in that situation
-          // was actively counterproductive: tested empirically against a
-          // real "resuma a última adoração matinal" query, the cautious
-          // wording below made gpt-4o-mini decline in roughly half of
-          // repeated identical calls at the app's own temperature (0.3),
-          // even with the correct, clearly-labeled video transcript sitting
-          // right there in context — a more assertive prompt for just this
-          // case (no escape hatch offered) answered correctly 5/5 times.
-          // The ordinary threshold-only case below keeps the cautious
-          // wording, since a merely-above-threshold semantic match can
-          // legitimately be a poor fit worth declining.
-          const hasHighConfidenceMatch = matchRows.some((m) => m.similarity >= 0.95);
-
-          systemPrompt = hasHighConfidenceMatch
-            ? `Você é o assistente inteligente do Study Notes. Você recebeu abaixo o trecho de contexto exato que responde à pergunta do usuário — ` +
-              `o sistema de busca já confirmou que esse é o conteúdo certo, incluindo quando um trecho começa com uma anotação entre colchetes ` +
-              `(como "[Este é o vídeo mais recente sobre o tema pedido, publicado em ...]"): isso é um FATO já verificado, não uma suposição sua. ` +
-              `Responda diretamente a pergunta do usuário usando esse conteúdo, em português, de forma clara e concisa, usando Markdown quando apropriado. ` +
-              `Não invente detalhes que não estejam no trecho, mas TAMBÉM não diga que a informação não foi encontrada — ela foi.\n\n` +
-              `CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`
-            : `Você é o assistente inteligente do Study Notes. Responda APENAS com base nos trechos de contexto fornecidos abaixo, ` +
-              `extraídos de ${sourcesLabel}. NÃO invente informações que não estejam nos trechos. ` +
-              `Se os trechos não contiverem a resposta exata para a pergunta, diga especificamente que a informação não foi encontrada em ${sourcesLabel}. ` +
-              `Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado.\n\n` +
-              `CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`;
-        } else {
-          systemPrompt =
-            `Você é o assistente inteligente do Study Notes. O usuário pesquisou especificamente em ${sourcesLabel}, ` +
-            `mas NÃO foi encontrado nenhum trecho relevante para a pergunta dele. ` +
-            `Responda educadamente informando especificamente que não encontrou informações relevantes em ${sourcesLabel}.`;
-        }
+        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel);
 
         // 5. Build messages with history
         const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { generateSingleEmbedding } from "@/lib/vector/openai";
 import {
+  buildRagSystemPrompt,
   fetchExactMetadataMatches,
   formatAllowedSourcesLabel,
   rerankMatches,
@@ -167,45 +168,11 @@ export async function POST(request: Request) {
         }
         const sources = Array.from(sourcesMap.values());
 
-        // 3. Build context for OpenAI Chat Completion
-        let contextText = "";
-        if (matchRows.length > 0) {
-          contextText = matchRows
-            .map((m, idx) => {
-              const label = m.metadata?.chapterTitle
-                ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
-                : m.metadata?.title || "Nota";
-              return `[Fonte ${idx + 1}: ${label}]\n${m.content}`;
-            })
-            .join("\n\n---\n\n");
-        }
-
+        // 3. Build system prompt for OpenAI Chat Completion — shared with
+        // chats/[id]/stream/route.ts so the "nothing found" / "list of
+        // named matches" / "answer from content" styles stay in sync.
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
-
-        // A similarity this high only happens for a forced exact match
-        // (fetchExactMetadataMatches' year/número/category hits start at
-        // 0.99, and the wantsLatest boost pushes the winner past that) — the
-        // retrieval layer has already confirmed relevance, not just guessed
-        // semantically. Tested empirically against a real "resuma a última
-        // adoração matinal" query: a plainer "use os trechos abaixo" wording
-        // still let gpt-4o-mini decline in some repeated identical calls at
-        // this app's own temperature (0.3) even with the right, clearly
-        // labeled content sitting in context; being explicit that a
-        // bracketed annotation is an already-verified fact (not the model's
-        // own guess) and telling it not to hedge fixed that in every trial.
-        const hasHighConfidenceMatch = matchRows.some((m) => m.similarity >= 0.95);
-
-        const systemPrompt =
-          contextText && hasHighConfidenceMatch
-            ? `Você é o assistente inteligente do Study Notes. Você recebeu abaixo o trecho de contexto exato que responde à pergunta do usuário — ` +
-              `o sistema de busca já confirmou que esse é o conteúdo certo, incluindo quando um trecho começa com uma anotação entre colchetes ` +
-              `(como "[Este é o vídeo mais recente sobre o tema pedido, publicado em ...]"): isso é um FATO já verificado, não uma suposição sua. ` +
-              `Responda diretamente a pergunta do usuário usando esse conteúdo, em português, de forma clara e concisa, usando Markdown quando apropriado. ` +
-              `Não invente detalhes que não estejam no trecho, mas TAMBÉM não diga que a informação não foi encontrada — ela foi.\n\n${contextText}`
-            : "Você é o assistente inteligente do Study Notes. Responda à pergunta do usuário de forma clara, prestativa e concisa em português. " +
-              (contextText
-                ? `Use exclusivamente os trechos de contexto fornecidos abaixo, extraídos de ${sourcesLabel}, para responder com precisão:\n\n${contextText}`
-                : `Você pesquisou especificamente em ${sourcesLabel}, mas nenhum trecho relevante foi encontrado para a pergunta dele. Responda educadamente informando especificamente que não encontrou informações em ${sourcesLabel}.`);
+        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel);
 
         // 4. Stream from OpenAI
         const openai = new OpenAI({ apiKey });

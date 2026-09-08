@@ -24,7 +24,7 @@ const STORAGE_KEY = "study-notes-source-filters";
 export function ChatComposer({
   onSend,
   disabled = false,
-  placeholder = "Pergunte às suas notas ou solicite um estudo…",
+  placeholder = "Pergunte aqui…",
 }: ChatComposerProps) {
   const [value, setValue] = useState("");
   const [showFilters, setShowFilters] = useState(false);
