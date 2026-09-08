@@ -128,7 +128,7 @@ export function FolderCard({
           className="min-w-0 flex-1 rounded-lg bg-background px-2 py-1 font-heading text-[15px] outline-none ring-1 ring-ring"
         />
       ) : (
-        <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col text-left">
+        <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col text-left cursor-pointer">
           <span className="truncate font-heading text-[15px]">{name}</span>
           <span className="text-[11.5px] text-muted-foreground">
             {isDragOver ? "Soltar aqui" : `${itemCount} ${itemCount === 1 ? "item" : "itens"}`}

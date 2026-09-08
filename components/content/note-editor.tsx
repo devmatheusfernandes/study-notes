@@ -78,6 +78,14 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
   const [createdId, setCreatedId] = useState<string | null>(noteId ?? null);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
+  // Baseline to diff autosaves against, for an EXISTING note only — `null`
+  // for a brand-new one, so its very first save still goes through
+  // unconditionally (see the autosave effect below) whether or not the user
+  // has typed anything beyond an initial `?q=` draft.
+  const lastSaved = useRef<{ title: string; body: string } | null>(
+    noteId ? { title: effectiveTitle, body: effectiveBody } : null
+  );
+
   // The user's .jwpub library, for in-note references: it decides whether a
   // typed "(th 2)" is a real reference and it populates the "/" menu. Fetched
   // once here rather than per keystroke — a note is edited far more often
@@ -95,12 +103,20 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
     };
   }, []);
 
-  // Debounced autosave.
+  // Debounced autosave. Guarded against re-saving content that's identical
+  // to what was already loaded/persisted — merely opening an existing note
+  // was re-triggering this (once `hydrated` flips true, `title`/`body`
+  // change as dependencies even though nothing in them actually changed),
+  // which through updateNoteRow unconditionally re-queues the note for
+  // vectorization (a real OpenAI embedding call) on every open, not just
+  // every real edit.
   useEffect(() => {
     if (!hydrated) return;
     if (!title.trim() && !body.trim()) return;
+    if (lastSaved.current && title === lastSaved.current.title && body === lastSaved.current.body) return;
 
     const timer = setTimeout(() => {
+      lastSaved.current = { title, body };
       if (createdId) {
         updateNote(createdId, { title: title.trim() || "Nova nota", body });
       } else {
