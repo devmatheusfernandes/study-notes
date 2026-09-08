@@ -361,6 +361,18 @@ const TITLE_SEARCH_STOPWORDS = new Set([
   "ultimo", "ultima", "penultimo", "penultima", "antepenultimo", "antepenultima",
   "primeiro", "primeira", "segundo", "segunda", "terceiro", "terceira",
   "recente", "recentemente", "novo", "nova", "antigo", "antiga", "velho", "velha",
+  // Common request/wish verbs -- "quero vídeos com X" would otherwise force
+  // "quero" itself into the required-in-title set below, and no real title
+  // contains it, so the whole AND-match would silently find nothing despite
+  // the actual name ("X") being right there. A hand-kept list is inherently
+  // incomplete, but covers the overwhelmingly common ways this app's own
+  // Portuguese-speaking users phrase "find me a video about X".
+  "quero", "queres", "quer", "queremos", "querem", "queria", "queriam",
+  "gostaria", "gostava", "gosto", "gostei", "preciso", "precisa", "precisamos",
+  "procuro", "busco", "busca", "ache", "encontre", "consiga", "consigo",
+  "consegue", "poderia", "pode", "podem", "deseja", "desejo", "ver", "vejo",
+  "veja", "assistir", "assista", "curtir", "curta", "manda", "mande", "traga",
+  "traz", "exiba", "apresente", "aqui", "ali", "algo", "coisa", "coisas",
 ]);
 
 /**
@@ -410,33 +422,43 @@ export async function fetchExactMetadataMatches(
   const results: MatchResult[] = [];
 
   if (allowedTypes.includes("video")) {
-    let videoQuery = supabase
-      .from("global_videos")
-      .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url");
+    function baseVideoQuery() {
+      let q = supabase
+        .from("global_videos")
+        .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url");
+      if (categoryKey) q = q.eq("category_key", categoryKey);
+      if (isBoletimSearch) q = q.ilike("title", "%Boletim%");
+      if (targetYear !== null) q = q.ilike("title", `%${targetYear}%`);
+      return q;
+    }
 
-    if (categoryKey) {
-      videoQuery = videoQuery.eq("category_key", categoryKey);
-    }
-    if (isBoletimSearch) {
-      videoQuery = videoQuery.ilike("title", "%Boletim%");
-    }
-    if (targetYear !== null) {
-      videoQuery = videoQuery.ilike("title", `%${targetYear}%`);
-    }
     // Every significant word must appear in the title -- e.g. "mark" AND
     // "noumair" -- rather than any one of them, so a query naming a specific
     // video doesn't pull in every other video that happens to share just one
     // of its words. Chaining .ilike() on the same column multiple times is
     // PostgREST's documented way to AND several conditions together.
-    for (const word of titleKeywords) {
-      videoQuery = videoQuery.ilike("title", `%${escapeLikePattern(word)}%`);
-    }
+    //
+    // Without the trailing `.order().limit(30)`, an unordered slice risks
+    // missing the actual most recent video entirely on a category/year match
+    // with hundreds of rows — which the ordinal rerank step below depends on
+    // being present.
+    let videoQuery = baseVideoQuery();
+    for (const word of titleKeywords) videoQuery = videoQuery.ilike("title", `%${escapeLikePattern(word)}%`);
+    let { data: vids } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
 
-    // Without this, `.limit(30)` takes whatever arbitrary 30 rows Postgres
-    // happens to return first — a category can have hundreds of videos, so
-    // an unordered slice risks missing the actual most recent one entirely,
-    // which the ordinal rerank step below depends on being present.
-    const { data: vids } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
+    // The stopword list above is inherently incomplete — a filler word that
+    // slips through (an unanticipated verb, a name that also happens to be a
+    // common noun, ...) would otherwise make the strict AND above silently
+    // return nothing even though the video is right there. Retry once with
+    // just the two longest keywords, on the theory that the actual
+    // identifying words (a name, a distinctive term) are rarely the shortest
+    // ones in the sentence.
+    if ((!vids || vids.length === 0) && titleKeywords.length >= 3) {
+      const longestTwo = [...titleKeywords].sort((a, b) => b.length - a.length).slice(0, 2);
+      let retryQuery = baseVideoQuery();
+      for (const word of longestTwo) retryQuery = retryQuery.ilike("title", `%${escapeLikePattern(word)}%`);
+      ({ data: vids } = await retryQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30));
+    }
 
     if (vids && vids.length > 0) {
       for (const v of vids) {

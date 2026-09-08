@@ -128,7 +128,28 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
   const highlightApplied = useRef(false);
   useEffect(() => {
     if (!highlight || highlightApplied.current || !body) return;
-    if (editorRef.current?.scrollToText(highlight)) highlightApplied.current = true;
+
+    // `body` being non-empty doesn't guarantee the Tiptap editor itself has
+    // finished mounting yet — RichTextEditor's own `useEditor` returns null
+    // for a render or two (`immediatelyRender: false`), and this effect only
+    // re-fires when `highlight`/`body` change, neither of which happens again
+    // once the note is loaded. So poll briefly instead of trying once.
+    const target = highlight;
+    let cancelled = false;
+    let attempts = 0;
+    function attempt() {
+      if (cancelled) return;
+      if (editorRef.current?.scrollToText(target)) {
+        highlightApplied.current = true;
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) setTimeout(attempt, 150);
+    }
+    attempt();
+    return () => {
+      cancelled = true;
+    };
   }, [highlight, body]);
 
   const current = createdId ? notes.find((n) => n.id === createdId) : undefined;

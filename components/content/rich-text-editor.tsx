@@ -374,7 +374,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       });
       if (!range) return false;
 
-      editor.chain().setTextSelection(range).scrollIntoView().run();
+      // `focus()` after the selection, not before — a ProseMirror selection
+      // set on an unfocused editor doesn't get the browser's native
+      // selection-highlight rendering, so without this the jump would be
+      // silent (right position, nothing visibly marked).
+      editor.chain().setTextSelection(range).focus().scrollIntoView().run();
       return true;
     },
   }));
