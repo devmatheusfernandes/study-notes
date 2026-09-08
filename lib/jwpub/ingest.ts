@@ -52,7 +52,7 @@ export async function ingestJwpub(
       onProgress?.(total ? `${stage} (${current}/${total})` : stage);
     });
 
-    const { publicationId, error } = await savePublication({
+    const { publicationId, title: savedTitle, error } = await savePublication({
       noteId,
       symbol: stripYearSuffix(parsed.symbol, parsed.year),
       title: parsed.title,
@@ -102,7 +102,13 @@ export async function ingestJwpub(
       }
     }
 
-    return { ok: true, title: parsed.title.trim() !== "" ? parsed.title : undefined };
+    // `savedTitle` is savePublication's own return -- it has already folded
+    // the issue's month/year into the raw `Publication.Title` (see
+    // withIssuePeriod in jwpub-actions.ts), which every monthly issue of the
+    // same periodical otherwise shares verbatim. Falling back to the raw
+    // title only if that write somehow didn't happen.
+    const finalTitle = savedTitle ?? parsed.title;
+    return { ok: true, title: finalTitle.trim() !== "" ? finalTitle : undefined };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido.";
     await markPublicationFailed(noteId).catch(() => {});

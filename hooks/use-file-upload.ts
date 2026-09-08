@@ -3,13 +3,75 @@
 import { useState } from "react";
 import { notify } from "@/components/ui/toaster";
 import { useNotesStore } from "@/lib/store/notes-store";
-import { uploadFiles, type UploadedFile } from "@/app/(app)/files-actions";
+import { requestFileUploadSlots, finalizeFileUpload, type UploadedFile } from "@/app/(app)/files-actions";
+import { createClient } from "@/lib/supabase/client";
+import { ALLOWED_EXTENSIONS, FILES_BUCKET } from "@/lib/storage-config";
 import { ingestJwpubWithFeedback } from "@/lib/jwpub/ingest";
 import {
   isNoteImportFile,
   parseFileToNotes,
   type DiscoveredFile,
 } from "@/lib/import-notes";
+
+interface UploadBatchResult {
+  files: UploadedFile[];
+  error?: string;
+}
+
+/**
+ * Uploads straight from the browser to Storage instead of through a Server
+ * Action — a Server Action's body goes through a Vercel serverless
+ * function, which enforces its own request-size ceiling (well under the
+ * 60 MB this app means to allow for a `.jwpub`) that `next.config.ts`'s
+ * `bodySizeLimit` has no power over. `requestFileUploadSlots` does every
+ * validation (extension, size, rate limit) up front and hands back one
+ * signed upload URL per file; `uploadToSignedUrl` PUTs directly to Storage;
+ * `finalizeFileUpload` re-checks the object's actual landed size and then
+ * creates its note row. Best-effort, like the old single call: keeps going
+ * after one file fails so the rest of the batch still lands, and reports
+ * the first failure's message.
+ */
+async function uploadFilesDirect(files: File[], folderId?: string): Promise<UploadBatchResult> {
+  const { slots, error: slotError } = await requestFileUploadSlots(
+    files.map((f) => ({ name: f.name, size: f.size }))
+  );
+  if (slotError) return { files: [], error: slotError };
+
+  const supabase = createClient();
+  const uploaded: UploadedFile[] = [];
+  let firstError: string | undefined;
+
+  for (const file of files) {
+    const slot = slots.find((s) => s.fileName === file.name);
+    if (!slot) continue; // requestFileUploadSlots already rejected the whole batch above if any file was invalid
+
+    // Force the content-type from the extension rather than trusting the
+    // File object's own (browser-guessed, possibly absent) `.type` — same
+    // rule the old server-side upload enforced, see storage-config.ts.
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const { error: putError } = await supabase.storage
+      .from(FILES_BUCKET)
+      .uploadToSignedUrl(slot.storagePath, slot.token, file, { contentType: ALLOWED_EXTENSIONS[ext] });
+    if (putError) {
+      firstError ??= `Falha ao enviar "${file.name}".`;
+      continue;
+    }
+
+    const { file: uploadedFile, error: finalizeError } = await finalizeFileUpload(
+      slot.storagePath,
+      file.name,
+      folderId
+    );
+    if (finalizeError || !uploadedFile) {
+      firstError ??= finalizeError ?? `Falha ao registrar "${file.name}".`;
+      continue;
+    }
+
+    uploaded.push(uploadedFile);
+  }
+
+  return { files: uploaded, error: firstError };
+}
 
 /**
  * Matches each just-uploaded `.jwpub` back to its new note row (by filename,
@@ -208,10 +270,7 @@ export function useFileUpload() {
           simulateUploadProgress(tempIdByFile.get(file)!, file.size, setUploadProgress)
         );
 
-        const formData = new FormData();
-        files.forEach((file) => formData.append("files", file));
-
-        const result = await uploadFiles(formData, folderId);
+        const result = await uploadFilesDirect(files, folderId);
         stopProgress.forEach((stop) => stop());
 
         const resolved: { tempId: string; uploaded: UploadedFile; stillProcessing: boolean }[] = [];

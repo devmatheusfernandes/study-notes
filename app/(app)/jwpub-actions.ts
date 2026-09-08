@@ -47,10 +47,48 @@ export interface SavePublicationInput {
   chapters: { documentId: number; mepsDocumentId: number | null; position: number; title: string }[];
 }
 
+const MONTH_NAMES_PT = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+];
+
+/**
+ * `Publication.Title` inside a .jwpub is the SERIES name ("A Sentinela
+ * Anunciando o Reino de Jeová (Estudo)"), the same for every single monthly
+ * issue — every Watchtower a user uploads ends up with an identical title,
+ * with no way to tell November's from December's apart in the notes list.
+ * `IssueTagNumber` is what actually varies per issue (it has to: it's part of
+ * the .jwpub decryption key derivation, see lib/jwpub/crypto.ts, so two
+ * different months' issues can't share one), formatted YYYYMM for a monthly
+ * periodical or YYYYMMDD for a dated one (e.g. the midweek Meeting
+ * Workbook) — either way the first 6 digits are year+month, which is enough
+ * to build a real, distinguishing label without needing to know which of
+ * the two shapes a given publication uses.
+ */
+function formatIssuePeriod(issueTagNumber: number | null): string | null {
+  if (!issueTagNumber) return null;
+  const str = String(issueTagNumber);
+  if (str.length < 6) return null;
+
+  const year = parseInt(str.slice(0, 4), 10);
+  const month = parseInt(str.slice(4, 6), 10);
+  if (!Number.isFinite(year) || month < 1 || month > 12) return null;
+
+  return `${MONTH_NAMES_PT[month - 1]} de ${year}`;
+}
+
+/** Swaps a bare trailing "— <year>" (already baked into the raw title for annual publications) for the fuller "— <mês> de <year>" when we can tell which month, so re-processing an issue doesn't pile up "— 2026 — outubro de 2026". Appends outright if there's no such suffix to replace. */
+function withIssuePeriod(rawTitle: string, issueTagNumber: number | null): string {
+  const period = formatIssuePeriod(issueTagNumber);
+  if (!period) return rawTitle;
+  const withoutYearSuffix = rawTitle.replace(/\s*[—-]\s*\d{4}\s*$/, "").trimEnd();
+  return `${withoutYearSuffix} — ${period}`;
+}
+
 /** Creates (or replaces) the publication row plus one stub per chapter. */
 export async function savePublication(
   input: SavePublicationInput
-): Promise<{ publicationId?: string; error?: string }> {
+): Promise<{ publicationId?: string; title?: string; error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
@@ -65,13 +103,15 @@ export async function savePublication(
   // Re-ingesting replaces whatever was there: chapters/footnotes cascade away.
   await supabase.from("jwpub_publications").delete().eq("note_id", input.noteId);
 
+  const displayTitle = withIssuePeriod(input.title, input.issueTagNumber);
+
   const { data: publication, error } = await supabase
     .from("jwpub_publications")
     .insert({
       user_id: user.id,
       note_id: input.noteId,
       symbol: input.symbol,
-      title: input.title,
+      title: displayTitle,
       meps_language_index: input.mepsLanguageIndex,
       year: input.year,
       issue_tag_number: input.issueTagNumber,
@@ -86,8 +126,8 @@ export async function savePublication(
   // parsing knew any better) — swap in the publication's real title now that
   // we have it. Best-effort: a failure here shouldn't fail the whole ingest,
   // it just leaves the filename as the title.
-  if (input.title.trim() !== "") {
-    await updateNoteRow(input.noteId, { title: input.title }).catch(() => {});
+  if (displayTitle.trim() !== "") {
+    await updateNoteRow(input.noteId, { title: displayTitle }).catch(() => {});
   }
 
   if (input.chapters.length > 0) {
@@ -104,7 +144,7 @@ export async function savePublication(
     if (chaptersError) return { error: "Não foi possível registrar os capítulos." };
   }
 
-  return { publicationId: publication.id };
+  return { publicationId: publication.id, title: displayTitle };
 }
 
 /** One call per chapter — a whole publication's HTML in a single action would be a huge payload. */
