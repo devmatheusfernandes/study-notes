@@ -23,7 +23,8 @@ import { TagPickerVault } from "./tag-picker-vault";
 import { FolderPickerVault } from "./folder-picker-vault";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { getFileUrl } from "@/app/(app)/files-actions";
-import { searchJwpubContent } from "@/app/(app)/jwpub-actions";
+import { searchJwpubContent, type JwpubSearchMatch } from "@/app/(app)/jwpub-actions";
+import { extractMatchSnippet, type MatchSnippet } from "@/lib/note-preview";
 import { NOTE_DRAG_MIME, hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
 
 interface NotesCollectionProps {
@@ -152,7 +153,7 @@ export function NotesCollection({
   // match. This debounced, best-effort lookup (see searchJwpubContent) fills
   // that gap; a stale/failed/offline response just leaves it empty rather
   // than surfacing an error, since the title/body match above still works.
-  const [jwpubMatchIds, setJwpubMatchIds] = useState<Set<string>>(new Set());
+  const [jwpubMatches, setJwpubMatches] = useState<Map<string, JwpubSearchMatch>>(new Map());
   const jwpubSearchSeq = useRef(0);
   useEffect(() => {
     const trimmed = query.trim();
@@ -163,12 +164,12 @@ export function NotesCollection({
     const timeout = setTimeout(() => {
       if (jwpubSearchSeq.current !== seq) return;
       if (trimmed.length < 2) {
-        setJwpubMatchIds(new Set());
+        setJwpubMatches(new Map());
         return;
       }
       searchJwpubContent(trimmed)
-        .then(({ noteIds }) => {
-          if (jwpubSearchSeq.current === seq) setJwpubMatchIds(new Set(noteIds));
+        .then(({ matches }) => {
+          if (jwpubSearchSeq.current === seq) setJwpubMatches(new Map(matches.map((m) => [m.noteId, m])));
         })
         .catch(() => {});
     }, trimmed.length < 2 ? 0 : 300);
@@ -183,11 +184,23 @@ export function NotesCollection({
     showFolders && !isSearching ? { folderId: activeFolder } : undefined
   );
   const matchesNote = (note: Note) =>
-    (matchesSearch(query, note.title, note.body) || jwpubMatchIds.has(note.id)) &&
+    (matchesSearch(query, note.title, note.body) || jwpubMatches.has(note.id)) &&
     (selectedTagIds.length === 0 || selectedTagIds.some((id) => note.tagIds.includes(id)));
   const pinned = allPinned.filter(matchesNote);
   const others = allOthers.filter(matchesNote);
   const isEmpty = pinned.length === 0 && others.length === 0;
+
+  // What to show on a card in place of its normal excerpt while searching —
+  // the context around where the term actually is, not just whatever the
+  // note happens to open with. A jwpub match already carries its own
+  // (server-computed, since the real text lives in jwpub_chapters/footnotes)
+  // snippet; a regular note's is computed here from its already-loaded body.
+  function getSearchSnippet(note: Note): MatchSnippet | undefined {
+    if (!isSearching) return undefined;
+    const jwpubMatch = jwpubMatches.get(note.id);
+    if (jwpubMatch) return jwpubMatch;
+    return extractMatchSnippet(note.body ?? "", query) ?? undefined;
+  }
 
   // Keeps the selection store's notion of "all" matched to what's actually on
   // screen, so "Selecionar todas" is correct after filtering/folder changes.
@@ -202,18 +215,32 @@ export function NotesCollection({
   ).filter((f) => matchesSearch(query, f.name));
   const foldersVisible = childFolders.length > 0;
 
+  // While searching, carries the term (and, for a jwpub chapter match, which
+  // chapter) into the note's URL — the same `?doc=` + `?text=` convention
+  // chat-message.tsx already uses to jump a source citation straight to its
+  // spot, reused here so opening a search result does the same instead of
+  // just landing on the note's first line/chapter.
+  function searchParamsFor(note: Note): string {
+    if (!isSearching) return "";
+    const params = new URLSearchParams();
+    const jwpubMatch = jwpubMatches.get(note.id);
+    if (jwpubMatch?.documentId != null) params.set("doc", String(jwpubMatch.documentId));
+    params.set("text", query.trim());
+    return `?${params.toString()}`;
+  }
+
   async function openNote(note: Note) {
     if (note.processing) return; // still uploading/ingesting — NoteCard already blocks the click, this is belt-and-suspenders.
     if (!note.storagePath) {
       // Text notes (and legacy seed/demo file cards with no real upload) use the editor.
-      router.push(`/notes/${note.id}`);
+      router.push(`/notes/${note.id}${searchParamsFor(note)}`);
       return;
     }
 
     // Publications and PDFs are read in-app rather than downloaded — the route itself
     // decides between the respective reader and the editor.
     if (note.type === "jwpub" || note.type === "pdf") {
-      router.push(`/notes/${note.id}`);
+      router.push(`/notes/${note.id}${searchParamsFor(note)}`);
       return;
     }
 
@@ -270,6 +297,7 @@ export function NotesCollection({
         selectionMode={selectionMode}
         selected={isSelected(note.id)}
         tags={note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
+        searchSnippet={getSearchSnippet(note)}
         onToggleSelect={isOptimistic ? undefined : (id) => { hapticTap(); toggleSelect(id); }}
         onOpen={() => void openNote(note)}
         onTogglePin={!isOptimistic && status === "active" ? () => togglePin(note.id) : undefined}

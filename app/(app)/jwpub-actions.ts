@@ -225,37 +225,100 @@ function escapeLikePattern(value: string): string {
   return value.replace(/[%_\\]/g, (ch) => `\\${ch}`);
 }
 
+export interface JwpubSearchMatch {
+  noteId: string;
+  /** Which chapter to deep-link into (`?doc=`) — null for a footnote-only match, since jwpub_footnotes carries no back-reference to the chapter that cites it. */
+  documentId: number | null;
+  before: string;
+  match: string;
+  after: string;
+}
+
+/** Strips tags for a plain-text snippet — regex-based, not DOMParser, since this runs server-side (same reasoning as lib/note-images.ts). */
+function stripHtmlForSnippet(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Plain-text context window centered on the first case-insensitive occurrence of `query` in `html` — null if it isn't actually there (a chapter/footnote can match the broader ILIKE pattern via a different word ordering than an exact substring). */
+function buildSnippet(
+  html: string,
+  query: string,
+  contextChars = 60
+): { before: string; match: string; after: string } | null {
+  const text = stripHtmlForSnippet(html);
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return null;
+
+  const start = Math.max(0, idx - contextChars);
+  const end = Math.min(text.length, idx + query.length + contextChars);
+  return {
+    before: (start > 0 ? "…" : "") + text.slice(start, idx),
+    match: text.slice(idx, idx + query.length),
+    after: text.slice(idx + query.length, end) + (end < text.length ? "…" : ""),
+  };
+}
+
 /**
- * Note ids whose `.jwpub` publication contains `query` in a chapter or
- * footnote — the notes-page search bar only ever sees `notes.title`/`body`
+ * Notes whose `.jwpub` publication contains `query` in a chapter or
+ * footnote, with a preview snippet and (for a chapter match) which chapter
+ * to open — the notes-page search bar only ever sees `notes.title`/`body`
  * (see lib/search.ts), and for a jwpub-type note `body` is just an encrypted
  * file-size string, never the real publication text (that lives here,
  * unencrypted per the migration's own note). This is the one extra
  * server round-trip that closes that gap: called debounced from
- * notes-collection.tsx and merged into the client-side title/body match.
+ * notes-collection.tsx and merged into the client-side title/body match, and
+ * its documentId/query are carried into the note's URL (the same `?doc=` +
+ * `?text=` convention chat-message.tsx already uses) so opening the note
+ * jumps straight to the match instead of just its first chapter.
  */
-export async function searchJwpubContent(query: string): Promise<{ noteIds: string[] }> {
+export async function searchJwpubContent(query: string): Promise<{ matches: JwpubSearchMatch[] }> {
   const { supabase, user } = await requireUser();
   const trimmed = query.trim();
-  if (!user || trimmed.length < 2) return { noteIds: [] };
+  if (!user || trimmed.length < 2) return { matches: [] };
 
   const pattern = `%${escapeLikePattern(trimmed)}%`;
   const [{ data: chapterRows }, { data: footnoteRows }] = await Promise.all([
-    supabase.from("jwpub_chapters").select("publication_id").ilike("content_html", pattern),
-    supabase.from("jwpub_footnotes").select("publication_id").ilike("content_html", pattern),
+    supabase.from("jwpub_chapters").select("publication_id, document_id, content_html").ilike("content_html", pattern),
+    supabase.from("jwpub_footnotes").select("publication_id, content_html").ilike("content_html", pattern),
   ]);
 
   const publicationIds = [
     ...new Set([...(chapterRows ?? []), ...(footnoteRows ?? [])].map((row) => row.publication_id)),
   ];
-  if (publicationIds.length === 0) return { noteIds: [] };
+  if (publicationIds.length === 0) return { matches: [] };
 
   const { data: publications } = await supabase
     .from("jwpub_publications")
-    .select("note_id")
+    .select("id, note_id")
     .in("id", publicationIds);
+  const noteIdByPublication = new Map((publications ?? []).map((p) => [p.id, p.note_id]));
 
-  return { noteIds: [...new Set((publications ?? []).map((p) => p.note_id))] };
+  // A chapter match wins over a footnote match for the same note — it's the
+  // one that actually deep-links to a specific chapter.
+  const matches = new Map<string, JwpubSearchMatch>();
+
+  for (const row of chapterRows ?? []) {
+    const noteId = noteIdByPublication.get(row.publication_id);
+    if (!noteId || matches.has(noteId) || !row.content_html) continue;
+    const snippet = buildSnippet(row.content_html, trimmed);
+    if (!snippet) continue;
+    matches.set(noteId, { noteId, documentId: row.document_id, ...snippet });
+  }
+
+  for (const row of footnoteRows ?? []) {
+    const noteId = noteIdByPublication.get(row.publication_id);
+    if (!noteId || matches.has(noteId)) continue;
+    const snippet = buildSnippet(row.content_html, trimmed);
+    if (!snippet) continue;
+    matches.set(noteId, { noteId, documentId: null, ...snippet });
+  }
+
+  return { matches: [...matches.values()] };
 }
 
 export interface ResolvedJwpubReference {

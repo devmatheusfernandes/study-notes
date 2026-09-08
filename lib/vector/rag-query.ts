@@ -332,6 +332,56 @@ function detectCategoryKey(normalizedAccentStrippedQuery: string): string | null
   return null;
 }
 
+/** Escapes Postgres LIKE/ILIKE metacharacters so a literal "%" or "_" typed by the user doesn't act as a wildcard. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * Words in the query too generic/frequent to mean anything on their own --
+ * filtered out before the title-keyword fallback below so "vídeos sobre Mark
+ * Noumair" reduces to the two words that actually identify the video
+ * ("mark", "noumair"), not "vídeos"/"sobre" which would match nearly
+ * everything.
+ */
+const TITLE_SEARCH_STOPWORDS = new Set([
+  "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
+  "em", "no", "na", "nos", "nas", "sobre", "com", "para", "por", "que", "qual", "quais",
+  "quem", "como", "onde", "quando", "video", "videos", "resuma", "resumir", "resume",
+  "mostre", "mostra", "mostrar", "me", "informacoes", "informacao", "fale", "falar",
+  "conte", "contar", "titulo", "chamado", "chamada", "nome", "publicacao", "nota",
+  "notas", "arquivo", "arquivos", "seja", "tem", "existe", "achar", "encontrar",
+  "procura", "procurar", "isso", "essa", "esse", "esta", "este", "meu", "minha",
+  "meus", "minhas", "qualquer", "algum", "alguma",
+  // Ordinal/temporal and common verb forms (see parseQueryConstraints'
+  // ordinal handling above) -- these show up in "qual foi o penúltimo
+  // vídeo"-style questions that name a *position*, not a title, and would
+  // otherwise falsely satisfy the >=2-word threshold below.
+  "foi", "sao", "vai", "ser", "sera", "houve", "havia", "mais",
+  "ultimo", "ultima", "penultimo", "penultima", "antepenultimo", "antepenultima",
+  "primeiro", "primeira", "segundo", "segunda", "terceiro", "terceira",
+  "recente", "recentemente", "novo", "nova", "antigo", "antiga", "velho", "velha",
+]);
+
+/**
+ * Words specific enough to identify a title by themselves ("mark",
+ * "noumair", "anatote") -- everything else in the sentence around them
+ * ("vídeos sobre", "resuma o vídeo") is just how a person phrases a
+ * question, not part of what they're naming. Requires at least 2 to trigger
+ * the fallback below, for the same reason the bare "boletim" case doesn't:
+ * a single generic word (e.g. "estudo") would match dozens of unrelated
+ * titles as fake "exact" matches.
+ */
+function extractTitleKeywords(query: string): string[] {
+  const words = query
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !TITLE_SEARCH_STOPWORDS.has(w));
+  return [...new Set(words)];
+}
+
 export async function fetchExactMetadataMatches(
   supabase: Awaited<ReturnType<typeof createClient>>,
   query: string,
@@ -342,6 +392,8 @@ export async function fetchExactMetadataMatches(
   const normStripped = norm.normalize("NFD").replace(/[̀-ͯ]/g, "");
   const isBoletimSearch = norm.includes("boletim");
   const categoryKey = detectCategoryKey(normStripped);
+  const titleKeywords = extractTitleKeywords(query);
+  const hasKeywordSignal = titleKeywords.length >= 2;
 
   // A bare "boletim" mention with no year or number is too vague to justify
   // forcing every bulletin video in as a fake "exact" match (similarity
@@ -350,8 +402,8 @@ export async function fetchExactMetadataMatches(
   // sources. Semantic vector search (match_hybrid_embeddings, called by the
   // caller) already ranks by actual content relevance for that case. A named
   // category match doesn't have that ambiguity, so it's allowed through on
-  // its own below.
-  if (targetYear === null && targetNum === null && !categoryKey) {
+  // its own below — as is a specific enough title-keyword match.
+  if (targetYear === null && targetNum === null && !categoryKey && !hasKeywordSignal) {
     return [];
   }
 
@@ -370,6 +422,14 @@ export async function fetchExactMetadataMatches(
     }
     if (targetYear !== null) {
       videoQuery = videoQuery.ilike("title", `%${targetYear}%`);
+    }
+    // Every significant word must appear in the title -- e.g. "mark" AND
+    // "noumair" -- rather than any one of them, so a query naming a specific
+    // video doesn't pull in every other video that happens to share just one
+    // of its words. Chaining .ilike() on the same column multiple times is
+    // PostgREST's documented way to AND several conditions together.
+    for (const word of titleKeywords) {
+      videoQuery = videoQuery.ilike("title", `%${escapeLikePattern(word)}%`);
     }
 
     // Without this, `.limit(30)` takes whatever arbitrary 30 rows Postgres

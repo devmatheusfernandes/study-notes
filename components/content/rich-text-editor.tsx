@@ -102,6 +102,16 @@ function ToolbarButton({
 export interface RichTextEditorHandle {
   /** Opens the native file picker to insert an image — for a trigger button that lives outside this component (see note-editor.tsx's header). */
   openImagePicker: () => void;
+  /**
+   * Selects the first case-insensitive occurrence of `text` and scrolls it
+   * into view — used to jump straight to the match when a note is opened
+   * from a search result (see note-editor.tsx). Returns whether a match was
+   * found. Only ever matches within a single text node, so a term that
+   * happens to straddle a bold/italic boundary won't be found — an accepted
+   * gap rather than a real ProseMirror position-mapping cost for something
+   * this cosmetic.
+   */
+  scrollToText: (text: string) => boolean;
 }
 
 interface RichTextEditorProps {
@@ -122,10 +132,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 ) {
   const seeded = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useImperativeHandle(ref, () => ({
-    openImagePicker: () => fileInputRef.current?.click(),
-  }));
 
   /* --------------------------------------------------------------- *
    * References — "(mt 7:12)" input rule + the "/" menu
@@ -352,6 +358,26 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     // Themed to match the app's dark "Organic" tokens instead of Tiptap's defaults.
     editable: true,
   });
+
+  useImperativeHandle(ref, () => ({
+    openImagePicker: () => fileInputRef.current?.click(),
+    scrollToText: (text: string) => {
+      const target = text.trim().toLowerCase();
+      if (!editor || !target) return false;
+
+      let range: { from: number; to: number } | null = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (range || !node.isText) return !range;
+        const idx = (node.text ?? "").toLowerCase().indexOf(target);
+        if (idx !== -1) range = { from: pos + idx, to: pos + idx + target.length };
+        return !range;
+      });
+      if (!range) return false;
+
+      editor.chain().setTextSelection(range).scrollIntoView().run();
+      return true;
+    },
+  }));
 
   // All of the above refs are refreshed here rather than during render:
   // every reader of them (an input rule, a keydown, a click) runs after

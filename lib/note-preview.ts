@@ -105,6 +105,37 @@ export function bodyToPlainText(body: string): string {
   return (doc.body.textContent ?? "").trim();
 }
 
+export interface MatchSnippet {
+  before: string;
+  match: string;
+  after: string;
+}
+
+/**
+ * Plain-text context window centered on the first case-insensitive
+ * occurrence of `query` inside `body` — shown on a card in place of the
+ * normal excerpt while searching, so the card shows *why* it matched instead
+ * of just its usual opening text (which might not even contain the term).
+ * Null if `query` isn't actually in the body (e.g. the note only matched by
+ * title) — the card falls back to `parseNotePreview` in that case.
+ */
+export function extractMatchSnippet(body: string, query: string, contextChars = 60): MatchSnippet | null {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return null;
+
+  const text = bodyToPlainText(body).replace(/\s+/g, " ").trim();
+  const idx = text.toLowerCase().indexOf(trimmedQuery.toLowerCase());
+  if (idx === -1) return null;
+
+  const start = Math.max(0, idx - contextChars);
+  const end = Math.min(text.length, idx + trimmedQuery.length + contextChars);
+  return {
+    before: (start > 0 ? "…" : "") + text.slice(start, idx),
+    match: text.slice(idx, idx + trimmedQuery.length),
+    after: text.slice(idx + trimmedQuery.length, end) + (end < text.length ? "…" : ""),
+  };
+}
+
 /**
  * Flips one checklist item's checked state directly in the stored HTML,
  * keyed by its index among ALL task items (not just the ones a preview

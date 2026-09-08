@@ -45,6 +45,11 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
   const searchParams = useSearchParams();
   const initialBody = noteId ? "" : searchParams.get("q") ?? "";
   const folderId = noteId ? undefined : searchParams.get("folder") ?? undefined;
+  // Same `?text=` convention chat-message.tsx already sends jwpub notes to
+  // (see JwpubChapterView's own highlight effect) — reused here so a note
+  // opened from a search result (see notes-collection.tsx) or a chat source
+  // jumps straight to where the term appears instead of just opening at the top.
+  const highlight = searchParams.get("text");
 
   const notes = useNotesStore((s) => s.notes);
   const addNote = useNotesStore((s) => s.addNote);
@@ -112,6 +117,19 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
 
     return () => clearTimeout(timer);
   }, [title, body, hydrated, addNote, updateNote, folderId, createdId]);
+
+  // Jumps to (and selects, so it's visually highlighted) the first
+  // occurrence of the search term once the editor has real content to search —
+  // `body` only carries the note's actual text once the store has hydrated,
+  // so this keeps retrying (cheaply — it's just a doc walk) until that lands
+  // instead of firing once too early and silently finding nothing. Left in
+  // the URL afterward rather than stripped, matching JwpubChapterView's own
+  // `?text=` handling — reloading the same link re-highlights the same spot.
+  const highlightApplied = useRef(false);
+  useEffect(() => {
+    if (!highlight || highlightApplied.current || !body) return;
+    if (editorRef.current?.scrollToText(highlight)) highlightApplied.current = true;
+  }, [highlight, body]);
 
   const current = createdId ? notes.find((n) => n.id === createdId) : undefined;
   const pinned = current?.pinned ?? false;

@@ -27,7 +27,7 @@ import {
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SyncStatusIndicator, type SyncStatus } from "./sync-status";
-import { parseNotePreview } from "@/lib/note-preview";
+import { parseNotePreview, type MatchSnippet } from "@/lib/note-preview";
 import { TagDot, TagPill } from "./tag-pill";
 import { ProcessingShimmer, UploadWaveProgress } from "./upload-progress-indicators";
 import type { Tag } from "@/lib/store/notes-store";
@@ -86,6 +86,8 @@ export interface NoteCardProps {
   selected?: boolean;
   /** Resolved tag objects assigned to this item — passed pre-mapped by the parent, which already holds the full tag list. */
   tags?: Tag[];
+  /** While searching, the context around where the search term actually appears — shown instead of the normal excerpt/checklist so the card shows *why* it matched. Undefined outside of search, or when the note only matched by title. */
+  searchSnippet?: MatchSnippet;
   onToggleSelect?: (id: string) => void;
   onOpen?: () => void;
   onTogglePin?: () => void;
@@ -118,6 +120,7 @@ export function NoteCard({
   selectionMode = false,
   selected = false,
   tags = [],
+  searchSnippet,
   onToggleSelect,
   onOpen,
   onTogglePin,
@@ -152,6 +155,14 @@ export function NoteCard({
   const checklist = preview?.checklist;
   const checklistRemaining = preview?.checklistRemaining ?? 0;
   const previewImageUrl = checklist ? undefined : preview?.imageUrl;
+
+  const snippetNode = searchSnippet && (
+    <>
+      {searchSnippet.before}
+      <mark className="rounded bg-accent/30 text-foreground">{searchSnippet.match}</mark>
+      {searchSnippet.after}
+    </>
+  );
 
   const visibleTags = tags.slice(0, MAX_TAG_PILLS);
   const overflowTagCount = tags.length - visibleTags.length;
@@ -373,7 +384,9 @@ export function NoteCard({
           <span className="truncate font-heading text-[15px] transition-colors group-hover/open:text-accent">
             {title}
           </span>
-          {checklist ? (
+          {snippetNode ? (
+            <span className="truncate text-[12.5px] text-muted-foreground">{snippetNode}</span>
+          ) : checklist ? (
             <span className="truncate text-[12.5px] text-muted-foreground">
               {checklist.filter((i) => i.checked).length}/
               {checklist.length + (checklistRemaining ?? 0)} concluídas
@@ -517,13 +530,18 @@ export function NoteCard({
           />
         )}
 
-        {!checklist && previewHtml && (
+        {snippetNode && (
+          <span className="line-clamp-3 text-[12.5px] leading-relaxed text-muted-foreground text-pretty">
+            {snippetNode}
+          </span>
+        )}
+        {!snippetNode && !checklist && previewHtml && (
           <span
             className="line-clamp-3 text-[12.5px] leading-relaxed text-muted-foreground text-pretty"
             dangerouslySetInnerHTML={{ __html: previewHtml }}
           />
         )}
-        {!checklist && plainText && (
+        {!snippetNode && !checklist && plainText && (
           <span className="line-clamp-3 text-[12.5px] leading-relaxed text-muted-foreground text-pretty">
             {plainText}
           </span>
