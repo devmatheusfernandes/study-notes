@@ -32,6 +32,38 @@ const LOCATION_SELECT =
   "book_number, chapter_number, key_symbol, meps_language, issue_tag_number, meps_document_id, track, location_type";
 
 /**
+ * Supabase/PostgREST caps an un-ranged `.select()` at 1000 rows by default —
+ * silently, no error, no truncation flag. Several jwlibrary_* tables
+ * comfortably exceed that for an active user (a real account backing this
+ * feature has ~7000 usermarks/blockranges against ~350 notes), so every
+ * select below pages through with `.range()` instead of trusting one request
+ * to return everything. This was the actual cause of a report where every
+ * exported note landed in the right place but its highlight was completely
+ * missing in the official app: with 349 notes (under the cap, so all present)
+ * but ~7000 usermarks, only the first 1000 (in whatever order Postgres
+ * happened to return) made it into the export — everything past that,
+ * including most highlights' UserMark and BlockRange rows, was silently
+ * dropped.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllRows<T, E>(
+  query: (offset: number) => PromiseLike<{ data: T[] | null; error: E | null }>
+): Promise<{ data: T[]; error: E | null }> {
+  const all: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await query(offset);
+    if (error) return { data: all, error };
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return { data: all, error: null };
+}
+
+/**
  * Consolidates every jwlibrary_* row this user owns (across all imported
  * backups, plus anything created directly in Study Notes) into one fresh
  * `.jwlibrary` file — see lib/jwlibrary/writer.ts for the SQLite side.
@@ -56,22 +88,81 @@ export async function GET() {
     { data: publicationRows, error: publicationsError },
     { data: chapterRows, error: chaptersError },
   ] = await Promise.all([
-    supabase
-      .from("jwlibrary_notes")
-      .select(`id, source_guid, user_mark_id, title, content, block_type, block_identifier, source_created_at, source_last_modified, ${LOCATION_SELECT}`),
-    supabase.from("jwlibrary_usermarks").select(`id, source_guid, color_index, style_index, version, ${LOCATION_SELECT}`),
-    supabase.from("jwlibrary_blockranges").select("usermark_id, block_type, identifier, start_token, end_token"),
-    supabase.from("jwlibrary_tags").select("id, tag_type, name"),
-    supabase.from("jwlibrary_tag_map").select(`tag_id, note_id, ${LOCATION_SELECT}`),
-    supabase.from("jwlibrary_bookmarks").select(`title, snippet, slot, block_type, block_identifier, ${LOCATION_SELECT}`),
-    supabase.from("jwlibrary_input_fields").select(`text_tag, value, ${LOCATION_SELECT}`),
+    // .order("id") on every one of these: .range() pagination is only
+    // correct with a deterministic order — without it Postgres doesn't
+    // guarantee two successive requests see the same row order, which can
+    // skip or duplicate rows across pages.
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwlibrary_notes")
+        .select(`id, source_guid, user_mark_id, title, content, block_type, block_identifier, source_created_at, source_last_modified, ${LOCATION_SELECT}`)
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwlibrary_usermarks")
+        .select(`id, source_guid, color_index, style_index, version, ${LOCATION_SELECT}`)
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwlibrary_blockranges")
+        .select("usermark_id, block_type, identifier, start_token, end_token")
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase.from("jwlibrary_tags").select("id, tag_type, name").order("id").range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwlibrary_tag_map")
+        .select(`tag_id, note_id, ${LOCATION_SELECT}`)
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwlibrary_bookmarks")
+        .select(`title, snippet, slot, block_type, block_identifier, ${LOCATION_SELECT}`)
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwlibrary_input_fields")
+        .select(`text_tag, value, ${LOCATION_SELECT}`)
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
     // "Your answer" fields typed directly in this app's own jwpub reader —
     // stored separately from jwlibrary_input_fields (see app/(app)/jwpub-actions.ts's
     // getAnswers), so they need their own Location built from the owning
     // publication/chapter before they can be written into the export.
-    supabase.from("jwpub_answers").select("publication_id, document_id, pid, answer"),
-    supabase.from("jwpub_publications").select("id, symbol, meps_language_index, issue_tag_number"),
-    supabase.from("jwpub_chapters").select("publication_id, document_id, meps_document_id").not("meps_document_id", "is", null),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwpub_answers")
+        .select("publication_id, document_id, pid, answer")
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwpub_publications")
+        .select("id, symbol, meps_language_index, issue_tag_number")
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
+    fetchAllRows((offset) =>
+      supabase
+        .from("jwpub_chapters")
+        .select("publication_id, document_id, meps_document_id")
+        .not("meps_document_id", "is", null)
+        .order("id")
+        .range(offset, offset + PAGE_SIZE - 1)
+    ),
   ]);
 
   const firstError =
