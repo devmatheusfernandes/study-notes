@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { Gem } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import DOMPurify from "dompurify";
+import { Gem, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { bodyToPlainText } from "@/lib/note-preview";
 import type {
   BibleBook,
   BibleFootnote,
@@ -61,8 +64,10 @@ interface BibleStudyPanelProps {
   onOpenAppendix: (mepsDocumentId: number) => void;
 
   personalNotes: WithVerse<BiblePersonalNote>[];
-  /** Opens the tapped personal note in its full editor/panel (same one a click on the highlighted text itself opens). */
-  onOpenPersonalNote: (note: BiblePersonalNote) => void;
+  /** "Editar" on an expanded personal note — opens the full editor vault. */
+  onEditPersonalNote: (note: BiblePersonalNote) => void;
+  /** "Excluir" on an expanded personal note, after the inline confirm below. */
+  onDeletePersonalNote: (note: BiblePersonalNote) => void;
 }
 
 /**
@@ -147,9 +152,17 @@ export function BibleStudyPanel({
   onOpenBibleRef,
   onOpenAppendix,
   personalNotes,
-  onOpenPersonalNote,
+  onEditPersonalNote,
+  onDeletePersonalNote,
 }: BibleStudyPanelProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // Which personal note (if any) is expanded inline — clicking a note used
+  // to open a whole separate sidebar (JwlibraryHighlightNotePanel) for
+  // exactly the content already listed here; expanding in place instead
+  // means this tab is the one place to view/edit/delete a personal note.
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [confirmDeleteNote, setConfirmDeleteNote] = useState<BiblePersonalNote | null>(null);
 
   // Delegated click for the `data-bible-ref="book:chapter:verse"` and
   // `data-bible-appendix-ref` links the seed left inside study notes and
@@ -200,6 +213,7 @@ export function BibleStudyPanel({
   };
 
   return (
+    <>
     <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={420}>
       <div ref={contentRef} className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
@@ -361,23 +375,63 @@ export function BibleStudyPanel({
                 {personalNoteGroups.map((group) => (
                   <div key={group.verse ?? "sup"} className="flex flex-col gap-1.5">
                     {whole && <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />}
-                    {group.items.map((note) => (
-                      <button
-                        key={note.id}
-                        type="button"
-                        onClick={() => onOpenPersonalNote(note)}
-                        className="flex flex-col gap-1 rounded-2xl bg-secondary px-4 py-3 text-left transition-colors hover:bg-surface"
-                      >
-                        {note.title && (
-                          <span className="text-[13px] font-medium text-foreground/90">{note.title}</span>
-                        )}
-                        {note.content && (
-                          <span className="line-clamp-3 whitespace-pre-line text-[13px] leading-relaxed text-muted-foreground">
-                            {note.content}
-                          </span>
-                        )}
-                      </button>
-                    ))}
+                    {group.items.map((note) => {
+                      const expanded = expandedNoteId === note.id;
+                      return (
+                        <div key={note.id} className="rounded-2xl bg-secondary px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedNoteId(expanded ? null : note.id)}
+                            className="flex w-full flex-col gap-1 text-left"
+                          >
+                            {note.title && (
+                              <span className="text-[13px] font-medium text-foreground/90">{note.title}</span>
+                            )}
+                            {/* note.content is Tiptap HTML (or plain text
+                                imported from JW Library) — never raw text, so
+                                the collapsed preview strips tags instead of
+                                printing them literally. */}
+                            {!expanded && note.content && (
+                              <span className="line-clamp-3 whitespace-pre-line text-[13px] leading-relaxed text-muted-foreground">
+                                {bodyToPlainText(note.content)}
+                              </span>
+                            )}
+                          </button>
+                          {expanded && (
+                            <>
+                              {note.content && (
+                                <div
+                                  className="mt-1 text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2"
+                                  dangerouslySetInnerHTML={{
+                                    __html: DOMPurify.sanitize(note.content, { USE_PROFILES: { html: true } }),
+                                  }}
+                                />
+                              )}
+                              <div className="mt-2 flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => onEditPersonalNote(note)}
+                                  aria-label="Editar nota"
+                                  className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-surface hover:text-foreground"
+                                >
+                                  <Pencil className="size-3.5" />
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteNote(note)}
+                                  aria-label="Excluir nota"
+                                  className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                  Excluir
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
@@ -386,5 +440,21 @@ export function BibleStudyPanel({
         </Tabs>
       </div>
     </JwpubSidePanel>
+
+    <ConfirmVault
+      open={confirmDeleteNote !== null}
+      onOpenChange={(next) => {
+        if (!next) setConfirmDeleteNote(null);
+      }}
+      title="Excluir nota?"
+      description="Essa ação não pode ser desfeita."
+      confirmLabel="Excluir"
+      onConfirm={() => {
+        if (confirmDeleteNote) onDeletePersonalNote(confirmDeleteNote);
+        setConfirmDeleteNote(null);
+        setExpandedNoteId(null);
+      }}
+    />
+    </>
   );
 }

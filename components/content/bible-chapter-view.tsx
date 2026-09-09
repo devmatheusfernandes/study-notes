@@ -18,8 +18,15 @@ interface BibleChapterViewProps {
   onVerseSelected?: (verse: number) => void;
   /** Imported/created highlights for this chapter — see getBibleChapterHighlights in jwlibrary-actions.ts. */
   highlights?: BibleVerseHighlight[];
-  /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. `colorIndex`/`userMarkId` are meaningless for a note created via "Anotar sem destaque" (no real UserMark) — see the identical comment in jwpub-chapter-view.tsx. */
-  onHighlightNote?: (note: { id: string; title: string; content: string; userMarkId: string | null; colorIndex: number | null }) => void;
+  /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. `colorIndex`/`userMarkId` are meaningless for a note created via "Anotar sem destaque" (no real UserMark) — see the identical comment in jwpub-chapter-view.tsx. `verse` lets the caller scope the Estudo panel's Pessoal tab to it instead of opening a separate note panel. */
+  onHighlightNote?: (note: {
+    id: string;
+    title: string;
+    content: string;
+    userMarkId: string | null;
+    colorIndex: number | null;
+    verse: number;
+  }) => void;
   /** A highlight with NO attached note was clicked — offers to recolor/annotate/delete it. `text` is the highlighted span's own plain text (read off the rendered `<mark>`), shown in place of a note since there isn't one. */
   onHighlightMark?: (highlight: BibleVerseHighlight & { text?: string }) => void;
   /** Scrolls to and briefly flashes this verse on mount — deep link from a jwlibrary Bible note, or from picking a cross reference (see bible-reader.tsx's `?verse=`/navigateTo). */
@@ -79,6 +86,7 @@ export function BibleChapterView({
             ...highlight.note,
             userMarkId: hasRealMark ? highlight.id : null,
             colorIndex: highlight.colorIndex,
+            verse: highlight.verse,
           });
         }
         return;

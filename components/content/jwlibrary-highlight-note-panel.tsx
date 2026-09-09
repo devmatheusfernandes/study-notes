@@ -80,16 +80,26 @@ export function JwlibraryHighlightNotePanel({
     };
   }, [open, note]);
 
-  async function handleDelete() {
+  // Optimistic, same rationale as handleColorChange below: the caller drops
+  // the highlight/note and closes the panel immediately instead of waiting
+  // on the round trip (which was the main source of the "demora muito para
+  // atualizar" delay) — the request still goes out, a failure just surfaces
+  // a toast instead of leaving the panel open while the user waits.
+  function handleDelete() {
     setConfirmDeleteOpen(false);
     if (note) {
-      await deleteJwlibraryNote(note.id);
+      const noteId = note.id;
+      onDeleted();
+      void deleteJwlibraryNote(noteId).then((result) => {
+        if (result.error) notify.error("Não foi possível excluir a nota", result.error);
+      });
     } else if (highlightId) {
-      await deleteJwlibraryHighlight(highlightId);
-    } else {
-      return;
+      const id = highlightId;
+      onDeleted();
+      void deleteJwlibraryHighlight(id).then((result) => {
+        if (result.error) notify.error("Não foi possível excluir o destaque", result.error);
+      });
     }
-    onDeleted();
   }
 
   // Optimistic: tells the caller right away (so it can recolor the live
