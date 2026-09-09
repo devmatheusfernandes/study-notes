@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Gem, Pencil, Trash2 } from "lucide-react";
+import { Gem, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { bodyToPlainText } from "@/lib/note-preview";
+import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import type {
   BibleBook,
   BibleFootnote,
@@ -14,6 +15,7 @@ import type {
   CrossReference,
   CrossReferenceSource,
 } from "@/app/(app)/bible-actions";
+import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleReferencesList, CROSS_REFERENCE_SOURCE_LABELS } from "./bible-references-panel";
 
@@ -68,6 +70,13 @@ interface BibleStudyPanelProps {
   onEditPersonalNote: (note: BiblePersonalNote) => void;
   /** "Excluir" on an expanded personal note, after the inline confirm below. */
   onDeletePersonalNote: (note: BiblePersonalNote) => void;
+
+  /** The highlight just tapped in the reader, when it has no note yet — shown as a dismissible recolor/add-note/delete card at the top of the Pessoal tab instead of its own sidebar. `null` when nothing was just tapped. */
+  activeHighlight?: (BibleVerseHighlight & { text?: string }) | null;
+  onCloseActiveHighlight?: () => void;
+  onAddNoteToActiveHighlight?: () => void;
+  onColorChangeActiveHighlight?: (colorIndex: number) => void;
+  onDeleteActiveHighlight?: () => void;
 }
 
 /**
@@ -154,6 +163,11 @@ export function BibleStudyPanel({
   personalNotes,
   onEditPersonalNote,
   onDeletePersonalNote,
+  activeHighlight = null,
+  onCloseActiveHighlight,
+  onAddNoteToActiveHighlight,
+  onColorChangeActiveHighlight,
+  onDeleteActiveHighlight,
 }: BibleStudyPanelProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +177,7 @@ export function BibleStudyPanel({
   // means this tab is the one place to view/edit/delete a personal note.
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<BiblePersonalNote | null>(null);
+  const [confirmDeleteHighlight, setConfirmDeleteHighlight] = useState(false);
 
   // Delegated click for the `data-bible-ref="book:chapter:verse"` and
   // `data-bible-appendix-ref` links the seed left inside study notes and
@@ -363,7 +378,65 @@ export function BibleStudyPanel({
             )}
           </TabsContent>
 
-          <TabsContent value="pessoal">
+          <TabsContent value="pessoal" className="flex flex-col gap-3">
+            {activeHighlight && (
+              <div className="flex flex-col gap-3 rounded-2xl bg-secondary px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[11px] tracking-[0.04em] text-accent">Destaque</span>
+                  <button
+                    type="button"
+                    onClick={onCloseActiveHighlight}
+                    aria-label="Fechar destaque"
+                    className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-surface hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+                {activeHighlight.text && (
+                  <blockquote className="rounded-xl border-l-2 border-accent/50 bg-surface px-3 py-2 text-[13px] italic leading-relaxed text-muted-foreground">
+                    “{activeHighlight.text}”
+                  </blockquote>
+                )}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11.5px] text-muted-foreground">Cor do destaque</span>
+                  <div className="flex items-center gap-1.5">
+                    {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => onColorChangeActiveHighlight?.(Number(index))}
+                        aria-label={color.name}
+                        title={color.name}
+                        className="size-7 shrink-0 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
+                        style={{
+                          backgroundColor: color.hex,
+                          borderColor: activeHighlight.colorIndex === Number(index) ? "var(--foreground)" : "transparent",
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={onAddNoteToActiveHighlight}
+                    className="flex items-center gap-1.5 self-start rounded-full px-2 py-1.5 text-[13px] text-accent transition-colors hover:bg-accent/10"
+                  >
+                    <Plus className="size-3.5" />
+                    Adicionar nota
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteHighlight(true)}
+                    className="flex items-center gap-1.5 self-start rounded-full px-2 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    <Trash2 className="size-3.5" />
+                    Excluir destaque
+                  </button>
+                </div>
+              </div>
+            )}
+
             {personalNotes.length === 0 ? (
               <EmptyHint>
                 {whole
@@ -453,6 +526,18 @@ export function BibleStudyPanel({
         if (confirmDeleteNote) onDeletePersonalNote(confirmDeleteNote);
         setConfirmDeleteNote(null);
         setExpandedNoteId(null);
+      }}
+    />
+
+    <ConfirmVault
+      open={confirmDeleteHighlight}
+      onOpenChange={setConfirmDeleteHighlight}
+      title="Excluir destaque?"
+      description="Essa ação não pode ser desfeita."
+      confirmLabel="Excluir"
+      onConfirm={() => {
+        setConfirmDeleteHighlight(false);
+        onDeleteActiveHighlight?.();
       }}
     />
     </>

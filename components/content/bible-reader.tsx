@@ -28,6 +28,8 @@ import {
 import {
   getBibleChapterHighlights,
   createJwlibraryHighlight,
+  updateJwlibraryHighlightColor,
+  deleteJwlibraryHighlight,
   deleteJwlibraryNote,
   type BibleVerseHighlight,
 } from "@/app/(app)/jwlibrary-actions";
@@ -42,7 +44,6 @@ import {
   type PrefilledJwlibraryLocation,
   type EditableJwlibraryNote,
 } from "./jwlibrary-note-editor-vault";
-import { JwlibraryHighlightNotePanel } from "./jwlibrary-highlight-note-panel";
 
 interface BibleReaderProps {
   /** null when /bible was opened with no ?book=/?chapter= — starts on the book-grid screen instead of jumping straight to reading. */
@@ -118,7 +119,10 @@ function BibleTopHeader({ title, onBack, studyOpen, onToggleStudy, userEmail }: 
  * (`?book=&chapter=&verse=`); moving between the three screens is local
  * state, not its own URL. Reading itself mirrors jwpub-reader.tsx closely
  * (chapter switching, highlighting, notes), reusing JwlibraryNoteEditorVault
- * and JwlibraryHighlightNotePanel unchanged.
+ * for the actual editing. Unlike jwpub-reader.tsx, this reader has no
+ * separate highlight/note viewing panel — the Estudo panel's Pessoal tab
+ * (bible-study-panel.tsx) is the one place a highlight or note is viewed,
+ * recolored, annotated, or deleted from here.
  */
 export function BibleReader({ initialBookOrder, initialChapter, initialVerse, userEmail }: BibleReaderProps) {
   const router = useRouter();
@@ -410,19 +414,48 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     return selectedVerse === null ? withNotes : withNotes.filter((n) => n.verse === selectedVerse);
   }, [highlights, selectedVerse]);
 
-  // highlightMark used to be passed straight through as setHighlightMark, so
-  // clicking a note-less highlight right after viewing/editing a note left
-  // highlightNote (and edit mode) set — the note-less panel's `open`
-  // condition was already true from that stale state, so it never visibly
-  // "opened" on that click, making the click look like it did nothing until
-  // closing and clicking again. Clearing highlightNote/edit mode whenever a
-  // fresh highlight is opened keeps exactly one panel-relevant piece of
-  // state active at a time.
+  // Clicking a note-less highlight used to open its own third sidebar
+  // (JwlibraryHighlightNotePanel's note-less branch) — same redundancy as
+  // handleViewHighlightNote below, since the Estudo panel's Pessoal tab is
+  // now where every highlight/note (with or without a note) is viewed. This
+  // just scopes that panel to the highlight's verse and keeps it (as
+  // `highlightMark`) around for the recolor/add-note/delete controls the
+  // Pessoal tab renders for it — see BibleStudyPanel's `activeHighlight`.
   const openHighlightMark = useCallback((mark: (BibleVerseHighlight & { text?: string }) | null) => {
     setHighlightMark(mark);
     setHighlightNote(null);
     setHighlightEditMode(false);
+    if (mark) {
+      setSelectedVerse(mark.verse);
+      setStudyTab("pessoal");
+      setStudyOpen(true);
+    }
   }, []);
+
+  const handleHighlightMarkColorChange = useCallback(
+    (colorIndex: number) => {
+      if (!highlightMark) return;
+      const id = highlightMark.id;
+      // Local patch, no refetch — matches handleCreateHighlight's optimistic
+      // pattern above.
+      setHighlightMark((prev) => (prev ? { ...prev, colorIndex } : prev));
+      setHighlights((prev) => prev.map((h) => (h.id === id ? { ...h, colorIndex } : h)));
+      void updateJwlibraryHighlightColor(id, colorIndex).then((result) => {
+        if (result.error) notify.error("Não foi possível trocar a cor", result.error);
+      });
+    },
+    [highlightMark]
+  );
+
+  const handleDeleteHighlightMark = useCallback(() => {
+    if (!highlightMark) return;
+    const id = highlightMark.id;
+    setHighlights((prev) => prev.filter((h) => h.id !== id));
+    setHighlightMark(null);
+    void deleteJwlibraryHighlight(id).then((result) => {
+      if (result.error) notify.error("Não foi possível excluir o destaque", result.error);
+    });
+  }, [highlightMark]);
 
   const handlePickVerseSpan = useCallback(
     (verse: number, startToken: number, endToken: number, selectedText?: string) => {
@@ -676,6 +709,11 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         personalNotes={panelPersonalNotes}
         onEditPersonalNote={handleEditPersonalNote}
         onDeletePersonalNote={handleDeletePersonalNote}
+        activeHighlight={highlightMark}
+        onCloseActiveHighlight={() => setHighlightMark(null)}
+        onAddNoteToActiveHighlight={handleAddNoteToHighlight}
+        onColorChangeActiveHighlight={handleHighlightMarkColorChange}
+        onDeleteActiveHighlight={handleDeleteHighlightMark}
       />
 
       <BibleAppendixSurface
@@ -685,41 +723,6 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         onOpenBibleRef={(refBookOrder, refChapter, refVerse) => {
           setOpenAppendixId(null);
           enterReading(refBookOrder, refChapter, refVerse);
-        }}
-      />
-
-      {/*
-        Only ever used here for the note-LESS mode now (recolor/add
-        note/delete a bare highlight) — a highlight/note that already has a
-        note is viewed via the Estudo panel's Pessoal tab instead (see
-        handleViewHighlightNote above), so `note` is never fed here.
-        `highlightNote` still exists as state, but only to drive
-        JwlibraryNoteEditorVault below while editing.
-      */}
-      <JwlibraryHighlightNotePanel
-        open={highlightMark !== null && !highlightEditMode}
-        note={null}
-        highlightId={highlightMark?.id}
-        colorIndex={highlightMark?.colorIndex}
-        highlightText={highlightMark?.text}
-        onClose={() => setHighlightMark(null)}
-        onEdit={() => setHighlightEditMode(true)}
-        onAddNote={handleAddNoteToHighlight}
-        onColorChanged={(colorIndex) => {
-          // Local patch, no refetch — instant, matching the optimistic
-          // creation flow above.
-          const id = highlightMark?.id;
-          setHighlightMark((prev) => (prev ? { ...prev, colorIndex } : prev));
-          if (id) setHighlights((prev) => prev.map((h) => (h.id === id ? { ...h, colorIndex } : h)));
-        }}
-        onDeleted={() => {
-          // Local patch, no refetch — matches the optimistic delete in
-          // jwlibrary-highlight-note-panel.tsx: waiting on a full chapter
-          // refetch after the delete round trip was the main source of the
-          // "demora muito para atualizar" delay.
-          const id = highlightMark?.id;
-          if (id) setHighlights((prev) => prev.filter((h) => h.id !== id));
-          setHighlightMark(null);
         }}
       />
 
