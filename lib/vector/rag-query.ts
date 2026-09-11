@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { findBibleReferenceInText } from "@/lib/bible/parse-reference";
 
 export interface MatchResult {
   id: string;
@@ -35,6 +36,20 @@ export interface OrdinalConstraint {
 export interface QueryConstraints {
   targetYear: number | null;
   targetNum: number | null;
+  /**
+   * True only when `targetNum` came from an explicit prefix word ("número
+   * 2", "boletim 2", "edição 2") -- false when it's the bare `\d{1,2}`
+   * fallback below picking up an incidental short number (a Bible chapter,
+   * a verse, the leading "1"/"2"/"3" of a book name like "1 Coríntios").
+   * `rerankMatches`' conflict-penalty logic must only trust the explicit
+   * case: penalizing a candidate because its transcript happens to contain
+   * some unrelated one/two-digit number turned a verified exact match (e.g.
+   * a "1 Coríntios capítulo 9" query hitting the right Morning Worship talk)
+   * into a rejected one -- confirmed empirically against the real talk
+   * "Mark Scott: Estabeleça Alvos Que Honrem a Jeová (1 Cor. 9:26)", whose
+   * transcript's own first incidental number didn't happen to be 9.
+   */
+  targetNumExplicit: boolean;
   /** e.g. "a ultima adoracao matinal", "o video mais recente" -- no year/number given, just "give me the newest one". Kept as a plain boolean alongside `ordinal` since it's the overwhelmingly common case and reads clearer at call sites than `ordinal?.direction === "latest" && ordinal.offsetFromEnd === 0`. */
   wantsLatest: boolean;
   /** Non-null whenever the query points at a specific position from either end of a timeline: "último" (latest, 0), "penúltimo" (latest, 1), "antepenúltimo" (latest, 2), "primeiro"/"mais antigo" (oldest, 0), "segundo mais recente" (latest, 1), "terceiro mais antigo" (oldest, 2), etc. */
@@ -110,16 +125,22 @@ export function parseQueryConstraints(query: string): QueryConstraints {
   // Remove the year to avoid confusing bulletin number extraction
   const queryWithoutYear = targetYear ? norm.replace(String(targetYear), "") : norm;
 
-  // 2. Extract bulletin / item number (e.g. "numero 2", "nº 2", "n.º 2", "n2", "boletim 2")
+  // 2. Extract bulletin / item number (e.g. "numero 2", "nº 2", "n.º 2", "n2", "boletim 2").
+  // Deliberately does NOT include "capitulo" -- that word means a Bible or
+  // publication chapter, never a bulletin/edição number, and nothing
+  // downstream actually checks for a "capítulo N" citation style; including
+  // it here only fed a chapter number into the bulletin-numbering
+  // conflict-check below.
   let targetNum: number | null = null;
-  const numMatch =
-    queryWithoutYear.match(/(?:numero|num|n[.\sº°o]*|boletim|capitulo|parte|edicao)\s*(\d+)/i) ??
-    queryWithoutYear.match(/\b(\d{1,2})\b/);
+  let targetNumExplicit = false;
+  const explicitNumMatch = queryWithoutYear.match(/(?:numero|num|n[.\sº°o]*|boletim|parte|edicao)\s*(\d+)/i);
+  const numMatch = explicitNumMatch ?? queryWithoutYear.match(/\b(\d{1,2})\b/);
 
   if (numMatch) {
     const num = parseInt(numMatch[1], 10);
     if (!isNaN(num) && num > 0 && num < 200) {
       targetNum = num;
+      targetNumExplicit = explicitNumMatch !== null;
     }
   }
 
@@ -130,7 +151,7 @@ export function parseQueryConstraints(query: string): QueryConstraints {
   const ordinal = parseOrdinalConstraint(norm);
   const wantsLatest = ordinal !== null && ordinal.direction === "latest" && ordinal.offsetFromEnd === 0;
 
-  return { targetYear, targetNum, wantsLatest, ordinal };
+  return { targetYear, targetNum, targetNumExplicit, wantsLatest, ordinal };
 }
 
 /**
@@ -146,7 +167,7 @@ export async function rerankMatches(
   query: string,
   matches: MatchResult[]
 ): Promise<MatchResult[]> {
-  const { targetYear, targetNum, ordinal } = parseQueryConstraints(query);
+  const { targetYear, targetNum, targetNumExplicit, ordinal } = parseQueryConstraints(query);
   if (targetYear === null && targetNum === null && !ordinal) return matches;
 
   let reranked: MatchResult[] = [];
@@ -170,8 +191,13 @@ export async function rerankMatches(
       }
     }
 
-    // Check Bulletin / Item Number
-    if (targetNum !== null) {
+    // Check Bulletin / Item Number -- only when the query's number came from
+    // an explicit bulletin/edição word (see targetNumExplicit above). A
+    // bare-fallback number (a Bible chapter/verse digit, a book's leading
+    // "1"/"2"/"3", ...) is too coincidental to justify rejecting a candidate
+    // just because its own transcript happens to mention some unrelated
+    // one/two-digit number.
+    if (targetNum !== null && targetNumExplicit) {
       const numPatterns = [
         `n.º ${targetNum}`,
         `nº ${targetNum}`,
@@ -186,11 +212,11 @@ export async function rerankMatches(
 
       const matchesNumPattern =
         numPatterns.some((pat) => textToSearch.includes(pat)) ||
-        itemConstraints.targetNum === targetNum;
+        (itemConstraints.targetNumExplicit && itemConstraints.targetNum === targetNum);
 
       if (matchesNumPattern) {
         scoreModifier += 0.5;
-      } else if (itemConstraints.targetNum !== null && itemConstraints.targetNum !== targetNum) {
+      } else if (itemConstraints.targetNumExplicit && itemConstraints.targetNum !== targetNum) {
         isNumConflicting = true;
       }
     }
@@ -415,9 +441,23 @@ const CATEGORY_KEYWORDS: { pattern: RegExp; categoryKey: string }[] = [
   { pattern: /\bbroadcasting\b/, categoryKey: "StudioMonthlyPrograms" },
 ];
 
-function detectCategoryKey(normalizedAccentStrippedQuery: string): string | null {
+/** Accent-strips and lowercases a single word for stopword/exclusion comparisons -- kept separate from tokenizing a whole query (see `extractTitleKeywords`) since callers here only ever need to normalize one already-isolated word at a time. */
+function stripAccentsLower(word: string): string {
+  return word.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+interface CategoryMatch {
+  categoryKey: string;
+  /** Accent-stripped words making up the matched phrase (e.g. {"adoracoes","matinais"}) -- see the exclusion in fetchExactMetadataMatches below. */
+  matchedWords: Set<string>;
+}
+
+function detectCategoryKey(normalizedAccentStrippedQuery: string): CategoryMatch | null {
   for (const { pattern, categoryKey } of CATEGORY_KEYWORDS) {
-    if (pattern.test(normalizedAccentStrippedQuery)) return categoryKey;
+    const match = pattern.exec(normalizedAccentStrippedQuery);
+    if (match) {
+      return { categoryKey, matchedWords: new Set(match[0].split(/\s+/).filter(Boolean)) };
+    }
   }
   return null;
 }
@@ -483,15 +523,32 @@ const TITLE_SEARCH_STOPWORDS = new Set([
  * the fallback below, for the same reason the bare "boletim" case doesn't:
  * a single generic word (e.g. "estudo") would match dozens of unrelated
  * titles as fake "exact" matches.
+ *
+ * Returned words keep their original accents (only the length/stopword
+ * check below uses the accent-stripped form) -- titles and transcripts in
+ * the DB are stored with accents (`Coríntios`, `capítulo`), and a plain
+ * ILIKE is accent-sensitive, so an accent-stripped keyword ("corintios")
+ * would silently match zero rows even when the word is right there in the
+ * text. Verified directly against the DB: `ILIKE '%corintios%'` matches 0
+ * of 2460 videos while `ILIKE '%coríntios%'` matches 314 -- this alone was
+ * making the whole exact-match fallback a no-op for any query containing an
+ * accented Portuguese word, which is most of them.
  */
 function extractTitleKeywords(query: string): string[] {
-  const words = query
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+  const rawWords = query
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 3 && !TITLE_SEARCH_STOPWORDS.has(w));
-  return [...new Set(words)];
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const w of rawWords) {
+    const stripped = stripAccentsLower(w);
+    if (stripped.length < 3 || TITLE_SEARCH_STOPWORDS.has(stripped)) continue;
+    if (seen.has(w)) continue;
+    seen.add(w);
+    result.push(w);
+  }
+  return result;
 }
 
 export async function fetchExactMetadataMatches(
@@ -499,12 +556,24 @@ export async function fetchExactMetadataMatches(
   query: string,
   allowedTypes: string[]
 ): Promise<MatchResult[]> {
-  const { targetYear, targetNum } = parseQueryConstraints(query);
+  const { targetYear, targetNum, targetNumExplicit } = parseQueryConstraints(query);
   const norm = query.toLowerCase();
   const normStripped = norm.normalize("NFD").replace(/[̀-ͯ]/g, "");
   const isBoletimSearch = norm.includes("boletim");
-  const categoryKey = detectCategoryKey(normStripped);
+  const categoryMatch = detectCategoryKey(normStripped);
+  const categoryKey = categoryMatch?.categoryKey ?? null;
   const titleKeywords = extractTitleKeywords(query);
+  // When a category phrase matched ("adorações matinais" -> category_key
+  // filter below), its own words describe the PROGRAM, not the talk -- a
+  // Morning Worship talk's transcript essentially never repeats "adorações
+  // matinais" verbatim, so requiring those words to also appear in
+  // title/content_text (the AND-filter below) made a category match
+  // combined with any real topic ("... com 1 Coríntios capítulo 9")
+  // impossible to satisfy. Excluded here, from the AND-filter set only --
+  // `titleKeywords` itself stays intact for the signal-gating checks below.
+  const videoContentKeywords = categoryMatch
+    ? titleKeywords.filter((w) => !categoryMatch.matchedWords.has(stripAccentsLower(w)))
+    : titleKeywords;
   // The video catalog is shared and not scoped to any one person, so a
   // single generic word risks pulling in dozens of unrelated "exact"
   // matches — same reasoning as the bare "boletim" case below, hence >=2.
@@ -513,6 +582,19 @@ export async function fetchExactMetadataMatches(
   // "Rispa") is precise enough on its own without that same risk.
   const hasVideoKeywordSignal = titleKeywords.length >= 2;
   const hasNoteKeywordSignal = titleKeywords.length >= 1;
+
+  // A specific "book chapter[:verse]" mention paired with a named category
+  // ("adorações matinais com 1 Coríntios capítulo 9") gets its own precise
+  // path below instead of the generic keyword-AND one -- talks cite their
+  // theme scripture in the transcript itself ("Vamos ler 1 Coríntios
+  // 9:26..."), so a "book chapter" substring is a much sharper signal than
+  // ANDing "coríntios" (which shows up in unrelated cross-references across
+  // dozens of talks) against the whole transcript. Gated on `categoryKey` so
+  // this only fires for the narrow "named program + scripture" shape --
+  // unscoped across the whole 2460-video catalog the same substring is far
+  // noisier (verified empirically: "coríntios 9" alone matches 18 videos
+  // catalog-wide vs. 3 once scoped to Morning Worship).
+  const inlineBibleRef = categoryKey ? findBibleReferenceInText(query) : null;
 
   // A bare "boletim" mention with no year or number is too vague to justify
   // forcing every bulletin video in as a fake "exact" match (similarity
@@ -528,7 +610,37 @@ export async function fetchExactMetadataMatches(
 
   const results: MatchResult[] = [];
 
-  if (allowedTypes.includes("video") && (categoryKey || isBoletimSearch || targetYear !== null || hasVideoKeywordSignal)) {
+  if (allowedTypes.includes("video") && inlineBibleRef) {
+    const refPattern = `%${escapeLikePattern(inlineBibleRef.book.toLowerCase())} ${inlineBibleRef.chapter}%`;
+    const { data: refVids } = await supabase
+      .from("global_videos")
+      .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url")
+      .eq("category_key", categoryKey)
+      .or(`title.ilike.${refPattern},content_text.ilike.${refPattern}`)
+      .order("first_published", { ascending: false, nullsFirst: false })
+      .limit(10);
+
+    for (const v of refVids ?? []) {
+      results.push({
+        id: `exact-vid-ref-${v.id}`,
+        note_id: null,
+        video_id: v.id,
+        source_type: "video",
+        content: v.content_text || `Vídeo: ${v.title}`,
+        similarity: 0.99,
+        metadata: {
+          title: v.title,
+          type: "video",
+          videoId: v.id,
+          videoUrl: v.video_url,
+          coverImage: v.cover_image,
+          durationFormatted: v.duration_formatted,
+          subtitlesUrl: v.subtitles_url,
+          matchedByTitleKeyword: false,
+        },
+      });
+    }
+  } else if (allowedTypes.includes("video") && (categoryKey || isBoletimSearch || targetYear !== null || hasVideoKeywordSignal)) {
     function baseVideoQuery() {
       let q = supabase
         .from("global_videos")
@@ -561,7 +673,7 @@ export async function fetchExactMetadataMatches(
     // with hundreds of rows — which the ordinal rerank step below depends on
     // being present.
     let videoQuery = baseVideoQuery();
-    for (const word of titleKeywords) videoQuery = withWordFilter(videoQuery, word);
+    for (const word of videoContentKeywords) videoQuery = withWordFilter(videoQuery, word);
     let { data: vids } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
 
     // The stopword list above is inherently incomplete — a filler word that
@@ -571,8 +683,8 @@ export async function fetchExactMetadataMatches(
     // just the two longest keywords, on the theory that the actual
     // identifying words (a name, a distinctive term) are rarely the shortest
     // ones in the sentence.
-    if ((!vids || vids.length === 0) && titleKeywords.length >= 3) {
-      const longestTwo = [...titleKeywords].sort((a, b) => b.length - a.length).slice(0, 2);
+    if ((!vids || vids.length === 0) && videoContentKeywords.length >= 3) {
+      const longestTwo = [...videoContentKeywords].sort((a, b) => b.length - a.length).slice(0, 2);
       let retryQuery = baseVideoQuery();
       for (const word of longestTwo) retryQuery = withWordFilter(retryQuery, word);
       ({ data: vids } = await retryQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30));
@@ -584,7 +696,7 @@ export async function fetchExactMetadataMatches(
         const vConstraints = parseQueryConstraints(titleLower);
 
         let isMatch = true;
-        if (targetNum !== null && vConstraints.targetNum !== targetNum) {
+        if (targetNumExplicit && targetNum !== null && vConstraints.targetNum !== targetNum) {
           const numPats = [
             `n.º ${targetNum}`,
             `nº ${targetNum}`,

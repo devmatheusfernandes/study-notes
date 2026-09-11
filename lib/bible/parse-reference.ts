@@ -173,3 +173,90 @@ export function formatBibleReference(ref: ParsedBibleReference): string {
   if (ref.endVerse === null) return `${ref.book} ${ref.chapter}:${ref.startVerse}`;
   return `${ref.book} ${ref.chapter}:${ref.startVerse}-${ref.endVerse}`;
 }
+
+// --- Free-text scanning (RAG retrieval), separate from the anchored parser above ---
+//
+// `bookOrderFromName` is safe to call on an already-isolated candidate (the
+// Tiptap input rule only ever hands it text the user just typed inside
+// parentheses), but several of its short aliases are ordinary Portuguese
+// words -- "De" (Deuteronômio), "Da" (Daniel), "Os" (Oseias) -- so reusing it
+// to scan whole sentences would false-positive on completely unrelated text
+// ("fale um pouco da 5ª parte" -> "Daniel 5"). The scanner below only matches
+// FULL book names, which don't have that problem (with one exception: see
+// EXCLUDED_FROM_SCAN).
+
+/** Book 4, "Números", is itself the ordinary word "numbers" -- excluded from the free-text scan since it would false-positive next to almost any unrelated number ("me passa os números 5 e 6"). */
+const EXCLUDED_FROM_SCAN = new Set([4]);
+
+const fullNameExact = new Map<string, number>();
+const fullNameLoose = new Map<string, number>();
+for (let bookOrder = 1; bookOrder <= 66; bookOrder += 1) {
+  if (EXCLUDED_FROM_SCAN.has(bookOrder)) continue;
+  const exact = normalize(BIBLE_BOOK_NAMES_PT[bookOrder]);
+  fullNameExact.set(exact, bookOrder);
+  const loose = stripAccents(exact);
+  if (!fullNameLoose.has(loose)) fullNameLoose.set(loose, bookOrder);
+}
+
+function fullBookNameOrderFromName(raw: string): number | null {
+  const exact = normalize(raw);
+  if (!exact) return null;
+  return fullNameExact.get(exact) ?? fullNameLoose.get(stripAccents(exact)) ?? null;
+}
+
+const SCAN_FILLER_WORDS = new Set(["capitulo", "cap", "versiculo", "v"]);
+
+function tokenizeForScan(text: string): string[] {
+  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+export interface InlineBibleReference {
+  bookOrder: number;
+  book: string;
+  chapter: number;
+  startVerse: number | null;
+}
+
+/**
+ * Scans free-form text (a chat question, not an isolated reference) for a
+ * "book chapter[:verse]" mention anywhere within it -- e.g. "adorações
+ * matinais com 1 Coríntios capítulo 9". Tries book-name windows of up to 3
+ * tokens (to catch a numbered prefix like "1 Coríntios" or a multi-word name
+ * like "Cântico de Salomão") at every position, longest first, so a real
+ * match wins over any shorter coincidental one earlier in the same window.
+ */
+export function findBibleReferenceInText(text: string): InlineBibleReference | null {
+  const tokens = tokenizeForScan(text);
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    for (let windowLen = Math.min(3, tokens.length - i); windowLen >= 1; windowLen -= 1) {
+      const candidate = tokens.slice(i, i + windowLen).join(" ");
+      const bookOrder = fullBookNameOrderFromName(candidate);
+      if (bookOrder === null) continue;
+
+      let j = i + windowLen;
+      if (j < tokens.length && SCAN_FILLER_WORDS.has(stripAccents(tokens[j]))) j += 1;
+      if (j >= tokens.length || !/^\d{1,3}$/.test(tokens[j])) continue;
+
+      const chapter = Number(tokens[j]);
+      if (chapter < 1 || chapter > BIBLE_BOOK_CHAPTER_COUNTS[bookOrder]) continue;
+
+      const k = j + 1;
+      let startVerse: number | null = null;
+      if (k < tokens.length && /^\d{1,3}$/.test(tokens[k])) {
+        startVerse = Number(tokens[k]);
+      } else if (
+        k < tokens.length &&
+        SCAN_FILLER_WORDS.has(stripAccents(tokens[k])) &&
+        k + 1 < tokens.length &&
+        /^\d{1,3}$/.test(tokens[k + 1])
+      ) {
+        startVerse = Number(tokens[k + 1]);
+      }
+
+      return { bookOrder, book: BIBLE_BOOK_NAMES_PT[bookOrder], chapter, startVerse };
+    }
+  }
+
+  return null;
+}
