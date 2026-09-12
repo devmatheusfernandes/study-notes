@@ -19,8 +19,43 @@ import { splitResearchGuideDocument, RESEARCH_GUIDE_IMPORT_VERSION } from "@/lib
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "@/lib/jwpub/sanitize";
 import type { JwpubExtract } from "@/lib/jwpub/types";
 
-/** How many parsed verse entries go up per Server Action call — keeps each request small regardless of how much HTML the whole guide adds up to. */
-const BATCH_SIZE = 500;
+/**
+ * A ceiling on each Server Action call's own payload, not a row count — a
+ * fixed 500-rows-per-batch scheme (this card's original approach) blew past
+ * Vercel's hard 4.5MB request-body cap on Serverless Functions in production,
+ * because HTML size per row varies wildly (a plain citation is a few hundred
+ * bytes; an embedded excerpt — a whole Bible story, a "quadro de destaque" —
+ * can run past 50KB) and next.config.ts's own `bodySizeLimit` can't override
+ * that platform limit. 1.5MB leaves real headroom under it for the
+ * serialization overhead Server Actions add on top of the raw JSON.
+ */
+const MAX_BATCH_BYTES = 1.5 * 1024 * 1024;
+
+/**
+ * Slices `items` into batches whose *summed* size never exceeds `maxBytes` —
+ * unlike a fixed row count, this stays safe regardless of how unevenly sized
+ * the items are. A single item larger than `maxBytes` still gets its own
+ * batch rather than being dropped or split.
+ */
+function batchBySize<T>(items: T[], sizeOf: (item: T) => number, maxBytes: number): T[][] {
+  const batches: T[][] = [];
+  let current: T[] = [];
+  let currentBytes = 0;
+
+  for (const item of items) {
+    const size = sizeOf(item);
+    if (current.length > 0 && currentBytes + size > maxBytes) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(item);
+    currentBytes += size;
+  }
+  if (current.length > 0) batches.push(current);
+
+  return batches;
+}
 
 /**
  * Lets the "Guia de Pesquisa" (símbolo `rsg`, JW.org) be (re)imported by
@@ -154,8 +189,7 @@ export function ResearchGuideUploadCard() {
       }
 
       let sent = 0;
-      for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-        const batch = entries.slice(i, i + BATCH_SIZE);
+      for (const batch of batchBySize(entries, (e) => e.contentHtml.length, MAX_BATCH_BYTES)) {
         setProgress(`Gravando citações (${sent}/${entries.length})`);
         const result = await appendResearchGuideEntries(batch);
         if (!result.ok) {
@@ -167,8 +201,7 @@ export function ResearchGuideUploadCard() {
 
       const extracts = [...extractsById.values()];
       let extractsSent = 0;
-      for (let i = 0; i < extracts.length; i += BATCH_SIZE) {
-        const batch = extracts.slice(i, i + BATCH_SIZE);
+      for (const batch of batchBySize(extracts, (e) => e.contentHtml.length, MAX_BATCH_BYTES)) {
         setProgress(`Gravando trechos embutidos (${extractsSent}/${extracts.length})`);
         const result = await appendResearchGuideExtracts(batch);
         if (!result.ok) {
