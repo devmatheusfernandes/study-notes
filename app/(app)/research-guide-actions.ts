@@ -47,9 +47,16 @@ export async function getResearchGuideStats(): Promise<ResearchGuideStats> {
  * that's already imported. Only compares against a *completed* prior import
  * (`imported_at` set) — a hash saved by an import that failed partway
  * through must not block a retry of that same file.
+ *
+ * Also requires `import_version` to match `RESEARCH_GUIDE_IMPORT_VERSION` —
+ * a code change to the parsing/rewriting logic (like the one that added
+ * embedded excerpts) doesn't change the source file's hash at all, so
+ * without this a reupload of the identical file would be wrongly skipped
+ * forever, with no way to pick up the fix short of clearing the row by hand.
  */
 export async function checkResearchGuideNeedsImport(
-  sourceHash: string
+  sourceHash: string,
+  importVersion: number
 ): Promise<{ needsImport: boolean; error?: string }> {
   const supabase = await createClient();
   const {
@@ -59,10 +66,11 @@ export async function checkResearchGuideNeedsImport(
 
   const { data } = await supabase
     .from("bible_research_guide_meta")
-    .select("source_hash, imported_at")
+    .select("source_hash, imported_at, import_version")
     .single();
 
-  const alreadyImported = data?.imported_at !== null && data?.source_hash === sourceHash;
+  const alreadyImported =
+    data?.imported_at !== null && data?.source_hash === sourceHash && data?.import_version === importVersion;
   return { needsImport: !alreadyImported };
 }
 
@@ -77,7 +85,8 @@ export async function checkResearchGuideNeedsImport(
  */
 export async function beginResearchGuideImport(
   publicationTitle: string,
-  sourceHash: string
+  sourceHash: string,
+  importVersion: number
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const {
@@ -98,7 +107,13 @@ export async function beginResearchGuideImport(
 
     const { error: metaError } = await admin
       .from("bible_research_guide_meta")
-      .update({ publication_title: publicationTitle, entry_count: 0, imported_at: null, source_hash: sourceHash })
+      .update({
+        publication_title: publicationTitle,
+        entry_count: 0,
+        imported_at: null,
+        source_hash: sourceHash,
+        import_version: importVersion,
+      })
       .eq("id", true);
     if (metaError) return { ok: false, error: "Não foi possível reiniciar o progresso." };
 
