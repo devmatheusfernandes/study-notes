@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { crawlCategory } from "@/lib/video/video-crawler";
 import { formatVttToText } from "@/lib/video/video-utils";
+import { buildVideoScriptureRows } from "@/lib/bible/video-scripture-refs";
 
 export interface GlobalVideoStats {
   totalVideos: number;
@@ -124,6 +125,25 @@ export async function syncGlobalJwVideos(): Promise<{
 
           if (!insertErr) {
             addedCount++;
+
+            // Link the video to whatever Bible chapters its title and
+            // transcript cite, right here — the title and transcript are
+            // already in memory, so a new video shows up in the Bible reader's
+            // "Vídeos" tab immediately instead of waiting for the settings
+            // page's backfill pass to come around to it. Best-effort: a parse
+            // that finds nothing still marks the video indexed, and a failed
+            // write just leaves `scriptures_indexed_at` null for the backfill
+            // to pick up.
+            const scriptureRows = buildVideoScriptureRows(v.id, v.title, contentText);
+            const { error: refsErr } = scriptureRows.length
+              ? await admin.from("video_scripture_refs").insert(scriptureRows)
+              : { error: null };
+            if (!refsErr) {
+              await admin
+                .from("global_videos")
+                .update({ scriptures_indexed_at: new Date().toISOString() })
+                .eq("id", v.id);
+            }
 
             // Queue for global vectorization
             await admin.from("vectorization_queue").insert({

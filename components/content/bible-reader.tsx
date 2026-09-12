@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,9 +33,12 @@ import {
   deleteJwlibraryNote,
   type BibleVerseHighlight,
 } from "@/app/(app)/jwlibrary-actions";
+import { getChapterVideos, type ChapterVideo } from "@/app/(app)/bible-search-actions";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
+import { BibleSearchInput } from "./bible-search-input";
+import { BibleSearchResults } from "./bible-search-results";
 import { BibleStudyPanel, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
@@ -53,14 +56,20 @@ interface BibleReaderProps {
   userEmail?: string;
 }
 
-type BibleScreen = "books" | "chapters" | "reading";
+type BibleScreen = "books" | "chapters" | "reading" | "search";
 
 interface BibleTopHeaderProps {
   title: string;
   onBack?: () => void;
+  /** What the back arrow does on this screen — "Trocar de capítulo" while reading, "Sair da busca" on the results screen. */
+  backLabel?: string;
   studyOpen?: boolean;
   onToggleStudy?: () => void;
   userEmail?: string;
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
+  onSearchSubmit: () => void;
+  onSearchClear: () => void;
 }
 
 /**
@@ -74,15 +83,28 @@ interface BibleTopHeaderProps {
  * Previously this was a second bar stacked below the shared Header's own
  * "Bíblia" title, which is the redundant double-header this replaces.
  */
-function BibleTopHeader({ title, onBack, studyOpen, onToggleStudy, userEmail }: BibleTopHeaderProps) {
+function BibleTopHeader({
+  title,
+  onBack,
+  backLabel = "Trocar de capítulo",
+  studyOpen,
+  onToggleStudy,
+  userEmail,
+  searchQuery,
+  onSearchQueryChange,
+  onSearchSubmit,
+  onSearchClear,
+}: BibleTopHeaderProps) {
   return (
-    <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-border bg-background/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 sm:px-6">
+    // `relative` so the search field's mobile layout can cover this row rather
+    // than push its contents around — see BibleSearchInput.
+    <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-border bg-background/85 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 sm:px-6 relative">
       <SidebarToggleButton />
       {onBack && (
         <button
           type="button"
           onClick={onBack}
-          aria-label="Trocar de capítulo"
+          aria-label={backLabel}
           className="shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
         >
           <ChevronLeft className="size-4" />
@@ -90,6 +112,12 @@ function BibleTopHeader({ title, onBack, studyOpen, onToggleStudy, userEmail }: 
       )}
       <h1 className="min-w-0 flex-1 truncate font-heading text-lg tracking-tight">{title}</h1>
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        <BibleSearchInput
+          value={searchQuery}
+          onChange={onSearchQueryChange}
+          onSubmit={onSearchSubmit}
+          onClear={onSearchClear}
+        />
         {onToggleStudy && (
           <button
             type="button"
@@ -169,6 +197,50 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   // Clicking a highlight with NO note (a "destaque puro") opens the same
   // panel in its note-less mode (recolor/add note/delete) instead.
   const [highlightMark, setHighlightMark] = useState<(BibleVerseHighlight & { text?: string }) | null>(null);
+
+  // --- Busca (header) ---
+  //
+  // `query` é o que está digitado; `submittedQuery` é o que a tela de
+  // resultados realmente consulta, atrasado em 350 ms para não disparar uma
+  // ida ao servidor por tecla. Enter pula a espera.
+  const [query, setQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
+
+  // Para onde voltar quando a busca é limpa — a tela em que a pessoa estava
+  // antes de digitar, não sempre a grade de livros. Um ref, e não estado,
+  // porque mudar isso nunca precisa provocar renderização por si só.
+  const screenBeforeSearchRef = useRef<BibleScreen>("books");
+  useEffect(() => {
+    if (screen !== "search") screenBeforeSearchRef.current = screen;
+  }, [screen]);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      // Adiado um tique, como os outros efeitos deste arquivo: apagar a
+      // consulta aqui dentro, de forma síncrona, é exatamente a cascata de
+      // renderizações que a regra react-hooks/set-state-in-effect proíbe.
+      queueMicrotask(() => setSubmittedQuery(""));
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSubmittedQuery(trimmed);
+      setScreen("search");
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const submitSearch = useCallback(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return;
+    setSubmittedQuery(trimmed);
+    setScreen("search");
+  }, [query]);
+
+  const exitSearch = useCallback(() => {
+    setSubmittedQuery("");
+    setScreen(screenBeforeSearchRef.current);
+  }, []);
 
   const currentBook = books?.find((b) => b.bookOrder === bookOrder) ?? null;
   const bookIndex = books?.findIndex((b) => b.bookOrder === bookOrder) ?? -1;
@@ -371,6 +443,43 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       cancelled = true;
     };
   }, [studyOpen, selectedVerse, refsSource, bookOrder, chapter]);
+
+  // Vídeos do JW.org ligados a este capítulo — o título ou a transcrição deles
+  // cita algum texto daqui (ver video_scripture_refs, migração 0025).
+  //
+  // Buscado por CAPÍTULO, não por versículo, mesmo quando um versículo está
+  // selecionado: são poucas linhas, e filtrar em memória deixa alternar entre
+  // "capítulo inteiro" e um versículo instantâneo em vez de uma ida ao
+  // servidor por toque — o mesmo motivo pelo qual as notas de rodapé já são
+  // carregadas por capítulo.
+  const [chapterVideos, setChapterVideos] = useState<ChapterVideo[]>([]);
+  const [isLoadingChapterVideos, setIsLoadingChapterVideos] = useState(false);
+
+  useEffect(() => {
+    if (!studyOpen) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setIsLoadingChapterVideos(true);
+    });
+    void getChapterVideos(bookOrder, chapter).then((result) => {
+      if (cancelled) return;
+      setChapterVideos(result.videos ?? []);
+      setIsLoadingChapterVideos(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [studyOpen, bookOrder, chapter]);
+
+  // Um vídeo cujo tema é o capítulo inteiro continua aparecendo com um
+  // versículo selecionado — ele fala do versículo por definição. Some só quem
+  // aponta explicitamente para outros versículos.
+  const panelVideos = useMemo(() => {
+    if (selectedVerse === null) return chapterVideos;
+    return chapterVideos.filter(
+      (video) => video.verses.length === 0 || video.verses.includes(selectedVerse)
+    );
+  }, [chapterVideos, selectedVerse]);
 
   const handleOpenStudy = useCallback((verse: number, tab: BibleStudyTab) => {
     setSelectedVerse(verse);
@@ -588,6 +697,36 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     });
   }, []);
 
+  // Cada tela monta seu próprio cabeçalho, então estas quatro props de busca
+  // vão para todas elas — juntas num objeto para não repetir a mesma lista em
+  // quatro lugares e deixar uma delas para trás numa mudança futura.
+  const searchHeaderProps = {
+    searchQuery: query,
+    onSearchQueryChange: setQuery,
+    onSearchSubmit: submitSearch,
+    onSearchClear: exitSearch,
+  };
+
+  if (screen === "search") {
+    return (
+      <div className="flex min-h-dvh w-full flex-1 flex-col">
+        <BibleTopHeader
+          title="Busca"
+          onBack={exitSearch}
+          backLabel="Sair da busca"
+          userEmail={userEmail}
+          {...searchHeaderProps}
+        />
+        <BibleSearchResults
+          query={submittedQuery}
+          onSelectVerse={(refBookOrder, refChapter, refVerse) =>
+            enterReading(refBookOrder, refChapter, refVerse)
+          }
+        />
+      </div>
+    );
+  }
+
   if (screen === "books") {
     return (
       // JwpubSidePanel (rendered inside BibleAppendixSurface) is a flex
@@ -597,7 +736,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       // grid instead of opening as a side panel next to it.
       <div className="flex min-h-dvh w-full flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <BibleTopHeader title="Bíblia" userEmail={userEmail} />
+          <BibleTopHeader title="Bíblia" userEmail={userEmail} {...searchHeaderProps} />
           <BibleBookGrid
             books={books}
             onSelectBook={pickBook}
@@ -621,7 +760,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   if (screen === "chapters") {
     return (
       <>
-        <BibleTopHeader title="Bíblia" userEmail={userEmail} />
+        <BibleTopHeader title="Bíblia" userEmail={userEmail} {...searchHeaderProps} />
         <BibleChapterGrid
           bookName={currentBook?.book ?? ""}
           bookOrder={bookOrder}
@@ -643,6 +782,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
           studyOpen={studyOpen}
           onToggleStudy={() => setStudyOpen((v) => !v)}
           userEmail={userEmail}
+          {...searchHeaderProps}
         />
 
         <div className="flex-1 px-4 py-6 sm:px-6">
@@ -706,6 +846,8 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         studyLoading={isLoadingStudy}
         onOpenBibleRef={enterReading}
         onOpenAppendix={setOpenAppendixId}
+        videos={panelVideos}
+        videosLoading={isLoadingChapterVideos}
         personalNotes={panelPersonalNotes}
         onEditPersonalNote={handleEditPersonalNote}
         onDeletePersonalNote={handleDeletePersonalNote}

@@ -22,6 +22,7 @@ import { ViewModeToggle } from "@/components/content/view-mode-toggle";
 import { AiUsageCard } from "@/components/settings/ai-usage-card";
 import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
+import { VideoScriptureIndexCard } from "@/components/settings/video-scripture-index-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
@@ -188,6 +189,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               {/* Row 3: Full Width Global Video Sync Card */}
               <GlobalVideoSyncCard />
 
+              {/* Row 3b: Bible references extracted from those videos */}
+              <VideoScriptureIndexCard />
+
               {/* Row 4: Full Width Tags Card */}
               <TagsSettingsCard />
 
@@ -207,6 +211,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               <AiUsageCard />
               <VectorQueueCard />
               <GlobalVideoSyncCard />
+              <VideoScriptureIndexCard />
             </div>
           )}
 

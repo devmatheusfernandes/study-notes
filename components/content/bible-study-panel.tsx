@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Gem, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Film, Gem, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { bodyToPlainText } from "@/lib/note-preview";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import type { ChapterVideo } from "@/app/(app)/bible-search-actions";
+import { BibleStudyRowsSkeleton, BibleStudyVideosSkeleton } from "./bible-study-panel-skeleton";
 import type {
   BibleBook,
   BibleFootnote,
@@ -19,7 +22,7 @@ import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleReferencesList, CROSS_REFERENCE_SOURCE_LABELS } from "./bible-references-panel";
 
-export type BibleStudyTab = "referencias" | "notas" | "rodape" | "pessoal";
+export type BibleStudyTab = "referencias" | "notas" | "rodape" | "videos" | "pessoal";
 
 /** A personal annotation (typed here or imported from a .jwlibrary backup), as opposed to `BibleStudyNote`'s official JW.org commentary. */
 export interface BiblePersonalNote {
@@ -64,6 +67,10 @@ interface BibleStudyPanelProps {
   onOpenBibleRef: (bookOrder: number, chapter: number, verse: number) => void;
   /** A `data-bible-appendix-ref` link inside a study note was clicked — 422 of them exist. */
   onOpenAppendix: (mepsDocumentId: number) => void;
+
+  /** JW.org videos whose title or transcript cites this chapter — already scoped to `selectedVerse` by the caller. */
+  videos: ChapterVideo[];
+  videosLoading: boolean;
 
   personalNotes: WithVerse<BiblePersonalNote>[];
   /** "Editar" on an expanded personal note — opens the full editor vault. */
@@ -125,6 +132,112 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   return <p className="py-6 text-center text-[13px] text-muted-foreground">{children}</p>;
 }
 
+/** "Salmo 37:11", "Salmo 37:11, 29", or just the chapter when the reference names no verse. */
+function formatVideoVerses(chapter: number, verses: number[]): string {
+  if (verses.length === 0) return `capítulo ${chapter}`;
+  return `versículo${verses.length > 1 ? "s" : ""} ${verses.join(", ")}`;
+}
+
+interface VideoRowProps {
+  video: ChapterVideo;
+  chapter: number;
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * How many "mencionam" rows show before the "ver todos" link. Romanos 12 is
+ * cited by 69 different talks, and dropping all of them into a 420px panel
+ * buries the handful of videos actually *about* the chapter under four
+ * thousand pixels of scrolling.
+ */
+const MENTION_PREVIEW_COUNT = 8;
+
+/** One video in the Vídeos tab: a compact row that expands in place into the real player. */
+function VideoRow({ video, chapter, expanded, onToggle }: VideoRowProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className={cn(
+          "flex items-start gap-2.5 rounded-2xl px-2.5 py-2.5 text-left transition-colors",
+          expanded ? "bg-surface-elevated" : "bg-secondary hover:bg-surface-elevated"
+        )}
+      >
+        <span className="relative aspect-video w-20 shrink-0 overflow-hidden rounded-lg bg-black/50">
+          {video.coverImage && (
+            // eslint-disable-next-line @next/next/no-img-element -- JW.org CDN host, not a local asset Next can optimize
+            <img src={video.coverImage} alt="" loading="lazy" className="h-full w-full object-cover" />
+          )}
+          <span className="absolute inset-0 flex items-center justify-center">
+            <Play className="size-3.5 text-white/90 drop-shadow" />
+          </span>
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="line-clamp-2 text-[12.5px] leading-snug text-foreground/90">{video.title}</span>
+          <span className="font-mono text-[10px] tracking-[0.04em] text-muted-foreground">
+            {formatVideoVerses(chapter, video.verses)}
+            {video.durationFormatted ? ` · ${video.durationFormatted}` : ""}
+          </span>
+        </span>
+      </button>
+
+      {expanded && (
+        <InlineVideoCard
+          videoId={video.videoId}
+          title={video.title}
+          videoUrl={video.videoUrl ?? undefined}
+          coverImage={video.coverImage ?? undefined}
+          durationFormatted={video.durationFormatted ?? undefined}
+          subtitlesUrl={video.subtitlesUrl ?? undefined}
+          snippet={video.snippet ?? undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+interface MentionListProps {
+  videos: ChapterVideo[];
+  chapter: number;
+  openVideoId: string | null;
+  onToggleVideo: (videoId: string) => void;
+}
+
+/** The "mencionam" section, collapsed to its first few rows until asked to expand. */
+function MentionList({ videos, chapter, openVideoId, onToggleVideo }: MentionListProps) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? videos : videos.slice(0, MENTION_PREVIEW_COUNT);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="font-mono text-[10.5px] tracking-[0.04em] text-muted-foreground">
+        mencionam ({videos.length})
+      </span>
+      {visible.map((video) => (
+        <VideoRow
+          key={`transcript-${video.videoId}`}
+          video={video}
+          chapter={chapter}
+          expanded={openVideoId === video.videoId}
+          onToggle={() => onToggleVideo(video.videoId)}
+        />
+      ))}
+      {!showAll && videos.length > MENTION_PREVIEW_COUNT && (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          className="self-start rounded-full px-2 py-1 text-[12px] text-accent transition-colors hover:bg-accent/10"
+        >
+          Ver os outros {videos.length - MENTION_PREVIEW_COUNT}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * The reader's study surface: cross references, study notes and footnotes,
  * behind one header toggle instead of three. Same `JwpubSidePanel` shell as
@@ -160,6 +273,8 @@ export function BibleStudyPanel({
   studyLoading,
   onOpenBibleRef,
   onOpenAppendix,
+  videos,
+  videosLoading,
   personalNotes,
   onEditPersonalNote,
   onDeletePersonalNote,
@@ -178,6 +293,10 @@ export function BibleStudyPanel({
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<BiblePersonalNote | null>(null);
   const [confirmDeleteHighlight, setConfirmDeleteHighlight] = useState(false);
+  // Which video is expanded into a real player. One at a time — the panel is
+  // 420px wide and two <video> elements side by side would both be tiny and
+  // both be downloading.
+  const [openVideoId, setOpenVideoId] = useState<string | null>(null);
 
   // Delegated click for the `data-bible-ref="book:chapter:verse"` and
   // `data-bible-appendix-ref` links the seed left inside study notes and
@@ -221,6 +340,13 @@ export function BibleStudyPanel({
   const studyNoteGroups = useMemo(() => groupByVerse(studyNotes), [studyNotes]);
   const personalNoteGroups = useMemo(() => groupByVerse(personalNotes), [personalNotes]);
 
+  // "Tema" primeiro, "mencionam" depois — um discurso construído em cima do
+  // capítulo vale muito mais para quem está lendo do que um que leu dois
+  // versículos daqui de passagem, e misturar os dois numa lista só faria o
+  // primeiro sumir no meio dos outros.
+  const themeVideos = useMemo(() => videos.filter((v) => v.source === "title"), [videos]);
+  const mentionVideos = useMemo(() => videos.filter((v) => v.source === "transcript"), [videos]);
+
   // A superscription has no verse number, so its heading is a label, not a
   // filter target — there is nothing to narrow to.
   const narrow = (verse: number | null) => () => {
@@ -245,7 +371,10 @@ export function BibleStudyPanel({
         </div>
 
         <Tabs value={tab} onValueChange={(value) => onTabChange(value as BibleStudyTab)}>
-          <TabsList className="w-full">
+          {/* Cinco abas dentro de um painel de 420px: sem apertar a fonte e o
+              espaçamento, a quinta ("Vídeos") estoura a linha em vez de
+              caber, já que os gatilhos usam whitespace-nowrap. */}
+          <TabsList className="w-full [&_[data-slot=tabs-trigger]]:px-1 [&_[data-slot=tabs-trigger]]:text-[12.5px]">
             <TabsTrigger value="referencias">
               Refs
               {refs.length > 0 && <span className="ml-1 font-mono text-[10px] text-accent">{refs.length}</span>}
@@ -260,6 +389,13 @@ export function BibleStudyPanel({
               Rodapé
               {footnotes.length > 0 && (
                 <span className="ml-1 font-mono text-[10px] text-accent">{footnotes.length}</span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="videos">
+              <Film className="size-3" />
+              Vídeos
+              {videos.length > 0 && (
+                <span className="ml-1 font-mono text-[10px] text-accent">{videos.length}</span>
               )}
             </TabsTrigger>
             <TabsTrigger value="pessoal">
@@ -299,7 +435,7 @@ export function BibleStudyPanel({
             )}
 
             {refsLoading ? (
-              <EmptyHint>carregando…</EmptyHint>
+              <BibleStudyRowsSkeleton />
             ) : refs.length === 0 ? (
               <EmptyHint>
                 {whole ? "Este capítulo não tem referências." : "Este versículo não tem referências."}
@@ -325,7 +461,7 @@ export function BibleStudyPanel({
 
           <TabsContent value="notas">
             {studyLoading ? (
-              <EmptyHint>carregando…</EmptyHint>
+              <BibleStudyRowsSkeleton />
             ) : studyNotes.length === 0 ? (
               <EmptyHint>
                 {whole
@@ -350,7 +486,7 @@ export function BibleStudyPanel({
 
           <TabsContent value="rodape">
             {studyLoading ? (
-              <EmptyHint>carregando…</EmptyHint>
+              <BibleStudyRowsSkeleton withIndex />
             ) : footnotes.length === 0 ? (
               <EmptyHint>
                 {whole ? "Este capítulo não tem notas de rodapé." : "Este versículo não tem notas de rodapé."}
@@ -375,6 +511,54 @@ export function BibleStudyPanel({
                   </div>
                 ))}
               </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="videos" className="flex flex-col gap-4">
+            {videosLoading ? (
+              <BibleStudyVideosSkeleton />
+            ) : videos.length === 0 ? (
+              <EmptyHint>
+                {whole
+                  ? "Nenhum vídeo do JW.org cita este capítulo."
+                  : "Nenhum vídeo do JW.org cita este versículo."}
+              </EmptyHint>
+            ) : (
+              <>
+                {themeVideos.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <span className="font-mono text-[10.5px] tracking-[0.04em] text-accent">
+                      tema do vídeo
+                    </span>
+                    {themeVideos.map((video) => (
+                      <VideoRow
+                        key={`title-${video.videoId}`}
+                        video={video}
+                        chapter={chapter}
+                        expanded={openVideoId === video.videoId}
+                        onToggle={() =>
+                          setOpenVideoId(openVideoId === video.videoId ? null : video.videoId)
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {mentionVideos.length > 0 && (
+                  // A chave inclui o escopo para que trocar de capítulo ou de
+                  // versículo remonte a lista e volte a mostrá-la recolhida —
+                  // sem precisar de um efeito só para zerar esse estado.
+                  <MentionList
+                    key={`${bookName}-${chapter}-${selectedVerse ?? "all"}`}
+                    videos={mentionVideos}
+                    chapter={chapter}
+                    openVideoId={openVideoId}
+                    onToggleVideo={(videoId) =>
+                      setOpenVideoId(openVideoId === videoId ? null : videoId)
+                    }
+                  />
+                )}
+              </>
             )}
           </TabsContent>
 
