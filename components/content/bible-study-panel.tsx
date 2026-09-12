@@ -130,7 +130,14 @@ function VerseHeading({ verse, onClick }: { verse: number | null; onClick: () =>
     <button
       type="button"
       onClick={onClick}
-      className="sticky top-0 z-10 -mx-1 flex w-[calc(100%+0.5rem)] items-baseline gap-1.5 bg-[#161413] px-1 py-1.5 text-left font-mono text-[11px] tracking-[0.04em] text-accent transition-colors hover:text-foreground"
+      // The bleed here has to match the scroll container's own side padding
+      // exactly (JwpubSidePanel's `p-5`, 20px) — this used to only bleed 4px
+      // (-mx-1), leaving a 16px strip on each side where a card scrolling
+      // underneath (bg-secondary) wasn't covered by this opaque background,
+      // showing through right at the sticky boundary. `-mx-5`/`px-5` bleeds
+      // the full 20px, so the header is edge-to-edge with the panel itself,
+      // not just with its own already-inset flex column.
+      className="sticky top-0 z-10 -mx-5 flex w-[calc(100%+2.5rem)] items-baseline gap-1.5 bg-[#161413] px-5 py-1.5 text-left font-mono text-[11px] tracking-[0.04em] text-accent shadow-[0_1px_0_0_var(--border)] transition-colors hover:text-foreground"
     >
       {verse === null ? "sobrescrito" : `versículo ${verse}`}
     </button>
