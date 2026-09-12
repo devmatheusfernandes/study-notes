@@ -1,7 +1,7 @@
 "use client";
 
 import DOMPurify from "dompurify";
-import type { JwpubBibleCitation } from "./types";
+import type { JwpubBibleCitation, JwpubExtract } from "./types";
 
 /**
  * Chapter HTML comes out of a third-party file, so per CLAUDE.md's rule about
@@ -18,7 +18,7 @@ export function sanitizeChapterHtml(html: string): string {
       "class", "id", "style", "src", "alt", "title", "href", "colspan", "rowspan",
       "data-jwpub-footnote", "data-jwpub-ref", "data-pid", "data-key",
       "data-jwpub-bible-first", "data-jwpub-bible-last",
-      "data-jwpub-pubref", "data-jwpub-pubref-pid",
+      "data-jwpub-pubref", "data-jwpub-pubref-pid", "data-jwpub-extract",
     ],
     FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "srcset"],
@@ -43,6 +43,10 @@ export function sanitizeChapterHtml(html: string): string {
  *     library, which can change after this one was ingested — so it's left
  *     as inert data here and resolved dynamically at read time (see
  *     resolveJwpubReferences in jwpub-actions.ts), not baked in now.
+ *     **Superseded whenever `extracts` resolves the same citation** (see
+ *     below) — a citation with its own embedded excerpt gets
+ *     `data-jwpub-extract` *instead*, since there's then nothing to resolve
+ *     or download in the first place.
  *   jwpub://p/… of any other shape → data-jwpub-ref="…" (kept, not clickable)
  *
  * The `href` is dropped in every case so nothing can navigate to a scheme the
@@ -50,11 +54,23 @@ export function sanitizeChapterHtml(html: string): string {
  * BibleCitation block/element numbers repeat across documents, so citations
  * must be scoped to it (pass -1, the default, for content with no such
  * scope — e.g. footnotes — which just leaves any bible ref inert).
+ *
+ * `extracts` resolves a citation carrying `data-xtid="<hyperlinkId>"` (the
+ * source archive's own name for the id, confirmed against a real one) to
+ * `data-jwpub-extract="<extractId>"` when it has a self-contained excerpt
+ * embedded in the archive — the caller is then expected to have persisted
+ * that excerpt somewhere addressable by `extractId` (see
+ * lib/bible/research-guide-parse.ts for how the Bible reader's Research
+ * Guide tab does this; nothing else in the app currently does the
+ * equivalent for a normal uploaded publication — see the "known gap" note on
+ * ParsedJwpub.extractsByHyperlinkId). Omit `extracts` (the default) to leave
+ * every citation exactly as before this existed.
  */
 export function rewriteJwpubLinks(
   html: string,
   citations: Map<string, JwpubBibleCitation> = new Map(),
-  documentId: number = -1
+  documentId: number = -1,
+  extracts: Map<number, JwpubExtract> = new Map()
 ): string {
   return html.replace(
     /<a\b([^>]*?)href="jwpub:\/\/([^"]+)"([^>]*)>/gi,
@@ -73,6 +89,12 @@ export function rewriteJwpubLinks(
       }
 
       if (target.startsWith("p/")) {
+        const xtid = /data-xtid="(\d+)"/.exec(before + after);
+        const extract = xtid ? extracts.get(Number(xtid[1])) : undefined;
+        if (extract) {
+          return `<a${before}data-jwpub-extract="${extract.extractId}"${after}>`;
+        }
+
         const pubRef = /^p\/T:(\d+)\/(?:(\d+)(?:-\d+)?(?::\d+)?)?$/.exec(target);
         if (pubRef) {
           const pidAttr = pubRef[2] ? ` data-jwpub-pubref-pid="${pubRef[2]}"` : "";

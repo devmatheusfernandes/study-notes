@@ -202,6 +202,9 @@ export function JwpubReader({
   const [referenceTarget, setReferenceTarget] = useState<JwpubReferenceTarget | null>(null);
   const [referenceHtml, setReferenceHtml] = useState<string | null>(null);
   const [isLoadingReference, setIsLoadingReference] = useState(false);
+  // The clicked citation's own id, carried whenever it isn't in
+  // `resolvedPubRefs` — lets the panel offer "Baixar" instead of a dead end.
+  const [unresolvedPubRef, setUnresolvedPubRef] = useState<number | null>(null);
 
   // "Anotar" mode (Fase 2): while true, clicking a paragraph in
   // JwpubChapterView opens the note editor pre-anchored to it instead of the
@@ -375,10 +378,20 @@ export function JwpubReader({
   const handlePublicationRef = useCallback(
     (mepsDocumentId: number, pid?: string) => {
       const resolved = resolvedPubRefs.get(mepsDocumentId);
-      if (!resolved) return;
+      if (!resolved) {
+        // Not in this user's library — open the same panel with just the id,
+        // so it can offer "Baixar" instead of the click doing nothing.
+        setReferenceOpen(true);
+        setReferenceTarget(null);
+        setReferenceHtml(null);
+        setIsLoadingReference(false);
+        setUnresolvedPubRef(mepsDocumentId);
+        return;
+      }
       setReferenceOpen(true);
       setReferenceHtml(null);
       setIsLoadingReference(true);
+      setUnresolvedPubRef(null);
       setReferenceTarget({
         noteId: resolved.noteId,
         publicationTitle: resolved.publicationTitle,
@@ -393,6 +406,30 @@ export function JwpubReader({
     },
     [resolvedPubRefs]
   );
+
+  // A download from inside the panel just ingested this MepsDocumentId's
+  // publication — re-resolve it against the (now updated) library so the
+  // same click's panel flips from the download prompt to the real content,
+  // without the user having to close and re-click.
+  const handlePublicationRefResolved = useCallback((mepsDocumentId: number) => {
+    void resolveJwpubReferences([mepsDocumentId]).then((result) => {
+      const resolved = result.resolved[0];
+      if (!resolved) return;
+      setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, resolved));
+      setUnresolvedPubRef(null);
+      setIsLoadingReference(true);
+      setReferenceTarget({
+        noteId: resolved.noteId,
+        publicationTitle: resolved.publicationTitle,
+        chapterTitle: resolved.chapterTitle,
+        documentId: resolved.documentId,
+      });
+      void getChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
+        setReferenceHtml(chapterResult.html ?? null);
+        setIsLoadingReference(false);
+      });
+    });
+  }, []);
 
   const handleFootnote = useCallback(
     (footnoteId: number) => {
@@ -810,6 +847,8 @@ export function JwpubReader({
         target={referenceTarget}
         html={referenceHtml}
         isLoading={isLoadingReference}
+        unresolvedMepsDocumentId={unresolvedPubRef}
+        onResolved={handlePublicationRefResolved}
         onClose={() => setReferenceOpen(false)}
       />
 

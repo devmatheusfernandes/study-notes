@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ExternalLink } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { notify } from "@/components/ui/toaster";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
+import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 
 export interface JwpubReferenceTarget {
@@ -24,7 +26,54 @@ interface JwpubReferenceSurfaceProps {
   isLoading: boolean;
   /** Shown instead of the content when the reference could not be resolved at all (e.g. the publication is not in this user's library). */
   error?: string | null;
+  /**
+   * The citation's own `MepsDocumentId`, carried whenever `target` is `null`
+   * because nothing in this user's library resolves it — lets the panel
+   * offer "Baixar" (see downloadAndIngestPublication) instead of just an
+   * error. Omitted (or `undefined`) when the caller has no such id to offer
+   * — e.g. a citation shape this app doesn't parse a MepsDocumentId out of.
+   */
+  unresolvedMepsDocumentId?: number | null;
+  /** Called after a successful download — the caller re-resolves and reopens with the newly-available `target`, same click, no re-navigation needed. */
+  onResolved?: (mepsDocumentId: number, noteId: string) => void;
   onClose: () => void;
+}
+
+function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number; onResolved?: (mepsDocumentId: number, noteId: string) => void }) {
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  async function handleDownload() {
+    setIsDownloading(true);
+    try {
+      const result = await downloadAndIngestPublication(mepsDocumentId);
+      if (!result.ok || !result.noteId) {
+        notify.error("Não foi possível baixar", result.error);
+        return;
+      }
+      notify.success(`"${result.title ?? "Publicação"}" baixada`);
+      onResolved?.(mepsDocumentId, result.noteId);
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <p className="text-[13.5px] text-muted-foreground">
+        Essa publicação ainda não está na sua biblioteca. O jw.org disponibiliza o arquivo original —
+        dá para trazer ela para cá.
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        isLoading={isDownloading}
+        leftIcon={<Download className="size-3.5 text-accent" />}
+        onClick={() => void handleDownload()}
+      >
+        Baixar publicação
+      </Button>
+    </div>
+  );
 }
 
 function Body({
@@ -32,11 +81,15 @@ function Body({
   html,
   isLoading,
   error,
+  unresolvedMepsDocumentId,
+  onResolved,
 }: {
   target: JwpubReferenceTarget | null;
   html: string | null;
   isLoading: boolean;
   error?: string | null;
+  unresolvedMepsDocumentId?: number | null;
+  onResolved?: (mepsDocumentId: number, noteId: string) => void;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,7 +122,10 @@ function Body({
     );
   }
 
-  if (error || !target || !html) {
+  if (!target || !html) {
+    if (!error && unresolvedMepsDocumentId) {
+      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} onResolved={onResolved} />;
+    }
     return <p className="text-[13.5px] text-muted-foreground">{error ?? "Conteúdo não encontrado."}</p>;
   }
 
@@ -92,11 +148,34 @@ function Body({
   );
 }
 
-/** Same side-panel-on-desktop/Vault-on-mobile shell as footnotes — opened by tapping a resolved `data-jwpub-pubref` cross-reference (e.g. "th study 5") in another already-uploaded publication. */
-export function JwpubReferenceSurface({ open, target, html, isLoading, error, onClose }: JwpubReferenceSurfaceProps) {
+/**
+ * Same side-panel-on-desktop/Vault-on-mobile shell as footnotes — opened by
+ * tapping a `data-jwpub-pubref` cross-reference (e.g. "th study 5"). Renders
+ * one of three states: the resolved content (already in this user's
+ * library), a loading placeholder, or — when `unresolvedMepsDocumentId` is
+ * given — a "Baixar" prompt that fetches the publication from jw.org and
+ * ingests it in place (see downloadAndIngestPublication).
+ */
+export function JwpubReferenceSurface({
+  open,
+  target,
+  html,
+  isLoading,
+  error,
+  unresolvedMepsDocumentId,
+  onResolved,
+  onClose,
+}: JwpubReferenceSurfaceProps) {
   return (
     <JwpubSidePanel open={open} title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"} onClose={onClose}>
-      <Body target={target} html={html} isLoading={isLoading} error={error} />
+      <Body
+        target={target}
+        html={html}
+        isLoading={isLoading}
+        error={error}
+        unresolvedMepsDocumentId={unresolvedMepsDocumentId}
+        onResolved={onResolved}
+      />
     </JwpubSidePanel>
   );
 }

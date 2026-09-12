@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Film, Gem, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { BookMarked, Film, Gem, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
@@ -10,6 +10,9 @@ import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { bodyToPlainText } from "@/lib/note-preview";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import type { ChapterVideo } from "@/app/(app)/bible-search-actions";
+import type { ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
+import { resolveJwpubReferences, getChapter, type ResolvedJwpubReference } from "@/app/(app)/jwpub-actions";
+import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
 import { BibleStudyRowsSkeleton, BibleStudyVideosSkeleton } from "./bible-study-panel-skeleton";
 import type {
   BibleBook,
@@ -22,7 +25,7 @@ import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleReferencesList, CROSS_REFERENCE_SOURCE_LABELS } from "./bible-references-panel";
 
-export type BibleStudyTab = "referencias" | "notas" | "rodape" | "videos" | "pessoal";
+export type BibleStudyTab = "referencias" | "notas" | "rodape" | "videos" | "guia" | "pessoal";
 
 /** A personal annotation (typed here or imported from a .jwlibrary backup), as opposed to `BibleStudyNote`'s official JW.org commentary. */
 export interface BiblePersonalNote {
@@ -71,6 +74,12 @@ interface BibleStudyPanelProps {
   /** JW.org videos whose title or transcript cites this chapter — already scoped to `selectedVerse` by the caller. */
   videos: ChapterVideo[];
   videosLoading: boolean;
+
+  /** "Guia de Pesquisa" entries for this chapter — already scoped to `selectedVerse` by the caller. See app/(app)/research-guide-actions.ts. */
+  researchGuideEntries: { verse: number | null; contentHtml: string }[];
+  /** Excerpts embedded in the guide itself, keyed by extractId — a `data-jwpub-extract` link in an entry above resolves here, with nothing to fetch or download. */
+  researchGuideExtracts: Record<number, ResearchGuideExtract>;
+  researchGuideLoading: boolean;
 
   personalNotes: WithVerse<BiblePersonalNote>[];
   /** "Editar" on an expanded personal note — opens the full editor vault. */
@@ -275,6 +284,9 @@ export function BibleStudyPanel({
   onOpenAppendix,
   videos,
   videosLoading,
+  researchGuideEntries,
+  researchGuideExtracts,
+  researchGuideLoading,
   personalNotes,
   onEditPersonalNote,
   onDeletePersonalNote,
@@ -298,9 +310,106 @@ export function BibleStudyPanel({
   // both be downloading.
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
 
-  // Delegated click for the `data-bible-ref="book:chapter:verse"` and
-  // `data-bible-appendix-ref` links the seed left inside study notes and
-  // footnotes. One listener on the container rather than rehydrating every
+  // --- "Guia de Pesquisa" citation links (data-jwpub-pubref) ---
+  //
+  // Same resolve-against-the-user's-own-library dance jwpub-reader.tsx does
+  // for its own cross-references — this panel never had any of that
+  // machinery before (Notas/Rodapé only ever link to other Bible verses or
+  // appendices), so it's all new here, not reused from the reader.
+  const [resolvedPubRefs, setResolvedPubRefs] = useState<Map<number, ResolvedJwpubReference>>(new Map());
+  const [referenceOpen, setReferenceOpen] = useState(false);
+  const [referenceTarget, setReferenceTarget] = useState<JwpubReferenceTarget | null>(null);
+  const [referenceHtml, setReferenceHtml] = useState<string | null>(null);
+  const [isLoadingReference, setIsLoadingReference] = useState(false);
+  const [unresolvedPubRef, setUnresolvedPubRef] = useState<number | null>(null);
+
+  // `data-jwpub-extract` links — already-resolved excerpts embedded in the
+  // guide itself (see researchGuideExtracts), so there's nothing to fetch:
+  // just look the id up and show it. Its own small panel rather than
+  // reusing JwpubReferenceSurface, which is built around the resolve/
+  // download state machine this doesn't need at all.
+  const [openExtractId, setOpenExtractId] = useState<number | null>(null);
+  const openExtract = openExtractId !== null ? researchGuideExtracts[openExtractId] : undefined;
+
+  // Resolves every citation currently on screen against this user's own
+  // library in one batched call, the moment the Guia tab's content arrives —
+  // matching jwpub-reader.tsx's own pattern, so the link doesn't have to be
+  // clicked once just to find out whether it even works.
+  useEffect(() => {
+    const ids = [
+      ...new Set(
+        researchGuideEntries.flatMap((entry) => [
+          ...entry.contentHtml.matchAll(/data-jwpub-pubref="(\d+)"/g),
+        ]).map((m) => Number(m[1]))
+      ),
+    ];
+    if (ids.length === 0) {
+      queueMicrotask(() => setResolvedPubRefs(new Map()));
+      return;
+    }
+    let cancelled = false;
+    void resolveJwpubReferences(ids).then((result) => {
+      if (cancelled) return;
+      setResolvedPubRefs(new Map(result.resolved.map((r) => [r.mepsDocumentId, r])));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [researchGuideEntries]);
+
+  const openPublicationRef = useCallback(
+    (mepsDocumentId: number) => {
+      const resolved = resolvedPubRefs.get(mepsDocumentId);
+      if (!resolved) {
+        setReferenceOpen(true);
+        setReferenceTarget(null);
+        setReferenceHtml(null);
+        setIsLoadingReference(false);
+        setUnresolvedPubRef(mepsDocumentId);
+        return;
+      }
+      setReferenceOpen(true);
+      setReferenceHtml(null);
+      setIsLoadingReference(true);
+      setUnresolvedPubRef(null);
+      setReferenceTarget({
+        noteId: resolved.noteId,
+        publicationTitle: resolved.publicationTitle,
+        chapterTitle: resolved.chapterTitle,
+        documentId: resolved.documentId,
+      });
+      void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
+        setReferenceHtml(result.html ?? null);
+        setIsLoadingReference(false);
+      });
+    },
+    [resolvedPubRefs]
+  );
+
+  const handlePublicationRefResolved = useCallback((mepsDocumentId: number) => {
+    void resolveJwpubReferences([mepsDocumentId]).then((result) => {
+      const resolved = result.resolved[0];
+      if (!resolved) return;
+      setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, resolved));
+      setUnresolvedPubRef(null);
+      setIsLoadingReference(true);
+      setReferenceTarget({
+        noteId: resolved.noteId,
+        publicationTitle: resolved.publicationTitle,
+        chapterTitle: resolved.chapterTitle,
+        documentId: resolved.documentId,
+      });
+      void getChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
+        setReferenceHtml(chapterResult.html ?? null);
+        setIsLoadingReference(false);
+      });
+    });
+  }, []);
+
+  // Delegated click for the `data-bible-ref="book:chapter:verse"`,
+  // `data-bible-appendix-ref` and (Guia tab only) `data-jwpub-pubref` links
+  // the seed/import left inside study notes, footnotes and research-guide
+  // entries. One listener on the container rather than rehydrating every
   // <a> into a React component — the HTML is injected as a string, so there
   // are no React nodes to attach to.
   useEffect(() => {
@@ -320,6 +429,26 @@ export function BibleStudyPanel({
         return;
       }
 
+      const extractLink = target?.closest<HTMLElement>("[data-jwpub-extract]");
+      if (extractLink) {
+        const id = Number(extractLink.dataset.jwpubExtract);
+        if (Number.isFinite(id)) {
+          event.preventDefault();
+          setOpenExtractId(id);
+        }
+        return;
+      }
+
+      const pubRefLink = target?.closest<HTMLElement>("[data-jwpub-pubref]");
+      if (pubRefLink) {
+        const id = Number(pubRefLink.dataset.jwpubPubref);
+        if (Number.isFinite(id)) {
+          event.preventDefault();
+          openPublicationRef(id);
+        }
+        return;
+      }
+
       const anchor = target?.closest<HTMLElement>("[data-bible-ref]");
       if (!anchor) return;
       const parts = (anchor.dataset.bibleRef ?? "").split(":").map(Number);
@@ -330,7 +459,7 @@ export function BibleStudyPanel({
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [onOpenBibleRef, onOpenAppendix]);
+  }, [onOpenBibleRef, onOpenAppendix, openPublicationRef]);
 
   const whole = selectedVerse === null;
   const scopeLabel = whole ? `${bookName} ${chapter}` : `${bookName} ${chapter}:${selectedVerse}`;
@@ -339,6 +468,7 @@ export function BibleStudyPanel({
   const footnoteGroups = useMemo(() => groupByVerse(footnotes), [footnotes]);
   const studyNoteGroups = useMemo(() => groupByVerse(studyNotes), [studyNotes]);
   const personalNoteGroups = useMemo(() => groupByVerse(personalNotes), [personalNotes]);
+  const researchGuideGroups = useMemo(() => groupByVerse(researchGuideEntries), [researchGuideEntries]);
 
   // "Tema" primeiro, "mencionam" depois — um discurso construído em cima do
   // capítulo vale muito mais para quem está lendo do que um que leu dois
@@ -371,10 +501,10 @@ export function BibleStudyPanel({
         </div>
 
         <Tabs value={tab} onValueChange={(value) => onTabChange(value as BibleStudyTab)}>
-          {/* Cinco abas dentro de um painel de 420px: sem apertar a fonte e o
-              espaçamento, a quinta ("Vídeos") estoura a linha em vez de
-              caber, já que os gatilhos usam whitespace-nowrap. */}
-          <TabsList className="w-full [&_[data-slot=tabs-trigger]]:px-1 [&_[data-slot=tabs-trigger]]:text-[12.5px]">
+          {/* Seis abas dentro de um painel de 420px: sem apertar a fonte, o
+              espaçamento e o ícone, elas estouram a linha em vez de caber,
+              já que os gatilhos usam whitespace-nowrap. */}
+          <TabsList className="w-full [&_[data-slot=tabs-trigger]]:gap-1 [&_[data-slot=tabs-trigger]]:px-0.5 [&_[data-slot=tabs-trigger]]:text-[11.5px] [&_[data-slot=tabs-trigger]_svg]:size-3">
             <TabsTrigger value="referencias">
               Refs
               {refs.length > 0 && <span className="ml-1 font-mono text-[10px] text-accent">{refs.length}</span>}
@@ -396,6 +526,13 @@ export function BibleStudyPanel({
               Vídeos
               {videos.length > 0 && (
                 <span className="ml-1 font-mono text-[10px] text-accent">{videos.length}</span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="guia">
+              <BookMarked className="size-3" />
+              Guia
+              {researchGuideEntries.length > 0 && (
+                <span className="ml-1 font-mono text-[10px] text-accent">{researchGuideEntries.length}</span>
               )}
             </TabsTrigger>
             <TabsTrigger value="pessoal">
@@ -562,6 +699,31 @@ export function BibleStudyPanel({
             )}
           </TabsContent>
 
+          <TabsContent value="guia">
+            {researchGuideLoading ? (
+              <BibleStudyRowsSkeleton />
+            ) : researchGuideEntries.length === 0 ? (
+              <EmptyHint>
+                {whole
+                  ? "O Guia de Pesquisa não tem citações para este capítulo."
+                  : "O Guia de Pesquisa não tem citações para este versículo."}
+              </EmptyHint>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {researchGuideGroups.map((group) => (
+                  <div key={group.verse ?? "sup"} className="flex flex-col gap-1.5">
+                    {whole && <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />}
+                    {group.items.map((entry, index) => (
+                      <div key={`${group.verse ?? "sup"}-${index}`} className="rounded-2xl bg-secondary px-4 py-3">
+                        <StudyHtml html={entry.contentHtml} />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
           <TabsContent value="pessoal" className="flex flex-col gap-3">
             {activeHighlight && (
               <div className="flex flex-col gap-3 rounded-2xl bg-secondary px-4 py-3">
@@ -724,6 +886,29 @@ export function BibleStudyPanel({
         onDeleteActiveHighlight?.();
       }}
     />
+
+    <JwpubReferenceSurface
+      open={referenceOpen}
+      target={referenceTarget}
+      html={referenceHtml}
+      isLoading={isLoadingReference}
+      unresolvedMepsDocumentId={unresolvedPubRef}
+      onResolved={handlePublicationRefResolved}
+      onClose={() => setReferenceOpen(false)}
+    />
+
+    <JwpubSidePanel
+      open={openExtractId !== null}
+      title={openExtract?.refTitle ?? "Trecho"}
+      onClose={() => setOpenExtractId(null)}
+    >
+      {openExtract && (
+        <div
+          className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
+          dangerouslySetInnerHTML={{ __html: openExtract.html }}
+        />
+      )}
+    </JwpubSidePanel>
     </>
   );
 }

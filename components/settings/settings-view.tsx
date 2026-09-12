@@ -23,6 +23,7 @@ import { AiUsageCard } from "@/components/settings/ai-usage-card";
 import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
 import { VideoScriptureIndexCard } from "@/components/settings/video-scripture-index-card";
+import { ResearchGuideUploadCard } from "@/components/settings/research-guide-upload-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
@@ -191,6 +192,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
               {/* Row 3b: Bible references extracted from those videos */}
               <VideoScriptureIndexCard />
+
+              {/* Row 3c: Research Guide (Guia de Pesquisa) upload */}
+              <ResearchGuideUploadCard />
 
               {/* Row 4: Full Width Tags Card */}
               <TagsSettingsCard />

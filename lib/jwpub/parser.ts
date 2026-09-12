@@ -5,6 +5,7 @@ import type {
   JwpubChapter,
   JwpubFootnote,
   JwpubBibleCitation,
+  JwpubExtract,
   ParsedJwpub,
   JwpubPublicationMeta,
 } from "./types";
@@ -103,11 +104,12 @@ export async function parseJwpub(file: Blob, onProgress?: ParseProgress): Promis
     const chapters = await readChapters(db, keys, inflate, onProgress);
     const footnotes = await readFootnotes(db, keys, inflate);
     const bibleCitations = readBibleCitations(db);
+    const extractsByHyperlinkId = await readExtracts(db, keys, inflate);
 
     onProgress?.("Extraindo imagens");
     const media = await extractMedia(entries, chapters);
 
-    return { ...meta, chapters, footnotes, media, bibleCitations };
+    return { ...meta, chapters, footnotes, media, bibleCitations, extractsByHyperlinkId };
   } finally {
     db.close();
   }
@@ -245,6 +247,79 @@ function readBibleCitations(db: import("sql.js").Database): Map<string, JwpubBib
   }
 
   return citations;
+}
+
+/**
+ * "Quadros de destaque" — a citation whose `<a data-xtid="…">` (the source
+ * HTML's own name for a `HyperlinkId`, verified against a real archive) has
+ * a matching `DocumentExtract` row carries its own embedded excerpt,
+ * decoded here exactly like a chapter's `Content`, so a caller never has to
+ * fetch or resolve another publication just to show it.
+ *
+ * Was previously left unextracted everywhere in this app (see the "ficou de
+ * fora" note this superseded in data/nwt_st_structure.md, written before this
+ * was implemented) — the join is `DocumentExtract.HyperlinkId` →
+ * `data-xtid`, `DocumentExtract.ExtractId` → `Extract`, `Extract.Content` the
+ * excerpt itself, `Extract.RefPublicationId` → `RefPublication` for a title
+ * to label it with. Optional in the archive, like BibleCitation — most
+ * publications carry no Extract table at all.
+ */
+async function readExtracts(
+  db: import("sql.js").Database,
+  keys: Awaited<ReturnType<typeof deriveJwpubKeys>>,
+  inflate: (input: Uint8Array) => Uint8Array
+): Promise<Map<number, JwpubExtract>> {
+  const extracts = new Map<number, JwpubExtract>();
+
+  let res;
+  try {
+    res = db.exec(`
+      SELECT de.HyperlinkId, e.ExtractId, e.Content, rp.Title, rp.Symbol
+      FROM DocumentExtract de
+      JOIN Extract e ON e.ExtractId = de.ExtractId
+      LEFT JOIN RefPublication rp ON rp.RefPublicationId = e.RefPublicationId
+    `);
+  } catch {
+    return extracts; // No Extract/DocumentExtract/RefPublication tables in this archive.
+  }
+  if (res.length === 0) return extracts;
+
+  // The same ExtractId is routinely cited from many different verses (a
+  // Bible story or "What Does the Bible Say" box referenced repeatedly) —
+  // each such citation gets its own HyperlinkId (a distinct data-xtid, one
+  // per place it's cited from), but decoding the same encrypted Content
+  // more than once would be pure waste at this archive's scale (tens of
+  // thousands of citations sharing far fewer distinct excerpts).
+  const decodedByExtractId = new Map<number, JwpubExtract>();
+
+  for (const [hyperlinkId, extractIdRaw, content, refTitle, refSymbol] of res[0].values) {
+    if (hyperlinkId === null || extractIdRaw === null) continue;
+    const hyperlinkKey = Number(hyperlinkId);
+    const extractId = Number(extractIdRaw);
+    if (extracts.has(hyperlinkKey)) continue; // A citation itself is never duplicated in this query's own rows.
+
+    let extract = decodedByExtractId.get(extractId);
+    if (!extract) {
+      const html =
+        content instanceof Uint8Array
+          ? await decodeJwpubContent(content, keys, inflate)
+          : content === null
+            ? ""
+            : String(content);
+      if (!html) continue;
+      extract = {
+        extractId,
+        html,
+        refTitle: refTitle === null ? null : String(refTitle),
+        refSymbol: refSymbol === null ? null : String(refSymbol),
+      };
+      decodedByExtractId.set(extractId, extract);
+    }
+
+    extracts.set(hyperlinkKey, extract);
+  }
+
+  return extracts;
 }
 
 /** Only pulls out images the chapters actually reference — an archive carries plenty that nothing links to. */
