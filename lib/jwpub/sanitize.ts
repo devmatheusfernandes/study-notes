@@ -95,7 +95,17 @@ export function rewriteJwpubLinks(
           return `<a${before}data-jwpub-extract="${extract.extractId}"${after}>`;
         }
 
-        const pubRef = /^p\/T:(\d+)\/(?:(\d+)(?:-\d+)?(?::\d+)?)?$/.exec(target);
+        // No trailing `$` anchor — a citation can name SEVERAL targets in one
+        // href, joined by `$` ("p/T:1102021206/4-5$p/T:1102021206/22-30", a
+        // real one, "Seja Feliz para Sempre!, lição 6"). The old anchored
+        // regex required the ENTIRE string to be one target and silently
+        // matched nothing for these, falling all the way through to the
+        // inert data-jwpub-ref case below — the link rendered but neither
+        // "Baixar" nor a resolved reference ever appeared, no matter what.
+        // Matching just the first target is a real destination instead of
+        // none; the rest are ignored, same trade-off data-jwpub-pubref-pid
+        // already makes for a range (it only keeps the first paragraph).
+        const pubRef = /^p\/T:(\d+)\/(?:(\d+)(?:-\d+)?(?::\d+)?)?/.exec(target);
         if (pubRef) {
           const pidAttr = pubRef[2] ? ` data-jwpub-pubref-pid="${pubRef[2]}"` : "";
           return `<a${before}data-jwpub-pubref="${pubRef[1]}"${pidAttr}${after}>`;

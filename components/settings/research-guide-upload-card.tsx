@@ -15,7 +15,7 @@ import {
   type ResearchGuideEntryInput,
   type ResearchGuideExtractInput,
 } from "@/app/(app)/research-guide-actions";
-import { splitResearchGuideDocument } from "@/lib/bible/research-guide-parse";
+import { splitResearchGuideDocument, RESEARCH_GUIDE_IMPORT_VERSION } from "@/lib/bible/research-guide-parse";
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "@/lib/jwpub/sanitize";
 import type { JwpubExtract } from "@/lib/jwpub/types";
 
@@ -73,7 +73,7 @@ export function ResearchGuideUploadCard() {
       const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
       const sourceHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-      const check = await checkResearchGuideNeedsImport(sourceHash);
+      const check = await checkResearchGuideNeedsImport(sourceHash, RESEARCH_GUIDE_IMPORT_VERSION);
       if (!check.needsImport) {
         notify.info("Já está atualizado", "Essa é a mesma edição que já está importada.");
         return;
@@ -147,7 +147,7 @@ export function ResearchGuideUploadCard() {
         return;
       }
 
-      const begin = await beginResearchGuideImport(parsed.title || parsed.symbol, sourceHash);
+      const begin = await beginResearchGuideImport(parsed.title || parsed.symbol, sourceHash, RESEARCH_GUIDE_IMPORT_VERSION);
       if (!begin.ok) {
         notify.error("Não foi possível iniciar a importação", begin.error);
         return;

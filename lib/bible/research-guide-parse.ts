@@ -19,6 +19,20 @@
 
 const VERSE_HEADING = /<p\b[^>]*class="se"[^>]*>\s*<a\b[^>]*href="jwpub:\/\/b\/NWTR\/(\d{1,2}):(\d{1,3}):(\d{1,3})(?:-\d{1,2}:\d{1,3}:\d{1,3})?"[^>]*>[\s\S]*?<\/a>\s*<\/p>/g;
 
+/**
+ * Bump this whenever a change to how a `.jwpub` upload gets parsed/rewritten
+ * (here, in lib/jwpub/sanitize.ts, or in the upload card itself) should force
+ * a reimport even for someone reuploading the exact same file —
+ * `checkResearchGuideNeedsImport` in app/(app)/research-guide-actions.ts
+ * otherwise only compares the file's own hash, which doesn't change just
+ * because the app's own parsing logic did. History:
+ *   1 — initial per-verse citation import (no embedded excerpts)
+ *   2 — embeds Extract content inline (data-jwpub-extract) and stops
+ *       silently dropping multi-target citations (a `$`-joined href like
+ *       "Seja Feliz para Sempre!, lição 6" used to match nothing at all)
+ */
+export const RESEARCH_GUIDE_IMPORT_VERSION = 2;
+
 export interface ResearchGuideVerseBlock {
   bookOrder: number;
   chapter: number;

@@ -160,11 +160,19 @@ const VaultContent = React.forwardRef<
                     <div className="mx-auto mt-4 mb-2 h-1.5 w-14 shrink-0 rounded-full bg-primary/50" />
                 )}
 
-                <div className={cn(
-                    "overflow-y-auto overscroll-contain no-scrollbar",
-                    !noPadding && "px-6 pb-6 pt-2"
-                )}>
-                    {children}
+                {/*
+                  Padding lives on this INNER div, not the scrollable one —
+                  a `position: sticky` child sticks to its containing
+                  block's *padding* edge, so any top padding on the
+                  scrollable element itself leaves that strip uncovered by
+                  both the sticky child and `overflow` clipping (padding
+                  sits inside the scrollport's border-box, so a
+                  scrolled-past sibling's tail can still render through it).
+                  Visually identical to before for every consumer with no
+                  sticky child — this only matters once one is added.
+                */}
+                <div className="overflow-y-auto overscroll-contain no-scrollbar">
+                    <div className={cn(!noPadding && "px-6 pb-6 pt-2")}>{children}</div>
                 </div>
             </Drawer.Content>
         </Drawer.Portal>
