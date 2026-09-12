@@ -107,7 +107,27 @@ interface BibleStudyPanelProps {
 function StudyHtml({ html }: { html: string }) {
   return (
     <div
-      className="text-[13.5px] leading-relaxed text-foreground/90 [&_a]:cursor-pointer [&_a]:text-accent [&_a]:underline-offset-2 [&_a:hover]:underline [&_em]:italic [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_strong]:text-foreground"
+      className={cn(
+        "text-[13.5px] leading-relaxed text-foreground/90 [&_a]:cursor-pointer [&_a]:text-accent [&_a]:underline-offset-2 [&_a:hover]:underline [&_em]:italic [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_strong]:text-foreground",
+        // The Research Guide's own citations split a publication's name
+        // (class="su") from its issue/page ("A Sentinela," / "15/2/2009,
+        // p. 14") into SIBLING <p> tags wrapped in one shared <div> —
+        // verified against the real source HTML, e.g.
+        // `<div><p class="su">A Sentinela,</p><p class="sk">15/2/2009, p.
+        // 14</p></div>`. The default `[&_p]` rule above treats every <p> as
+        // its own block, so this one citation rendered as two stacked
+        // lines that looked like two unrelated references. Only a `.su`/
+        // `.sk` that's a DIRECT CHILD of such a wrapping <div> gets pulled
+        // inline — a standalone citation with no issue breakdown (no
+        // wrapping <div> at all in the source) is unaffected and still
+        // gets its own line, which is correct: those really are separate
+        // citations.
+        // `ml-1` on `.sk` — the source has no whitespace at all between the
+        // two tags ("...</p><p class=\"sk\">..."), so without it "A
+        // Sentinela," and "15/2/2009, p. 14" would run together with no gap
+        // once both are inline.
+        "[&_div>.su]:inline [&_div>.sk]:inline [&_div>.sk]:ml-1 [&_div]:my-2 [&_div:first-child]:mt-0 [&_div:last-child]:mb-0"
+      )}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
