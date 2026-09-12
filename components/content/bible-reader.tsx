@@ -34,6 +34,7 @@ import {
   type BibleVerseHighlight,
 } from "@/app/(app)/jwlibrary-actions";
 import { getChapterVideos, type ChapterVideo } from "@/app/(app)/bible-search-actions";
+import { getChapterResearchGuide, type ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
@@ -481,6 +482,40 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     );
   }, [chapterVideos, selectedVerse]);
 
+  // Guia de Pesquisa (JW.org) — citações de outras publicações por versículo,
+  // importadas via Configurações (ver research-guide-actions.ts). Mesmo
+  // padrão de carregar o capítulo inteiro e filtrar em memória que os
+  // vídeos/rodapé já usam.
+  const [researchGuideEntries, setResearchGuideEntries] = useState<{ verse: number | null; contentHtml: string }[]>([]);
+  // Excerpts embedded in the guide itself, keyed by the extractId each
+  // entry's own data-jwpub-extract attribute names — see
+  // getChapterResearchGuide, which bundles these in the same request instead
+  // of a second round trip per citation clicked.
+  const [researchGuideExtracts, setResearchGuideExtracts] = useState<Record<number, ResearchGuideExtract>>({});
+  const [isLoadingResearchGuide, setIsLoadingResearchGuide] = useState(false);
+
+  useEffect(() => {
+    if (!studyOpen) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setIsLoadingResearchGuide(true);
+    });
+    void getChapterResearchGuide(bookOrder, chapter).then((result) => {
+      if (cancelled) return;
+      setResearchGuideEntries(result.entries ?? []);
+      setResearchGuideExtracts(result.extracts ?? {});
+      setIsLoadingResearchGuide(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [studyOpen, bookOrder, chapter]);
+
+  const panelResearchGuide = useMemo(() => {
+    if (selectedVerse === null) return researchGuideEntries;
+    return researchGuideEntries.filter((entry) => entry.verse === selectedVerse);
+  }, [researchGuideEntries, selectedVerse]);
+
   const handleOpenStudy = useCallback((verse: number, tab: BibleStudyTab) => {
     setSelectedVerse(verse);
     setStudyTab(tab);
@@ -848,6 +883,9 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         onOpenAppendix={setOpenAppendixId}
         videos={panelVideos}
         videosLoading={isLoadingChapterVideos}
+        researchGuideEntries={panelResearchGuide}
+        researchGuideExtracts={researchGuideExtracts}
+        researchGuideLoading={isLoadingResearchGuide}
         personalNotes={panelPersonalNotes}
         onEditPersonalNote={handleEditPersonalNote}
         onDeletePersonalNote={handleDeletePersonalNote}

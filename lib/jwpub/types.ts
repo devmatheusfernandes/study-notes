@@ -29,6 +29,22 @@ export interface JwpubBibleCitation {
   lastVerseId: number;
 }
 
+/**
+ * A "quadro de destaque" — a self-contained excerpt (a whole story, a boxed
+ * "What the Bible Says" panel) embedded directly in the archive, distinct
+ * from a bare `jwpub://p/` cross-reference: reading it needs no other
+ * publication at all. Keyed by the citing `HyperlinkId` (the same id already
+ * sitting on the citing `<a data-xtid="…">` in the source HTML — see
+ * readExtracts in parser.ts), not by `ExtractId`, since a caller resolving a
+ * link in place only ever has the former.
+ */
+export interface JwpubExtract {
+  extractId: number;
+  html: string;
+  refTitle: string | null;
+  refSymbol: string | null;
+}
+
 export interface JwpubPublicationMeta {
   symbol: string;
   title: string;
@@ -44,6 +60,8 @@ export interface ParsedJwpub extends JwpubPublicationMeta {
   media: Map<string, Blob>;
   /** "<documentId>:<blockNumber>:<elementNumber>" → verse range. Empty when the archive has no BibleCitation table. */
   bibleCitations: Map<string, JwpubBibleCitation>;
+  /** Citing HyperlinkId → its embedded excerpt. Empty when the archive has no Extract/DocumentExtract tables (most publications — this is not a general "every jwpub has these" feature). See JwpubExtract. */
+  extractsByHyperlinkId: Map<number, JwpubExtract>;
 }
 
 /** What the reader needs to render its chapter list — deliberately without the HTML. */
