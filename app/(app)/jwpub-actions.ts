@@ -555,11 +555,18 @@ export async function deletePublicationMediaForNote(noteId: string): Promise<{ e
 }
 
 /**
- * All saved "Your answer" fields for a publication, keyed `"<documentId>:<pid>"` —
- * a field's own `id`/`name` attributes repeat across documents (verified
- * against a real archive), so `data-pid` scoped to its document is the only
- * stable key. Fetched once per publication (not per chapter) since it's cheap
- * and every chapter switch would otherwise re-fetch.
+ * All saved "Your answer" fields for a publication, keyed `"<documentId>:<pid>"`
+ * where `pid` is the field's own `<textarea id>` (e.g. "tt46") — confirmed
+ * against real .jwlibrary backups to be exactly what the official app writes
+ * as `InputField.TextTag`, which is why jwpub-chapter-view.tsx now saves
+ * under that value instead of the wrapping `.gen-field`'s `data-pid` (a
+ * paragraph-scoped id that never matched TextTag, so an answer typed in this
+ * app's own reader never carried over once exported to the real app — fixed
+ * by using the textarea's id, with a one-time client-side migration for rows
+ * saved under the old data-pid key). Column name (`pid`) predates that fix
+ * and is kept as-is to avoid a migration; it's just a generic text key.
+ * Fetched once per publication (not per chapter) since it's cheap and every
+ * chapter switch would otherwise re-fetch.
  *
  * Merges two sources, live, every call — so it's correct regardless of import
  * order (a .jwpub processed before or after a .jwlibrary backup that answers

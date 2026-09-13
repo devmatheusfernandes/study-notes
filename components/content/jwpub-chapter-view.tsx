@@ -14,7 +14,7 @@ interface JwpubChapterViewProps {
   html: string;
   publicationId: string;
   documentId: number;
-  /** Saved "Your answer" text, keyed `"<documentId>:<pid>"` — see getAnswers in jwpub-actions.ts. */
+  /** Saved "Your answer" text, keyed `"<documentId>:<textarea id>"` (falling back to `<documentId>:<data-pid>"` for legacy rows) — see getAnswers in jwpub-actions.ts. */
   answers: Record<string, string>;
   onFootnote: (footnoteId: number) => void;
   onBibleRef: (firstVerseId: number, lastVerseId: number) => void;
@@ -271,13 +271,28 @@ export function JwpubChapterView({
       const textarea = field.querySelector("textarea");
       if (!pid || !textarea) return;
 
+      // The real JW Library app's InputField.TextTag is the <textarea>'s own
+      // `id` (e.g. "tt46"), verified against real .jwlibrary backups — NOT
+      // the wrapping .gen-field's `data-pid`, which is just this app's own
+      // internal paragraph-scoped save key (see jwpub-actions.ts). Saving
+      // under `data-pid` meant every answer round-tripped fine inside this
+      // app but never matched any real field once exported and reimported
+      // into the official app. `textarea.id` still repeats across documents
+      // (same as data-pid), so it's scoped the same way, by documentId.
+      const key = textarea.id || pid;
+
       const label = field.querySelector("label");
       if (label) {
         label.className = "mb-1.5 block text-[11.5px] font-medium text-muted-foreground";
       }
       field.classList.add("my-4");
 
-      const savedValue = answers[`${documentId}:${pid}`] ?? "";
+      // Self-heals answers saved under the old (pre-fix) key: if nothing is
+      // saved under the real TextTag yet but something is under the legacy
+      // data-pid key, adopt it and persist it under the correct key so the
+      // next export carries it into the official app too.
+      const legacyValue = key !== pid ? answers[`${documentId}:${pid}`] : undefined;
+      const savedValue = answers[`${documentId}:${key}`] ?? legacyValue ?? "";
       textarea.value = savedValue;
       textarea.rows = 2;
       textarea.placeholder = "Escreva sua resposta…";
@@ -286,8 +301,12 @@ export function JwpubChapterView({
       let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
       async function persist() {
-        const result = await saveAnswer(publicationId, documentId, pid!, textarea!.value);
+        const result = await saveAnswer(publicationId, documentId, key, textarea!.value);
         textarea!.className = `${ANSWER_BASE_CLASS} ${result.error ? ANSWER_TYPING_CLASS : ANSWER_SAVED_CLASS}`;
+      }
+
+      if (legacyValue !== undefined && !answers[`${documentId}:${key}`]) {
+        void persist();
       }
 
       function handleInput() {
