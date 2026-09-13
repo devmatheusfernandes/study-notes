@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { BookMarked, Film, Gem, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,8 +11,8 @@ import { bodyToPlainText } from "@/lib/note-preview";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import type { ChapterVideo } from "@/app/(app)/bible-search-actions";
 import type { ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
-import { resolveJwpubReferences, getChapter, type ResolvedJwpubReference } from "@/app/(app)/jwpub-actions";
-import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
+import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
+import { JwpubReferenceSurface } from "./jwpub-reference-surface";
 import { BibleStudyRowsSkeleton, BibleStudyVideosSkeleton } from "./bible-study-panel-skeleton";
 import type {
   BibleBook,
@@ -79,9 +79,11 @@ interface BibleStudyTabsProps {
 
   /** "Guia de Pesquisa" entries for this chapter — already scoped to `selectedVerse` by the caller. See app/(app)/research-guide-actions.ts. */
   researchGuideEntries: { verse: number | null; contentHtml: string }[];
-  /** Excerpts embedded in the guide itself, keyed by extractId — a `data-jwpub-extract` link in an entry above resolves here, with nothing to fetch or download. */
-  researchGuideExtracts: Record<number, ResearchGuideExtract>;
   researchGuideLoading: boolean;
+  /** A `data-jwpub-pubref` citation link inside a Guia entry was clicked — the caller owns the resolve-against-the-user's-library state and renders `JwpubReferenceSurface` itself (see useResearchGuideReference), because that surface must be a flex SIBLING of this component's own host panel to behave as a real sidebar, not nested inside it. */
+  onOpenPublicationRef: (mepsDocumentId: number) => void;
+  /** A `data-jwpub-extract` link (an excerpt already embedded in the guide) was clicked — same reasoning as onOpenPublicationRef above. */
+  onOpenExtract: (extractId: number) => void;
 
   personalNotes: WithVerse<BiblePersonalNote>[];
   /** "Editar" on an expanded personal note — opens the full editor vault. */
@@ -100,9 +102,18 @@ interface BibleStudyTabsProps {
   onTabChange: (tab: BibleStudyTab) => void;
 }
 
-interface BibleStudyPanelProps extends BibleStudyTabsProps {
+/**
+ * What bible-reader.tsx actually passes in — `onOpenPublicationRef`/
+ * `onOpenExtract` are supplied internally by this wrapper (via
+ * useResearchGuideReference), not by the caller; the caller instead supplies
+ * `researchGuideExtracts`, the raw data this wrapper's own extract panel
+ * needs to look up an excerpt's content.
+ */
+interface BibleStudyPanelProps extends Omit<BibleStudyTabsProps, "onOpenPublicationRef" | "onOpenExtract"> {
   open: boolean;
   onClose: () => void;
+  /** Excerpts embedded in the guide itself, keyed by extractId — a `data-jwpub-extract` link resolves here, with nothing to fetch or download. */
+  researchGuideExtracts: Record<number, ResearchGuideExtract>;
 }
 
 /**
@@ -321,8 +332,9 @@ export function BibleStudyTabs({
   videos,
   videosLoading,
   researchGuideEntries,
-  researchGuideExtracts,
   researchGuideLoading,
+  onOpenPublicationRef,
+  onOpenExtract,
   personalNotes,
   onEditPersonalNote,
   onDeletePersonalNote,
@@ -347,110 +359,6 @@ export function BibleStudyTabs({
   // 420px wide and two <video> elements side by side would both be tiny and
   // both be downloading.
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
-
-  // --- "Guia de Pesquisa" citation links (data-jwpub-pubref) ---
-  //
-  // Same resolve-against-the-user's-own-library dance jwpub-reader.tsx does
-  // for its own cross-references.
-  const [resolvedPubRefs, setResolvedPubRefs] = useState<Map<number, ResolvedJwpubReference>>(new Map());
-  const [referenceOpen, setReferenceOpen] = useState(false);
-  const [referenceTarget, setReferenceTarget] = useState<JwpubReferenceTarget | null>(null);
-  const [referenceHtml, setReferenceHtml] = useState<string | null>(null);
-  const [isLoadingReference, setIsLoadingReference] = useState(false);
-  const [unresolvedPubRef, setUnresolvedPubRef] = useState<number | null>(null);
-
-  // `data-jwpub-extract` links — already-resolved excerpts embedded in the
-  // guide itself (see researchGuideExtracts), so there's nothing to fetch:
-  // just look the id up and show it. Its own small panel rather than
-  // reusing JwpubReferenceSurface, which is built around the resolve/
-  // download state machine this doesn't need at all.
-  const [openExtractId, setOpenExtractId] = useState<number | null>(null);
-  const openExtract = openExtractId !== null ? researchGuideExtracts[openExtractId] : undefined;
-
-  // Resolves every citation currently on screen against this user's own
-  // library in one batched call, the moment the Guia tab's content arrives —
-  // matching jwpub-reader.tsx's own pattern, so the link doesn't have to be
-  // clicked once just to find out whether it even works.
-  useEffect(() => {
-    const ids = [
-      ...new Set(
-        researchGuideEntries.flatMap((entry) => [
-          ...entry.contentHtml.matchAll(/data-jwpub-pubref="(\d+)"/g),
-        ]).map((m) => Number(m[1]))
-      ),
-    ];
-    if (ids.length === 0) {
-      queueMicrotask(() => setResolvedPubRefs(new Map()));
-      return;
-    }
-    let cancelled = false;
-    void resolveJwpubReferences(ids).then((result) => {
-      if (cancelled) return;
-      setResolvedPubRefs(new Map(result.resolved.map((r) => [r.mepsDocumentId, r])));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [researchGuideEntries]);
-
-  const openPublicationRef = useCallback(
-    (mepsDocumentId: number) => {
-      // Guia's two reference surfaces (this one and the extract panel below)
-      // are independent state, so without this a citation with an embedded
-      // extract left its panel open when the next citation clicked was a bare
-      // pointer instead — two "Referência"-ish sidebars stacked side by side.
-      setOpenExtractId(null);
-      const resolved = resolvedPubRefs.get(mepsDocumentId);
-      if (!resolved) {
-        setReferenceOpen(true);
-        setReferenceTarget(null);
-        setReferenceHtml(null);
-        setIsLoadingReference(false);
-        setUnresolvedPubRef(mepsDocumentId);
-        return;
-      }
-      setReferenceOpen(true);
-      setReferenceHtml(null);
-      setIsLoadingReference(true);
-      setUnresolvedPubRef(null);
-      setReferenceTarget({
-        noteId: resolved.noteId,
-        publicationTitle: resolved.publicationTitle,
-        chapterTitle: resolved.chapterTitle,
-        documentId: resolved.documentId,
-      });
-      if (resolved.isGlobal) {
-        setReferenceHtml(resolved.contentHtml ?? null);
-        setIsLoadingReference(false);
-        return;
-      }
-      void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
-        setReferenceHtml(result.html ?? null);
-        setIsLoadingReference(false);
-      });
-    },
-    [resolvedPubRefs]
-  );
-
-  const handlePublicationRefResolved = useCallback((mepsDocumentId: number) => {
-    void resolveJwpubReferences([mepsDocumentId]).then((result) => {
-      const resolved = result.resolved[0];
-      if (!resolved) return;
-      setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, resolved));
-      setUnresolvedPubRef(null);
-      setIsLoadingReference(true);
-      setReferenceTarget({
-        noteId: resolved.noteId,
-        publicationTitle: resolved.publicationTitle,
-        chapterTitle: resolved.chapterTitle,
-        documentId: resolved.documentId,
-      });
-      void getChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
-        setReferenceHtml(chapterResult.html ?? null);
-        setIsLoadingReference(false);
-      });
-    });
-  }, []);
 
   // Delegated click for the `data-bible-ref="book:chapter:verse"`,
   // `data-bible-appendix-ref` and (Guia tab only) `data-jwpub-pubref` links
@@ -480,8 +388,7 @@ export function BibleStudyTabs({
         const id = Number(extractLink.dataset.jwpubExtract);
         if (Number.isFinite(id)) {
           event.preventDefault();
-          setReferenceOpen(false);
-          setOpenExtractId(id);
+          onOpenExtract(id);
         }
         return;
       }
@@ -491,7 +398,7 @@ export function BibleStudyTabs({
         const id = Number(pubRefLink.dataset.jwpubPubref);
         if (Number.isFinite(id)) {
           event.preventDefault();
-          openPublicationRef(id);
+          onOpenPublicationRef(id);
         }
         return;
       }
@@ -506,7 +413,7 @@ export function BibleStudyTabs({
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [onOpenBibleRef, onOpenAppendix, openPublicationRef]);
+  }, [onOpenBibleRef, onOpenAppendix, onOpenExtract, onOpenPublicationRef]);
 
   const whole = selectedVerse === null;
   const scopeLabel = whole ? `${bookName} ${chapter}` : `${bookName} ${chapter}:${selectedVerse}`;
@@ -931,6 +838,49 @@ export function BibleStudyTabs({
           onDeleteActiveHighlight?.();
         }}
       />
+    </>
+  );
+}
+
+/**
+ * Thin `JwpubSidePanel` wrapper around `BibleStudyTabs` for the /bible
+ * reading screen — owns the Guia tab's pubref/extract resolution state (see
+ * useResearchGuideReference) and renders `JwpubReferenceSurface` + the
+ * extract panel as its OWN siblings, next to (not nested inside) the
+ * "Estudo" panel, so both behave as real sidebars on desktop.
+ */
+export function BibleStudyPanel({
+  open,
+  onClose,
+  researchGuideEntries,
+  researchGuideExtracts,
+  ...tabsProps
+}: BibleStudyPanelProps) {
+  const {
+    referenceOpen,
+    referenceTarget,
+    referenceHtml,
+    isLoadingReference,
+    unresolvedPubRef,
+    closeReference,
+    openPublicationRef,
+    handlePublicationRefResolved,
+    openExtractId,
+    openExtract: onOpenExtract,
+    closeExtract,
+  } = useResearchGuideReference(researchGuideEntries);
+  const openExtract = openExtractId !== null ? researchGuideExtracts[openExtractId] : undefined;
+
+  return (
+    <>
+      <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={520}>
+        <BibleStudyTabs
+          {...tabsProps}
+          researchGuideEntries={researchGuideEntries}
+          onOpenPublicationRef={openPublicationRef}
+          onOpenExtract={onOpenExtract}
+        />
+      </JwpubSidePanel>
 
       <JwpubReferenceSurface
         open={referenceOpen}
@@ -939,14 +889,10 @@ export function BibleStudyTabs({
         isLoading={isLoadingReference}
         unresolvedMepsDocumentId={unresolvedPubRef}
         onResolved={handlePublicationRefResolved}
-        onClose={() => setReferenceOpen(false)}
+        onClose={closeReference}
       />
 
-      <JwpubSidePanel
-        open={openExtractId !== null}
-        title={openExtract?.refTitle ?? "Trecho"}
-        onClose={() => setOpenExtractId(null)}
-      >
+      <JwpubSidePanel open={openExtractId !== null} title={openExtract?.refTitle ?? "Trecho"} onClose={closeExtract}>
         {openExtract && (
           <div
             className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
@@ -955,14 +901,5 @@ export function BibleStudyTabs({
         )}
       </JwpubSidePanel>
     </>
-  );
-}
-
-/** Thin `JwpubSidePanel` wrapper around `BibleStudyTabs` for the /bible reading screen. */
-export function BibleStudyPanel({ open, onClose, ...tabsProps }: BibleStudyPanelProps) {
-  return (
-    <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={520}>
-      <BibleStudyTabs {...tabsProps} />
-    </JwpubSidePanel>
   );
 }

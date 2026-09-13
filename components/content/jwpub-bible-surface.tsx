@@ -26,8 +26,10 @@ import {
   useBibleChapterVideos,
   useBibleResearchGuide,
 } from "@/hooks/use-bible-study-data";
+import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
+import { JwpubReferenceSurface } from "./jwpub-reference-surface";
 import { BibleStudyTabs, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
 import {
   JwlibraryNoteEditorVault,
@@ -314,6 +316,21 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
   const { videos, videosLoading } = useBibleChapterVideos(studyParams);
   const { researchGuideEntries, researchGuideExtracts, researchGuideLoading } = useBibleResearchGuide(studyParams);
 
+  const {
+    referenceOpen,
+    referenceTarget,
+    referenceHtml,
+    isLoadingReference,
+    unresolvedPubRef,
+    closeReference,
+    openPublicationRef,
+    handlePublicationRefResolved,
+    openExtractId,
+    openExtract: onOpenExtract,
+    closeExtract,
+  } = useResearchGuideReference(researchGuideEntries);
+  const openExtract = openExtractId !== null ? researchGuideExtracts[openExtractId] : undefined;
+
   const personalNotes = toPersonalNotes(displayHighlights, tabSelectedVerse);
 
   const handleEditPersonalNote = useCallback((note: BiblePersonalNote) => {
@@ -392,8 +409,9 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
               videos={videos}
               videosLoading={videosLoading}
               researchGuideEntries={researchGuideEntries}
-              researchGuideExtracts={researchGuideExtracts}
               researchGuideLoading={researchGuideLoading}
+              onOpenPublicationRef={openPublicationRef}
+              onOpenExtract={onOpenExtract}
               personalNotes={personalNotes}
               onEditPersonalNote={handleEditPersonalNote}
               onDeletePersonalNote={handleDeletePersonalNote}
@@ -434,6 +452,25 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
         onOpenAppendix={setOpenAppendixId}
         onOpenBibleRef={navigateToVerse}
       />
+
+      <JwpubReferenceSurface
+        open={referenceOpen}
+        target={referenceTarget}
+        html={referenceHtml}
+        isLoading={isLoadingReference}
+        unresolvedMepsDocumentId={unresolvedPubRef}
+        onResolved={handlePublicationRefResolved}
+        onClose={closeReference}
+      />
+
+      <JwpubSidePanel open={openExtractId !== null} title={openExtract?.refTitle ?? "Trecho"} onClose={closeExtract}>
+        {openExtract && (
+          <div
+            className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
+            dangerouslySetInnerHTML={{ __html: openExtract.html }}
+          />
+        )}
+      </JwpubSidePanel>
 
       <JwlibraryNoteEditorVault
         open={editingNote !== null || pendingNoteLocation !== null}
