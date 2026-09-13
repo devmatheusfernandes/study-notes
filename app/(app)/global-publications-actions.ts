@@ -240,6 +240,43 @@ export async function finishGlobalPublicationImport(symbol: string): Promise<{ o
   return { ok: true };
 }
 
+export interface GlobalPublicationSymbolSummary {
+  symbol: string;
+  title: string;
+}
+
+/**
+ * Every fully-imported global publication, as `symbol → title` — merged into
+ * the note editor's own `listPublicationSymbols` (jwpub-actions.ts) list so
+ * the "@" menu and the "(symbol N)" shortcut recognise a shared publication
+ * like Perspicaz even though the caller never uploaded it themselves.
+ * Filtered to `imported_at is not null` so a publication mid-import (rows
+ * inserted, chapters not yet appended) doesn't show up as a dead end.
+ */
+export async function listGlobalPublicationSymbols(): Promise<{ publications: GlobalPublicationSymbolSummary[] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { publications: [] };
+
+  // No foreign key links global_publications to global_publications_meta
+  // (meta's `symbol` is its own primary key, not a references clause), so
+  // PostgREST can't embed one in the other — two queries, joined here.
+  const [{ data: pubs }, { data: meta }] = await Promise.all([
+    supabase.from("global_publications").select("symbol, title"),
+    supabase.from("global_publications_meta").select("symbol").not("imported_at", "is", null),
+  ]);
+
+  const importedSymbols = new Set((meta ?? []).map((row) => row.symbol));
+  const publications: GlobalPublicationSymbolSummary[] = [];
+  for (const row of pubs ?? []) {
+    if (!row.symbol || !importedSymbols.has(row.symbol)) continue;
+    publications.push({ symbol: row.symbol.toLowerCase(), title: row.title });
+  }
+  return { publications };
+}
+
 /** Fetches one article's full HTML — used when a Bible-page search result (see searchInsightChapters in bible-search-actions.ts) is expanded, since the search RPC itself only returns a headline excerpt, not the whole article. */
 export async function getGlobalPublicationChapterContent(
   publicationId: string,

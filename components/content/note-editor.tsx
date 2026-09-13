@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, ImagePlus, Pin, Share } from "lucide-react";
@@ -15,7 +15,8 @@ import { bodyToPlainText } from "@/lib/note-preview";
 import { shareNote } from "@/lib/share";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { listPublicationSymbols } from "@/app/(app)/jwpub-actions";
-import type { PublicationOption } from "@/lib/notes/reference-suggestions";
+import { listGlobalPublicationSymbols } from "@/app/(app)/global-publications-actions";
+import type { NoteOption, PublicationOption } from "@/lib/notes/reference-suggestions";
 import type { NoteReference } from "@/lib/notes/note-reference";
 
 interface NoteEditorProps {
@@ -78,6 +79,19 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
   const [createdId, setCreatedId] = useState<string | null>(noteId ?? null);
   const editorRef = useRef<RichTextEditorHandle>(null);
 
+  // "@" note-linking candidates — plain notes only (not files/publications),
+  // excludes this note itself so it can't reference its own text, and reads
+  // straight from the already-hydrated store rather than a server round trip
+  // (the whole point of the offline-first store is that every note the user
+  // owns is already sitting in memory).
+  const noteMentionOptions: NoteOption[] = useMemo(
+    () =>
+      notes
+        .filter((n) => n.type === "nota" && n.status === "active" && n.id !== createdId && n.title.trim())
+        .map((n) => ({ id: n.id, title: n.title })),
+    [notes, createdId]
+  );
+
   // Baseline to diff autosaves against, for an EXISTING note only — `null`
   // for a brand-new one, so its very first save still goes through
   // unconditionally (see the autosave effect below) whether or not the user
@@ -95,9 +109,20 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void listPublicationSymbols().then((result) => {
-      if (!cancelled) setPublications(result.publications);
-    });
+    void Promise.all([listPublicationSymbols(), listGlobalPublicationSymbols()]).then(
+      ([own, global]) => {
+        if (cancelled) return;
+        // Own entries win on a symbol collision — they're what the user
+        // actually has open in their own library, so "(th 2)" should resolve
+        // there even if a shared copy also exists.
+        const ownSymbols = new Set(own.publications.map((p) => p.symbol));
+        const merged = [
+          ...own.publications,
+          ...global.publications.filter((p) => !ownSymbols.has(p.symbol)),
+        ];
+        setPublications(merged);
+      }
+    );
     return () => {
       cancelled = true;
     };
@@ -249,12 +274,17 @@ export function NoteEditor({ noteId, initialNote, onBack }: NoteEditorProps) {
             autoFocus={!noteId}
             className="flex flex-1 flex-col"
             publications={publications}
+            notes={noteMentionOptions}
             onReferenceClick={setOpenReference}
           />
         </div>
       </motion.main>
 
-      <NoteReferenceSurface reference={openReference} onClose={() => setOpenReference(null)} />
+      <NoteReferenceSurface
+        reference={openReference}
+        onClose={() => setOpenReference(null)}
+        onOpenNote={(id) => router.push(`/notes/${id}`)}
+      />
     </div>
   );
 }

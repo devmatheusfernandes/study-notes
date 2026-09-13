@@ -22,6 +22,7 @@ import {
   Cpu,
   Search,
   SearchCode,
+  AtSign,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -134,6 +135,91 @@ export function DocsView() {
               indicador abaixo do título mostra "Salvo na nuvem", "Salvo neste
               dispositivo" (offline) ou sincronizando.
             </P>
+          </Section>
+
+          <Section icon={AtSign} title="Referências com @ — Bíblia, publicações, vídeos e notas">
+            <P>
+              Dentro do texto de qualquer nota, digitar <Code>@</Code> abre um menu de
+              busca. Continue digitando e as opções vão aparecendo — use as setas
+              ↑/↓ e <Code>Enter</Code> (ou clique) para escolher. Ao confirmar, o texto
+              digitado vira uma referência clicável (um "chip"), e você segue escrevendo
+              normalmente depois dela.
+            </P>
+            <P>
+              Clicar num chip já inserido abre a referência numa barra lateral à
+              direita (ou um Vault, no celular) — sem sair da nota que você está lendo
+              ou escrevendo.
+            </P>
+
+            <P>
+              <strong>Bíblia</strong> — nome ou abreviação do livro, capítulo e,
+              opcionalmente, versículo(s):
+            </P>
+            <Ul>
+              <li>
+                <Code>@jo 3:16</Code> ou <Code>@joão 3:16</Code> — um versículo específico.
+              </li>
+              <li>
+                <Code>@sal 23:1-6</Code> — uma faixa de versículos.
+              </li>
+              <li>
+                <Code>@mt 7</Code> — o capítulo inteiro, sem versículo.
+              </li>
+            </Ul>
+
+            <P>
+              <strong>Publicações</strong> — pela sigla (a mesma usada no jw.org: w, g,
+              it, sfg, bt…) seguida do número do capítulo/lição, <em>ou</em> pelo nome do
+              artigo/capítulo, sem precisar saber a sigla nem o número:
+            </P>
+            <Ul>
+              <li>
+                <Code>@th 2</Code> — capítulo 2 de uma publicação que você mesmo importou
+                (o menu só reconhece siglas de publicações que já estão na sua
+                biblioteca ou já indexadas globalmente, como o Guia de Pesquisa).
+              </li>
+              <li>
+                <Code>@it-1</Code> — a publicação inteira (sem número, abre o primeiro
+                capítulo), mesmo que você nunca tenha importado o Perspicaz — publicações
+                compartilhadas, como ele, funcionam para todo mundo.
+              </li>
+              <li>
+                <Code>@amor</Code> — busca por título: encontra o verbete "Amor" do
+                Perspicaz (ou de qualquer publicação sua) sem precisar saber sigla ou
+                número de capítulo. Essa busca por nome leva um instante a mais (aparece
+                "buscando…" no menu) porque consulta o servidor, diferente da busca por
+                sigla/livro da Bíblia, que é instantânea.
+              </li>
+            </Ul>
+            <P>
+              Também dá para escrever a referência direto, sem abrir o menu: digitar{" "}
+              <Code>(th 2)</Code> ou <Code>(mt 7:12)</Code> por conta própria — ao fechar
+              o parêntese, se for uma referência reconhecida, ela vira chip sozinha. Esse
+              atalho só funciona pra sigla+número, não para busca por título.
+            </P>
+
+            <P>
+              <strong>Vídeos</strong> — parte do título do vídeo:
+            </P>
+            <Ul>
+              <li>
+                <Code>@mansos herdarão</Code> — encontra um vídeo cujo título contenha
+                esse trecho; ao abrir o chip, o vídeo toca direto na barra lateral.
+              </li>
+            </Ul>
+
+            <P>
+              <strong>Outras notas</strong> — parte do título de uma nota sua:
+            </P>
+            <Ul>
+              <li>
+                <Code>@estudo de sexta</Code> — encontra e referencia outra nota pelo
+                título. Abrir o chip mostra uma prévia do conteúdo dela na barra lateral,
+                com um botão "Abrir nota" para ir até ela de verdade. Só notas de texto
+                entram nessa busca (não arquivos/publicações), e uma nota nunca aparece
+                na busca dentro dela mesma.
+              </li>
+            </Ul>
           </Section>
 
           <Section icon={FolderKanban} title="Pastas e tags">

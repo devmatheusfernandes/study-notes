@@ -41,15 +41,23 @@ import {
 } from "@/lib/tiptap/reference-suggestion";
 import {
   buildReferenceSuggestions,
+  namePartOf,
+  type NoteOption,
   type PublicationOption,
+  type ReferenceSearchResults,
   type ReferenceSuggestionItem,
 } from "@/lib/notes/reference-suggestions";
 import {
   referenceFromElement,
   referenceToMarkAttributes,
+  NOTE_REFERENCE_TRIGGER,
   type NoteReference,
 } from "@/lib/notes/note-reference";
 import { ReferenceSuggestionMenu } from "@/components/content/reference-suggestion-menu";
+import { searchNoteReferenceCandidates } from "@/app/(app)/note-reference-search-actions";
+
+const REFERENCE_SEARCH_DEBOUNCE_MS = 250;
+const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
 
 async function insertImageFile(editor: Editor, file: File) {
   if (!file.type.startsWith("image/")) return;
@@ -122,12 +130,14 @@ interface RichTextEditorProps {
   className?: string;
   /** The user's ingested .jwpub publications — what makes "(th 2)" recognisable as a reference at all. */
   publications?: PublicationOption[];
+  /** The user's own notes, offered as "@" mentions by title (excludes this note itself — see note-editor.tsx). */
+  notes?: NoteOption[];
   /** Called when a reference in the text is clicked, so the host can open its side panel. */
   onReferenceClick?: (reference: NoteReference) => void;
 }
 
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
-  { content, onChange, placeholder, autoFocus, className, publications, onReferenceClick },
+  { content, onChange, placeholder, autoFocus, className, publications, notes, onReferenceClick },
   ref
 ) {
   const seeded = useRef(false);
@@ -161,9 +171,49 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   );
   const symbolsRef = useRef(knownSymbols);
 
+  // The title/video search half of the menu — debounced since it's a server
+  // round trip, unlike the synchronous Bible-book/symbol matching above.
+  const [searchResults, setSearchResults] = useState<ReferenceSearchResults>(EMPTY_SEARCH_RESULTS);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchRequestRef = useRef(0);
+
+  useEffect(() => {
+    const namePart = suggestion ? namePartOf(suggestion.query) : "";
+    const requestId = ++searchRequestRef.current;
+
+    if (namePart.length < 2) {
+      // Deferred a tick rather than set synchronously in the effect body —
+      // same pattern note-reference-surface.tsx uses for its own load states.
+      queueMicrotask(() => {
+        if (searchRequestRef.current !== requestId) return;
+        setSearchResults(EMPTY_SEARCH_RESULTS);
+        setIsSearching(false);
+      });
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (searchRequestRef.current === requestId) setIsSearching(true);
+    });
+    const timer = setTimeout(() => {
+      void searchNoteReferenceCandidates(namePart).then((result) => {
+        // A later keystroke may have started a newer search — a slow response
+        // to a stale query must not overwrite results for what's typed now.
+        if (searchRequestRef.current !== requestId) return;
+        setSearchResults(result);
+        setIsSearching(false);
+      });
+    }, REFERENCE_SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [suggestion]);
+
   const items = useMemo(
-    () => (suggestion ? buildReferenceSuggestions(suggestion.query, publications ?? []) : []),
-    [suggestion, publications]
+    () =>
+      suggestion
+        ? buildReferenceSuggestions(suggestion.query, publications ?? [], notes ?? [], searchResults)
+        : [],
+    [suggestion, publications, notes, searchResults]
   );
   const activeIndex = highlight.query === (suggestion?.query ?? "") ? highlight.index : 0;
   const setActiveIndex = useCallback(
@@ -196,7 +246,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       editor
         .chain()
         .focus()
-        .insertContentAt({ from: active.from, to: active.to }, { type: "text", text: `/${item.text}` })
+        .insertContentAt(
+          { from: active.from, to: active.to },
+          { type: "text", text: `${NOTE_REFERENCE_TRIGGER}${item.text}` }
+        )
         .run();
       return;
     }
@@ -315,7 +368,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       /* eslint-disable react-hooks/refs */
       NoteReferenceMark.configure({ getKnownSymbols }),
       ReferenceSuggestion.configure({
-        char: "/",
+        char: NOTE_REFERENCE_TRIGGER,
         onUpdate: handleSuggestionUpdate,
         onKeyDown: handleSuggestionKeyDown,
       }),
@@ -485,6 +538,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           items={items}
           activeIndex={activeIndex}
           rect={suggestion.rect}
+          isSearching={isSearching}
           onSelect={applyItem}
           onHover={setActiveIndex}
         />

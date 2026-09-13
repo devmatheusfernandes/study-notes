@@ -90,6 +90,37 @@ export const NoteReferenceMark = Mark.create<NoteReferenceOptions>({
         renderHTML: (attributes) =>
           attributes.symbol ? { "data-ref-symbol": String(attributes.symbol) } : {},
       },
+      documentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-document-id"),
+        renderHTML: (attributes) =>
+          attributes.documentId !== null && attributes.documentId !== undefined
+            ? { "data-ref-document-id": String(attributes.documentId) }
+            : {},
+      },
+      publicationId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-publication-id"),
+        renderHTML: (attributes) =>
+          attributes.publicationId ? { "data-ref-publication-id": String(attributes.publicationId) } : {},
+      },
+      isGlobal: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-global") === "1",
+        renderHTML: (attributes) => (attributes.isGlobal ? { "data-ref-global": "1" } : {}),
+      },
+      videoId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-video-id"),
+        renderHTML: (attributes) =>
+          attributes.videoId ? { "data-ref-video-id": String(attributes.videoId) } : {},
+      },
+      linkedNoteId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-note-id"),
+        renderHTML: (attributes) =>
+          attributes.linkedNoteId ? { "data-ref-note-id": String(attributes.linkedNoteId) } : {},
+      },
     };
   },
 

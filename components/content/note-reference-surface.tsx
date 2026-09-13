@@ -6,15 +6,21 @@ import {
   getBibleVerseRange,
   type BibleVerseRow,
 } from "@/app/(app)/bible-actions";
-import { resolvePublicationReference } from "@/app/(app)/jwpub-actions";
+import { resolvePublicationReference, resolvePublicationChapterById } from "@/app/(app)/jwpub-actions";
+import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
 import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
+import { useNotesStore } from "@/lib/store/notes-store";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
 import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
+import { NoteVideoSurface, type NoteVideoTarget } from "./note-video-surface";
+import { NoteLinkSurface } from "./note-link-surface";
 
 interface NoteReferenceSurfaceProps {
   /** `null` closes the panel. */
   reference: NoteReference | null;
   onClose: () => void;
+  /** Navigates to a linked note's own editor — called from the "note" surface's "Abrir nota" button. */
+  onOpenNote: (noteId: string) => void;
 }
 
 /**
@@ -27,12 +33,21 @@ interface NoteReferenceSurfaceProps {
  * Fetching lives here rather than in the note editor so the editor keeps
  * exactly one piece of state for this feature (which reference is open).
  */
-export function NoteReferenceSurface({ reference, onClose }: NoteReferenceSurfaceProps) {
+export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteReferenceSurfaceProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verses, setVerses] = useState<BibleVerseRow[] | null>(null);
   const [target, setTarget] = useState<JwpubReferenceTarget | null>(null);
   const [html, setHtml] = useState<string | null>(null);
+  const [video, setVideo] = useState<NoteVideoTarget | null>(null);
+
+  // A linked note is already sitting in the offline-first store (see
+  // note-editor.tsx's own comment on noteMentionOptions) — no fetch, no
+  // loading state, just a live selector so a title edited elsewhere updates
+  // the panel immediately.
+  const linkedNote = useNotesStore((s) =>
+    reference?.kind === "note" ? s.notes.find((n) => n.id === reference.noteId) : undefined
+  );
 
   // Keyed on the reference's identity, not the object: clicking the same chip
   // twice (or a re-render handing over an equal-but-new object) must not
@@ -40,7 +55,7 @@ export function NoteReferenceSurface({ reference, onClose }: NoteReferenceSurfac
   const key = reference ? referenceKey(reference) : null;
 
   useEffect(() => {
-    if (!reference) return;
+    if (!reference || reference.kind === "note") return;
 
     let cancelled = false;
     // Deferred a tick rather than set synchronously in the effect body —
@@ -52,9 +67,12 @@ export function NoteReferenceSurface({ reference, onClose }: NoteReferenceSurfac
     });
 
     async function load(ref: NoteReference) {
+      if (ref.kind === "note") return; // handled by the linkedNote selector above, no fetch needed
+
       if (ref.kind === "bible") {
         setTarget(null);
         setHtml(null);
+        setVideo(null);
         const result =
           ref.startVerse === null
             ? await getBibleChapterVerses(ref.bookOrder, ref.chapter)
@@ -65,11 +83,35 @@ export function NoteReferenceSurface({ reference, onClose }: NoteReferenceSurfac
         return;
       }
 
+      if (ref.kind === "video") {
+        setVerses(null);
+        setTarget(null);
+        setHtml(null);
+        const row = await getGlobalVideoById(ref.videoId);
+        if (cancelled) return;
+        if (!row) {
+          setVideo(null);
+          setError("Vídeo não encontrado.");
+          return;
+        }
+        setVideo({
+          videoId: row.id,
+          title: row.title,
+          videoUrl: row.video_url ?? undefined,
+          coverImage: row.cover_image ?? undefined,
+          durationFormatted: row.duration_formatted ?? undefined,
+          subtitlesUrl: row.subtitles_url ?? undefined,
+        });
+        setError(null);
+        return;
+      }
+
       setVerses(null);
-      const { reference: resolved, error: resolveError } = await resolvePublicationReference(
-        ref.symbol,
-        ref.chapter
-      );
+      setVideo(null);
+      const { reference: resolved, error: resolveError } =
+        ref.documentId !== undefined && ref.publicationId
+          ? await resolvePublicationChapterById(ref.publicationId, ref.documentId, !!ref.isGlobal)
+          : await resolvePublicationReference(ref.symbol, ref.chapter);
       if (cancelled) return;
       if (!resolved) {
         setTarget(null);
@@ -113,6 +155,20 @@ export function NoteReferenceSurface({ reference, onClose }: NoteReferenceSurfac
         html={html}
         error={error}
         isLoading={isLoading}
+        onClose={onClose}
+      />
+      <NoteVideoSurface
+        open={reference?.kind === "video"}
+        video={video}
+        error={error}
+        isLoading={isLoading}
+        onClose={onClose}
+      />
+      <NoteLinkSurface
+        open={reference?.kind === "note"}
+        note={linkedNote ?? null}
+        fallbackTitle={reference?.kind === "note" ? reference.title : ""}
+        onOpen={() => linkedNote && onOpenNote(linkedNote.id)}
         onClose={onClose}
       />
     </>

@@ -727,7 +727,8 @@ function chapterTitleMatchesNumber(title: string, wanted: number): boolean {
 }
 
 export interface ResolvedPublicationReference {
-  noteId: string;
+  /** `null` for a shared global publication — there's no per-user note to open. */
+  noteId: string | null;
   publicationId: string;
   publicationTitle: string;
   symbol: string;
@@ -736,10 +737,31 @@ export interface ResolvedPublicationReference {
   html: string;
 }
 
+type ChapterLike = { document_id: number; position: number; title: string };
+
 /**
- * Opens "(th 2)" — the caller's own `th` publication, chapter 2 — in one
- * round trip: finds the publication by symbol, picks the chapter, and returns
- * its content.
+ * Picks the chapter "(symbol N)" meant, trying a labelled number in the
+ * title first (chapterTitleMatchesNumber) and falling back to position —
+ * shared by the own-library and global-publication lookups in
+ * resolvePublicationReference below, since both number a publication's parts
+ * the same inconsistent way.
+ */
+function pickChapterByNumber<T extends ChapterLike>(chapters: T[], chapter: number): T | undefined {
+  const byTitle = chapters.find((row) => chapterTitleMatchesNumber(row.title, chapter));
+  // Position is 0-based, so "chapter 2" is index 2 only when the file has a
+  // cover/front-matter document at 0 — try both rather than guessing.
+  const byPosition =
+    chapters.find((row) => row.position === chapter) ??
+    chapters.find((row) => row.position === chapter - 1);
+  return byTitle ?? byPosition;
+}
+
+/**
+ * Opens "(th 2)" in one round trip: finds the publication by symbol, picks
+ * the chapter, and returns its content — first against the caller's own
+ * library, then against the shared `global_publications` table (Perspicaz
+ * and any future single-copy reference work) when the symbol isn't one the
+ * user has personally imported.
  *
  * Resolved at click time rather than when the reference was typed, so a
  * reference written before the publication was uploaded starts working the
@@ -764,42 +786,172 @@ export async function resolvePublicationReference(
     .limit(1)
     .maybeSingle();
 
-  if (!publication) {
+  if (publication) {
+    const { data: chapters } = await supabase
+      .from("jwpub_chapters")
+      .select("document_id, position, title, content_html")
+      .eq("publication_id", publication.id)
+      .order("position", { ascending: true });
+
+    if (!chapters || chapters.length === 0) return { error: "Publicação sem capítulos." };
+
+    const match = chapter === null ? chapters[0] : pickChapterByNumber(chapters, chapter);
+    if (!match) {
+      return { error: `A publicação "${publication.title}" não tem um capítulo ${chapter}.` };
+    }
+
+    return {
+      reference: {
+        noteId: publication.note_id,
+        publicationId: publication.id,
+        publicationTitle: publication.title,
+        symbol: publication.symbol,
+        documentId: match.document_id,
+        chapterTitle: match.title,
+        html: match.content_html ?? "",
+      },
+    };
+  }
+
+  const { data: globalPublication } = await supabase
+    .from("global_publications")
+    .select("id, title, symbol")
+    .ilike("symbol", cleanSymbol)
+    .maybeSingle();
+
+  if (!globalPublication) {
     return { error: `Você ainda não tem a publicação "${cleanSymbol.toUpperCase()}" na sua biblioteca.` };
   }
 
-  const { data: chapters } = await supabase
-    .from("jwpub_chapters")
+  const { data: globalChapters } = await supabase
+    .from("global_publication_chapters")
     .select("document_id, position, title, content_html")
-    .eq("publication_id", publication.id)
+    .eq("publication_id", globalPublication.id)
     .order("position", { ascending: true });
 
-  if (!chapters || chapters.length === 0) return { error: "Publicação sem capítulos." };
+  if (!globalChapters || globalChapters.length === 0) return { error: "Publicação sem capítulos." };
 
-  let match = chapters[0];
-  if (chapter !== null) {
-    const byTitle = chapters.find((row) => chapterTitleMatchesNumber(row.title, chapter));
-    // Position is 0-based, so "chapter 2" is index 2 only when the file has a
-    // cover/front-matter document at 0 — try both rather than guessing.
-    const byPosition =
-      chapters.find((row) => row.position === chapter) ??
-      chapters.find((row) => row.position === chapter - 1);
-    const resolved = byTitle ?? byPosition;
-    if (!resolved) {
-      return { error: `A publicação "${publication.title}" não tem um capítulo ${chapter}.` };
-    }
-    match = resolved;
+  const globalMatch = chapter === null ? globalChapters[0] : pickChapterByNumber(globalChapters, chapter);
+  if (!globalMatch) {
+    return { error: `A publicação "${globalPublication.title}" não tem um capítulo ${chapter}.` };
   }
 
   return {
     reference: {
-      noteId: publication.note_id,
-      publicationId: publication.id,
-      publicationTitle: publication.title,
-      symbol: publication.symbol,
-      documentId: match.document_id,
-      chapterTitle: match.title,
-      html: match.content_html ?? "",
+      noteId: null,
+      publicationId: globalPublication.id,
+      publicationTitle: globalPublication.title,
+      symbol: globalPublication.symbol,
+      documentId: globalMatch.document_id,
+      chapterTitle: globalMatch.title,
+      html: globalMatch.content_html ?? "",
     },
   };
+}
+
+/**
+ * Opens one exact chapter by id — the resolution path for a reference the
+ * "@" menu built from a title search (searchOwnChapterTitles /
+ * search_global_publication_chapters in note-reference-search-actions.ts),
+ * where the chapter is already known and no symbol/number matching is
+ * needed.
+ */
+export async function resolvePublicationChapterById(
+  publicationId: string,
+  documentId: number,
+  isGlobal: boolean
+): Promise<{ reference?: ResolvedPublicationReference; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  if (!isGlobal) {
+    const { data } = await supabase
+      .from("jwpub_chapters")
+      .select("document_id, title, content_html, jwpub_publications!inner(note_id, title, symbol, status)")
+      .eq("publication_id", publicationId)
+      .eq("document_id", documentId)
+      .maybeSingle();
+
+    const pub = Array.isArray(data?.jwpub_publications) ? data.jwpub_publications[0] : data?.jwpub_publications;
+    if (!data || !pub || pub.status !== "ready") return { error: "Capítulo não encontrado." };
+
+    return {
+      reference: {
+        noteId: pub.note_id,
+        publicationId,
+        publicationTitle: pub.title,
+        symbol: pub.symbol,
+        documentId: data.document_id,
+        chapterTitle: data.title,
+        html: data.content_html ?? "",
+      },
+    };
+  }
+
+  const { data } = await supabase
+    .from("global_publication_chapters")
+    .select("document_id, title, content_html, global_publications(title, symbol)")
+    .eq("publication_id", publicationId)
+    .eq("document_id", documentId)
+    .maybeSingle();
+
+  const pub = Array.isArray(data?.global_publications) ? data.global_publications[0] : data?.global_publications;
+  if (!data || !pub) return { error: "Capítulo não encontrado." };
+
+  return {
+    reference: {
+      noteId: null,
+      publicationId,
+      publicationTitle: pub.title,
+      symbol: pub.symbol,
+      documentId: data.document_id,
+      chapterTitle: data.title,
+      html: data.content_html ?? "",
+    },
+  };
+}
+
+export interface OwnChapterTitleHit {
+  publicationId: string;
+  publicationTitle: string;
+  symbol: string;
+  documentId: number;
+  chapterTitle: string;
+  noteId: string;
+}
+
+/**
+ * Free-text title search over the caller's own chapters, for the "@" menu's
+ * title-search rows (e.g. typing "Amor" finding an it-1 article by that
+ * name). A plain `ilike` is enough here — unlike global_publication_chapters,
+ * a single user's own chapter count is small and RLS already scopes it.
+ */
+export async function searchOwnChapterTitles(query: string, limit = 5): Promise<{ hits: OwnChapterTitleHit[] }> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return { hits: [] };
+
+  const { supabase, user } = await requireUser();
+  if (!user) return { hits: [] };
+
+  const { data } = await supabase
+    .from("jwpub_chapters")
+    .select("document_id, title, publication_id, jwpub_publications!inner(note_id, title, symbol, status)")
+    .ilike("title", `%${trimmed}%`)
+    .eq("jwpub_publications.status", "ready")
+    .limit(limit);
+
+  const hits: OwnChapterTitleHit[] = [];
+  for (const row of data ?? []) {
+    const pub = Array.isArray(row.jwpub_publications) ? row.jwpub_publications[0] : row.jwpub_publications;
+    if (!pub || !pub.symbol) continue;
+    hits.push({
+      publicationId: row.publication_id,
+      publicationTitle: pub.title,
+      symbol: pub.symbol.toLowerCase(),
+      documentId: row.document_id,
+      chapterTitle: row.title,
+      noteId: pub.note_id,
+    });
+  }
+  return { hits };
 }

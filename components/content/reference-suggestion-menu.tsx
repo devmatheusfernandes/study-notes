@@ -2,17 +2,26 @@
 
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { BookOpen, Library } from "lucide-react";
+import { BookOpen, FileText, Library, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ReferenceSuggestionItem } from "@/lib/notes/reference-suggestions";
 
 interface ReferenceSuggestionMenuProps {
   items: ReferenceSuggestionItem[];
   activeIndex: number;
-  /** Viewport rect of the "/" that opened the menu. */
+  /** Viewport rect of the "@" that opened the menu. */
   rect: DOMRect;
+  /** True while a title/video search is still in flight — shown as a trailing row so the menu doesn't look stuck. */
+  isSearching?: boolean;
   onSelect: (item: ReferenceSuggestionItem) => void;
   onHover: (index: number) => void;
+}
+
+function iconFor(hint: string) {
+  if (hint === "Bíblia") return <BookOpen className="size-3.5 shrink-0" />;
+  if (hint === "Vídeo") return <Video className="size-3.5 shrink-0" />;
+  if (hint === "Nota") return <FileText className="size-3.5 shrink-0" />;
+  return <Library className="size-3.5 shrink-0" />;
 }
 
 const MENU_WIDTH = 288;
@@ -31,14 +40,16 @@ export function ReferenceSuggestionMenu({
   items,
   activeIndex,
   rect,
+  isSearching,
   onSelect,
   onHover,
 }: ReferenceSuggestionMenuProps) {
   // No mount flag needed: the menu only ever renders in response to typing,
   // so it never runs during SSR — the guard is just belt and braces.
-  if (typeof document === "undefined" || items.length === 0) return null;
+  if (typeof document === "undefined" || (items.length === 0 && !isSearching)) return null;
 
-  const estimatedHeight = Math.min(items.length, 7) * ESTIMATED_ROW_HEIGHT + 16;
+  const rowCount = items.length + (isSearching ? 1 : 0);
+  const estimatedHeight = Math.min(rowCount, 7) * ESTIMATED_ROW_HEIGHT + 16;
   const flipUp = rect.bottom + estimatedHeight > window.innerHeight - 12;
 
   return createPortal(
@@ -73,17 +84,23 @@ export function ReferenceSuggestionMenu({
             index === activeIndex ? "bg-primary/[0.18] text-accent" : "text-foreground/85 hover:bg-secondary"
           )}
         >
-          {item.hint === "Bíblia" ? (
-            <BookOpen className="size-3.5 shrink-0" />
-          ) : (
-            <Library className="size-3.5 shrink-0" />
-          )}
+          {iconFor(item.hint)}
           <span className="min-w-0 flex-1 truncate text-[13.5px]">{item.label}</span>
           <span className="shrink-0 font-mono text-[10px] tracking-[0.06em] text-muted-foreground">
             {item.type === "insert" ? "inserir" : item.hint}
           </span>
         </button>
       ))}
+      {isSearching && (
+        <div className="flex w-full items-center gap-2.5 px-3 py-2 text-[12px] text-muted-foreground">
+          <motion.span
+            animate={{ opacity: [1, 0.3, 1] }}
+            transition={{ duration: 1.2, repeat: Infinity }}
+            className="size-1.5 rounded-full bg-accent"
+          />
+          buscando…
+        </div>
+      )}
     </motion.div>,
     document.body
   );

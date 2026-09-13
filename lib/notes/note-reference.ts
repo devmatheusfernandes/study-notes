@@ -26,9 +26,42 @@ export interface ParsedPublicationReference {
   symbol: string;
   /** Chapter/lesson number as written, or `null` for a bare "(th)" meaning the publication itself. */
   chapter: number | null;
+  /**
+   * Set only when the "@" menu resolved this to one exact chapter via a
+   * title search (see searchNoteReferenceCandidates) — resolution then
+   * fetches this id directly instead of matching `chapter` against a
+   * chapter's title/position, which is what symbol+number references still
+   * do. `publicationId` is required alongside it to avoid a second lookup by
+   * symbol at resolve time.
+   */
+  documentId?: number;
+  publicationId?: string;
+  /** True when `documentId`/`publicationId` point into `global_publication_chapters` rather than the user's own `jwpub_chapters`. */
+  isGlobal?: boolean;
 }
 
-export type NoteReference = ParsedBibleReference | ParsedPublicationReference;
+export interface ParsedVideoReference {
+  kind: "video";
+  videoId: string;
+  /** Chip label shown before the panel re-fetches the real title. */
+  title: string;
+}
+
+export interface ParsedNoteReference {
+  kind: "note";
+  noteId: string;
+  /** Chip label — unlike the other kinds, the panel doesn't re-fetch this from a server, so it's also what's shown if the note is later renamed. */
+  title: string;
+}
+
+export type NoteReference =
+  | ParsedBibleReference
+  | ParsedPublicationReference
+  | ParsedVideoReference
+  | ParsedNoteReference;
+
+/** The character that opens the reference menu — kept in one place since the editor inserts it literally when completing a "prefix" row. */
+export const NOTE_REFERENCE_TRIGGER = "@";
 
 /**
  * "th 2", "th cap. 2", "bt lição 5", "lff 10", or a bare "th".
@@ -78,6 +111,7 @@ export function parseNoteReference(
 /** What the chip shows once resolved — publications keep the raw symbol until the panel knows the real title. */
 export function formatNoteReference(ref: NoteReference): string {
   if (ref.kind === "bible") return formatBibleReference(ref);
+  if (ref.kind === "video" || ref.kind === "note") return ref.title;
   return ref.chapter === null
     ? ref.symbol.toUpperCase()
     : `${ref.symbol.toUpperCase()} ${ref.chapter}`;
@@ -95,12 +129,17 @@ export function formatNoteReference(ref: NoteReference): string {
 export const REFERENCE_ATTRIBUTE = "data-note-ref";
 
 export type NoteReferenceAttributes = {
-  kind: "bible" | "publication" | null;
+  kind: "bible" | "publication" | "video" | "note" | null;
   bookOrder: number | null;
   chapter: number | null;
   startVerse: number | null;
   endVerse: number | null;
   symbol: string | null;
+  documentId: number | null;
+  publicationId: string | null;
+  isGlobal: boolean | null;
+  videoId: string | null;
+  linkedNoteId: string | null;
 };
 
 export function referenceToAttributes(ref: NoteReference): NoteReferenceAttributes {
@@ -112,6 +151,41 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
       startVerse: ref.startVerse,
       endVerse: ref.endVerse,
       symbol: null,
+      documentId: null,
+      publicationId: null,
+      isGlobal: null,
+      videoId: null,
+      linkedNoteId: null,
+    };
+  }
+  if (ref.kind === "video") {
+    return {
+      kind: "video",
+      bookOrder: null,
+      chapter: null,
+      startVerse: null,
+      endVerse: null,
+      symbol: null,
+      documentId: null,
+      publicationId: null,
+      isGlobal: null,
+      videoId: ref.videoId,
+      linkedNoteId: null,
+    };
+  }
+  if (ref.kind === "note") {
+    return {
+      kind: "note",
+      bookOrder: null,
+      chapter: null,
+      startVerse: null,
+      endVerse: null,
+      symbol: null,
+      documentId: null,
+      publicationId: null,
+      isGlobal: null,
+      videoId: null,
+      linkedNoteId: ref.noteId,
     };
   }
   return {
@@ -121,6 +195,11 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
     startVerse: null,
     endVerse: null,
     symbol: ref.symbol,
+    documentId: ref.documentId ?? null,
+    publicationId: ref.publicationId ?? null,
+    isGlobal: ref.isGlobal ?? null,
+    videoId: null,
+    linkedNoteId: null,
   };
 }
 
@@ -158,11 +237,28 @@ export function referenceFromElement(element: Element): NoteReference | null {
   if (kind === "publication") {
     const symbol = element.getAttribute("data-ref-symbol");
     if (!symbol) return null;
+    const documentId = toNumber(element.getAttribute("data-ref-document-id"));
+    const publicationId = element.getAttribute("data-ref-publication-id");
     return {
       kind: "publication",
       symbol: symbol.toLowerCase(),
       chapter: toNumber(element.getAttribute("data-ref-chapter")),
+      documentId: documentId ?? undefined,
+      publicationId: publicationId ?? undefined,
+      isGlobal: element.getAttribute("data-ref-global") === "1",
     };
+  }
+
+  if (kind === "video") {
+    const videoId = element.getAttribute("data-ref-video-id");
+    if (!videoId) return null;
+    return { kind: "video", videoId, title: element.textContent?.trim() ?? "Vídeo" };
+  }
+
+  if (kind === "note") {
+    const noteId = element.getAttribute("data-ref-note-id");
+    if (!noteId) return null;
+    return { kind: "note", noteId, title: element.textContent?.trim() ?? "Nota" };
   }
 
   return null;
@@ -170,9 +266,12 @@ export function referenceFromElement(element: Element): NoteReference | null {
 
 /** Stable identity for a reference — lets the panel skip a refetch when the same chip is clicked twice. */
 export function referenceKey(ref: NoteReference): string {
-  return ref.kind === "bible"
-    ? `bible:${ref.bookOrder}:${ref.chapter}:${ref.startVerse ?? ""}:${ref.endVerse ?? ""}`
-    : `pub:${ref.symbol}:${ref.chapter ?? ""}`;
+  if (ref.kind === "bible") {
+    return `bible:${ref.bookOrder}:${ref.chapter}:${ref.startVerse ?? ""}:${ref.endVerse ?? ""}`;
+  }
+  if (ref.kind === "video") return `video:${ref.videoId}`;
+  if (ref.kind === "note") return `note:${ref.noteId}`;
+  return `pub:${ref.symbol}:${ref.chapter ?? ""}:${ref.documentId ?? ""}`;
 }
 
 /**

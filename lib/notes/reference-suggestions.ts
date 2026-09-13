@@ -16,11 +16,26 @@ import {
 } from "@/lib/bible/parse-reference";
 import { BIBLE_BOOK_ABBREVIATIONS_PT } from "@/lib/bible/book-abbreviations";
 import { parseNoteReference, type NoteReference } from "./note-reference";
+import type { ChapterTitleHit, VideoTitleHit } from "@/app/(app)/note-reference-search-actions";
 
 export interface PublicationOption {
   symbol: string;
   title: string;
 }
+
+/** One of the user's own notes, offered for "@" linking — see NoteReferenceSuggestions in note-editor.tsx. */
+export interface NoteOption {
+  id: string;
+  title: string;
+}
+
+/** The async half of a search — chapter/article and video title hits, fetched via searchNoteReferenceCandidates. */
+export interface ReferenceSearchResults {
+  chapters: ChapterTitleHit[];
+  videos: VideoTitleHit[];
+}
+
+const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
 
 export type ReferenceSuggestionItem =
   | {
@@ -50,13 +65,15 @@ function normalizeForSearch(raw: string): string {
 }
 
 /** The name part of a half-typed reference — "mt 7:1" is still the user naming Matthew. */
-function namePartOf(query: string): string {
+export function namePartOf(query: string): string {
   return query.replace(/[\d\s:.\-–—]+$/u, "").trim();
 }
 
 export function buildReferenceSuggestions(
   query: string,
-  publications: PublicationOption[]
+  publications: PublicationOption[],
+  notes: NoteOption[] = [],
+  search: ReferenceSearchResults = EMPTY_SEARCH_RESULTS
 ): ReferenceSuggestionItem[] {
   const items: ReferenceSuggestionItem[] = [];
   const trimmed = query.trim();
@@ -75,7 +92,7 @@ export function buildReferenceSuggestions(
         text: `(${formatBibleReference(parsed)})`,
         reference: parsed,
       });
-    } else {
+    } else if (parsed.kind === "publication") {
       const publication = publications.find((p) => p.symbol === parsed.symbol);
       items.push({
         type: "insert",
@@ -135,6 +152,55 @@ export function buildReferenceSuggestions(
       label: publication.title || publication.symbol.toUpperCase(),
       hint: publication.symbol.toUpperCase(),
       text: `${publication.symbol} `,
+    });
+  }
+
+  // Own notes, matched by title — a ready-to-insert row (not "prefix"): a
+  // note doesn't have a chapter/verse to keep typing after choosing it.
+  for (const note of notes) {
+    if (items.length >= MAX_ITEMS) break;
+    const title = note.title.trim();
+    if (!title) continue;
+    const haystack = normalizeForSearch(title);
+    if (!haystack.includes(needle)) continue;
+    items.push({
+      type: "insert",
+      label: title,
+      hint: "Nota",
+      text: `(${title})`,
+      reference: { kind: "note", noteId: note.id, title },
+    });
+  }
+
+  // Title-search hits (chapters/articles by name, videos by name) — these
+  // already name one exact document, so each is a ready-to-insert row rather
+  // than a "keep typing" prefix, same as a fully-parsed "insert" row above.
+  for (const chapter of search.chapters) {
+    if (items.length >= MAX_ITEMS) break;
+    items.push({
+      type: "insert",
+      label: `${chapter.chapterTitle} — ${chapter.publicationTitle}`,
+      hint: "Publicação",
+      text: `(${chapter.publicationTitle} — ${chapter.chapterTitle})`,
+      reference: {
+        kind: "publication",
+        symbol: chapter.symbol || chapter.publicationTitle.toLowerCase(),
+        chapter: null,
+        documentId: chapter.documentId,
+        publicationId: chapter.publicationId,
+        isGlobal: chapter.source === "global",
+      },
+    });
+  }
+
+  for (const video of search.videos) {
+    if (items.length >= MAX_ITEMS) break;
+    items.push({
+      type: "insert",
+      label: video.title,
+      hint: "Vídeo",
+      text: `(${video.title})`,
+      reference: { kind: "video", videoId: video.videoId, title: video.title },
     });
   }
 
