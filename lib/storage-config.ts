@@ -93,5 +93,24 @@ export const JWPUB_MEDIA_BUCKET = "jwpub-media";
 /** A single publication can carry hundreds of illustrations, so the note-image ceiling of 40 would choke on the first real file. */
 export const JWPUB_MEDIA_RATE_LIMIT_MAX_UPLOADS = 1500;
 
-/** How many images go up per `uploadPublicationMedia` call — keeps each request well inside the body-size limit. */
+/**
+ * Upper bound on how many images go up per `uploadPublicationMedia` call —
+ * a secondary cap alongside JWPUB_MEDIA_BATCH_MAX_BYTES below, since a
+ * FormData with thousands of tiny parts still has per-part overhead even
+ * when comfortably under the byte cap.
+ */
 export const JWPUB_MEDIA_BATCH_SIZE = 20;
+
+/**
+ * A ceiling on each media batch's *summed* file size, not just count — a
+ * fixed 20-files-per-batch scheme (this constant's original approach) blew
+ * past Vercel's hard ~4.5MB request-body cap on Serverless Functions the
+ * first time a publication's illustrations were bigger than a typical
+ * pamphlet's (confirmed against Perspicaz/Insight: full-page maps and scanned
+ * plates routinely run past 500KB each, so 20 of them can sum well past
+ * 4.5MB) — next.config.ts's own `bodySizeLimit` can't override that
+ * platform limit, same reasoning as MAX_BATCH_BYTES in
+ * research-guide-upload-card.tsx for text batches. 3MB leaves headroom
+ * under it for multipart framing overhead.
+ */
+export const JWPUB_MEDIA_BATCH_MAX_BYTES = 3 * 1024 * 1024;
