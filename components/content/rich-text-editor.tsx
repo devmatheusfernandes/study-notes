@@ -389,6 +389,14 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         if (!element) return false;
         const reference = referenceFromElement(element);
         if (!reference) return false;
+        // Without this, the click's native default action is free to run
+        // alongside our own handling — harmless in a normal browser tab, but
+        // an installed PWA (desktop and mobile alike) can interpret that
+        // leftover default as opening the current page in a new window. This
+        // doesn't affect caret placement: ProseMirror computes that from the
+        // click coordinates itself, before handleClick even runs, not from
+        // the DOM event's default action.
+        event.preventDefault();
         referenceClickRef.current?.(reference);
         return false;
       },
