@@ -202,7 +202,7 @@ function VideoRow({ video, chapter, expanded, onToggle }: VideoRowProps) {
           expanded ? "bg-surface-elevated" : "bg-secondary hover:bg-surface-elevated"
         )}
       >
-        <span className="relative aspect-video w-20 shrink-0 overflow-hidden rounded-lg bg-black/50">
+        <span className="relative aspect-video w-20 shrink-0 overflow-hidden rounded-xs bg-black/50">
           {video.coverImage && (
             // eslint-disable-next-line @next/next/no-img-element -- JW.org CDN host, not a local asset Next can optimize
             <img src={video.coverImage} alt="" loading="lazy" className="h-full w-full object-cover" />
@@ -386,6 +386,11 @@ export function BibleStudyPanel({
 
   const openPublicationRef = useCallback(
     (mepsDocumentId: number) => {
+      // Guia's two reference surfaces (this one and the extract panel below)
+      // are independent state, so without this a citation with an embedded
+      // extract left its panel open when the next citation clicked was a bare
+      // pointer instead — two "Referência"-ish sidebars stacked side by side.
+      setOpenExtractId(null);
       const resolved = resolvedPubRefs.get(mepsDocumentId);
       if (!resolved) {
         setReferenceOpen(true);
@@ -461,6 +466,7 @@ export function BibleStudyPanel({
         const id = Number(extractLink.dataset.jwpubExtract);
         if (Number.isFinite(id)) {
           event.preventDefault();
+          setReferenceOpen(false);
           setOpenExtractId(id);
         }
         return;
@@ -512,7 +518,7 @@ export function BibleStudyPanel({
 
   return (
     <>
-    <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={420}>
+    <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={520}>
       <div ref={contentRef} className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[11px] tracking-[0.04em] text-accent">{scopeLabel}</span>

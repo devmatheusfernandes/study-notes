@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { NotebookPen } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { BibleVerseRow } from "@/app/(app)/bible-actions";
 import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
@@ -16,6 +17,8 @@ interface BibleChapterViewProps {
   onCreateHighlight?: (verse: number, startToken: number, endToken: number, colorIndex: number) => void;
   /** Fired whenever a verse is tapped or drag-selected — lets bible-reader.tsx refresh the references panel for whatever verse the reader is currently looking at, when that panel is open. A plain tap fires this without creating any actual text selection (see the click handler below) — it used to auto-select the whole verse, but that made every tap put the verse into an editable-looking selected state, which got in the way of just glancing at references. */
   onVerseSelected?: (verse: number) => void;
+  /** A click landed inside this reading column but not on any verse (or a highlight/note marker within one) — e.g. the blank margin, or a superscription. Lets bible-reader.tsx clear its `selectedVerse` so the side panels go back to showing the whole chapter. */
+  onBackgroundClick?: () => void;
   /** Imported/created highlights for this chapter — see getBibleChapterHighlights in jwlibrary-actions.ts. */
   highlights?: BibleVerseHighlight[];
   /** A highlight with an attached note was clicked — carries the highlight's own id/color too (not just the note), so the editor's color dropdown can recolor it directly. `colorIndex`/`userMarkId` are meaningless for a note created via "Anotar sem destaque" (no real UserMark) — see the identical comment in jwpub-chapter-view.tsx. `verse` lets the caller scope the Estudo panel's Pessoal tab to it instead of opening a separate note panel. */
@@ -31,6 +34,8 @@ interface BibleChapterViewProps {
   onHighlightMark?: (highlight: BibleVerseHighlight & { text?: string }) => void;
   /** Scrolls to and briefly flashes this verse on mount — deep link from a jwlibrary Bible note, or from picking a cross reference (see bible-reader.tsx's `?verse=`/navigateTo). */
   targetVerse?: number | null;
+  /** The verse currently narrowing the Estudo panel (bible-reader.tsx's `selectedVerse`) — rendered in `text-primary` so it's obvious at a glance which verse the panel is scoped to. `null` highlights nothing. */
+  selectedVerse?: number | null;
   /** How many footnotes each verse has, keyed by verse number. */
   footnoteCountByVerse?: Map<number, number>;
   /** Verse numbers that have a study note. */
@@ -55,7 +60,9 @@ export function BibleChapterView({
   highlights = [],
   onHighlightNote,
   onHighlightMark,
+  onBackgroundClick,
   targetVerse,
+  selectedVerse,
   footnoteCountByVerse,
   studyNoteVerses,
   onOpenStudy,
@@ -112,7 +119,10 @@ export function BibleChapterView({
       if (selection && !selection.isCollapsed) return;
 
       const verseEl = el?.closest<HTMLElement>("[data-verse]");
-      if (!verseEl) return;
+      if (!verseEl) {
+        onBackgroundClick?.();
+        return;
+      }
 
       const verse = Number(verseEl.dataset.verse);
       if (Number.isFinite(verse)) onVerseSelected?.(verse);
@@ -120,7 +130,7 @@ export function BibleChapterView({
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, [highlights, onHighlightNote, onHighlightMark, onVerseSelected]);
+  }, [highlights, onHighlightNote, onHighlightMark, onVerseSelected, onBackgroundClick]);
 
   // Same delayed selection-popup mechanics as jwpub-chapter-view.tsx —
   // deliberately duplicated rather than shared: that logic was only just
@@ -303,8 +313,20 @@ export function BibleChapterView({
               {v.text}
             </p>
           ) : (
-            <p key={v.id} data-verse={v.verse ?? undefined} className="relative my-3 text-pretty">
-              <span className="parNum mr-1.5 select-none align-super font-mono text-[11px] text-muted-foreground">
+            <p
+              key={v.id}
+              data-verse={v.verse ?? undefined}
+              className={cn(
+                "relative my-3 text-pretty",
+                v.verse !== null && v.verse === selectedVerse && "text-primary"
+              )}
+            >
+              <span
+                className={cn(
+                  "parNum mr-1.5 select-none align-super font-mono text-[11px]",
+                  v.verse !== null && v.verse === selectedVerse ? "text-primary" : "text-muted-foreground"
+                )}
+              >
                 {v.verse}
               </span>
               <span className="whitespace-pre-line">{v.text ?? "texto não disponível nesta tradução"}</span>
@@ -347,6 +369,7 @@ export function BibleChapterView({
         // Sibling of the motion.div above, not nested inside it — same
         // reasoning as jwpub-chapter-view.tsx's identical popup.
         <div
+          data-verse-ui
           style={{
             position: "fixed",
             left: selectionPrompt.x,

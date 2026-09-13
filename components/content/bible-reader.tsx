@@ -35,6 +35,7 @@ import {
 } from "@/app/(app)/jwlibrary-actions";
 import { getChapterVideos, type ChapterVideo } from "@/app/(app)/bible-search-actions";
 import { getChapterResearchGuide, type ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
+import { BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
@@ -217,7 +218,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) {
       // Adiado um tique, como os outros efeitos deste arquivo: apagar a
       // consulta aqui dentro, de forma síncrona, é exatamente a cascata de
       // renderizações que a regra react-hooks/set-state-in-effect proíbe.
@@ -233,7 +234,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
 
   const submitSearch = useCallback(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) return;
+    if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return;
     setSubmittedQuery(trimmed);
     setScreen("search");
   }, [query]);
@@ -820,7 +821,21 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
           {...searchHeaderProps}
         />
 
-        <div className="flex-1 px-4 py-6 sm:px-6">
+        <div
+          className="flex-1 px-4 py-6 sm:px-6"
+          onClick={(event) => {
+            // Clears the verse focus on a click anywhere in the reading
+            // column that isn't the verse text itself (or its highlight/note
+            // markers, or the highlight-color popup) — BibleChapterView's own
+            // click handler only covers clicks landing inside its tightly-fit
+            // verses wrapper, which leaves the surrounding padding and the
+            // area below a short chapter's last verse uncovered.
+            const target = event.target as HTMLElement;
+            if (!target.closest("[data-verse], [data-jwlibrary-note-id], [data-jwlibrary-usermark-id], [data-verse-ui]")) {
+              setSelectedVerse(null);
+            }
+          }}
+        >
           {isLoadingChapter ? (
             <JwpubChapterSkeleton />
           ) : (
@@ -832,7 +847,9 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
               highlights={highlights}
               onHighlightNote={handleViewHighlightNote}
               onHighlightMark={openHighlightMark}
+              onBackgroundClick={() => setSelectedVerse(null)}
               targetVerse={targetVerse}
+              selectedVerse={selectedVerse}
               footnoteCountByVerse={footnoteCountByVerse}
               studyNoteVerses={studyNoteVerses}
               onOpenStudy={handleOpenStudy}

@@ -20,6 +20,8 @@ import {
   RadioTower,
   Layers,
   Cpu,
+  Search,
+  SearchCode,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -168,6 +170,44 @@ export function DocsView() {
               um painel lateral no computador ou um Vault (o mesmo componente usado nas
               confirmações) no celular — nunca como uma janela flutuante por cima do
               texto.
+            </P>
+          </Section>
+
+          <Section icon={Search} title="Busca na Bíblia e nos vídeos">
+            <P>
+              A busca da tela <Code>/bible</Code> aceita texto livre — "amor fraternal",
+              "mansos herdarão a terra" — e já ignora acento e maiúsculas. Para casos em
+              que o texto livre traz resultado demais (ou de menos), dá para usar
+              operadores explícitos, digitados direto na caixa de busca:
+            </P>
+            <Ul>
+              <li>
+                <Code>&quot;palavra exata&quot;</Code> ou <Code>&quot;frase exata&quot;</Code> —
+                busca a palavra ou frase exatamente como escrita, <strong>sem</strong>{" "}
+                reduzir à raiz. Ao digitar sem aspas, "carro" também encontra "carros" e
+                "carrão" — útil na maioria das vezes, mas às vezes junta palavras sem
+                relação nenhuma de sentido (ex.: buscar "rispa" sem aspas também traz
+                "ríspido"). Colocar entre aspas resolve exatamente esse caso: só entra
+                quem tem a palavra escrita daquele jeito.
+              </li>
+              <li>
+                <Code>palavra1 &amp; palavra2</Code> — as duas têm que aparecer (E).
+              </li>
+              <li>
+                <Code>palavra1 | palavra2</Code> (ou <Code>||</Code>) — qualquer uma das
+                duas (OU).
+              </li>
+              <li>
+                <Code>!palavra</Code> — exclui resultados que contêm essa palavra.
+              </li>
+            </Ul>
+            <P>
+              Os operadores podem ser combinados, incluindo com frases entre aspas:{" "}
+              <Code>&quot;boas novas&quot; &amp; !reino</Code> — nesse caso, porém, a
+              parte entre aspas continua reduzida à raiz (a busca exata só vale para uma
+              busca puramente entre aspas, sem <Code>&amp;</Code>/<Code>|</Code>/
+              <Code>!</Code> junto). Sintaxe incompleta (um <Code>&amp;</Code> sem nada de
+              um lado, por exemplo) simplesmente não traz resultado, em vez de dar erro.
             </P>
           </Section>
 
@@ -335,6 +375,87 @@ export function DocsView() {
               salvo a cada sub-lote de embeddings, então uma nota grande que não termina a
               tempo continua de onde parou no próximo ciclo, sem reprocessar (e recobrar)
               o que já foi salvo.
+            </P>
+          </Section>
+
+          <Section icon={SearchCode} title="Busca full-text: operadores explícitos ao lado do texto livre">
+            <P>
+              <Code>search_bible_verses</Code> / <Code>search_global_videos</Code> (migração{" "}
+              <Code>0025</Code>) resolvem texto livre com{" "}
+              <Code>websearch_to_tsquery</Code>, com uma segunda tentativa (
+              <Code>pt_or_tsquery</Code>) juntando as palavras com "OU" em vez de "E"
+              quando a primeira não acha nada — o caso de uma citação lembrada com uma
+              palavra errada.
+            </P>
+            <P>
+              A migração <Code>0032</Code> soma um segundo caminho, só usado quando o
+              texto digitado já contém <Code>&amp;</Code>, <Code>|</Code> ou{" "}
+              <Code>!</Code>: <Code>pt_advanced_tsquery</Code> troca cada{" "}
+              <Code>&quot;frase entre aspas&quot;</Code> por uma expressão de proximidade
+              (via <Code>phraseto_tsquery</Code>, que já lematiza cada palavra da frase
+              com a config certa) antes de mandar o resto direto para{" "}
+              <Code>to_tsquery</Code> — que entende <Code>&amp;</Code>/<Code>|</Code>/
+              <Code>!</Code> mas não tem sintaxe de aspas própria, e também não aceita
+              duas palavras soltas sem operador entre elas (por isso texto livre sem
+              nenhum desses três caracteres nunca passa por aqui). Sintaxe incompleta
+              (parêntese sem fechar, <Code>&amp;</Code> sem nada de um lado) é capturada
+              e vira <Code>null</Code> em vez de propagar o erro do Postgres até quem
+              buscou.
+            </P>
+            <P>
+              Motivação: verificado direto no banco que{" "}
+              <Code>to_tsvector(&apos;pt_unaccent&apos;, &apos;rispa&apos;)</Code>,{" "}
+              <Code>&apos;ríspido&apos;</Code> e <Code>&apos;ríspida&apos;</Code> reduzem
+              todos à mesma raiz (<Code>&apos;risp&apos;</Code>) — o sufixo residual "-a"
+              de substantivo e o sufixo verbal "-ido"/"-ida" de particípio colidem por
+              acaso nesse caso. Como a colisão acontece na raiz, nenhuma combinação de
+              operadores <Code>&amp;</Code>/<Code>|</Code>/<Code>!</Code> desfaz o
+              encontro: <Code>ríspido &amp; !rispa</Code> vira{" "}
+              <Code>&apos;risp&apos; &amp; !&apos;risp&apos;</Code>, que nunca bate com
+              nada — a informação que diferenciava as duas palavras já tinha sido jogada
+              fora antes da consulta rodar.
+            </P>
+          </Section>
+
+          <Section icon={SearchCode} title="Modo exato: um segundo índice sem stemming">
+            <P>
+              As migrações <Code>0033</Code>/<Code>0034</Code> resolvem o caso acima de
+              verdade, em vez de só documentar o limite: uma segunda configuração de busca,{" "}
+              <Code>pt_simple_unaccent</Code> (cópia de <Code>simple</Code>, sem nenhum
+              stemmer — só o dicionário <Code>unaccent</Code> encadeado com{" "}
+              <Code>simple</Code> para tirar acento/caixa), e uma segunda coluna gerada,{" "}
+              <Code>search_vector_exact</Code>, em <Code>bible_verses</Code> e{" "}
+              <Code>global_videos</Code>, cada uma com seu próprio índice GIN. Nesse
+              índice "rispa" e "rispido" são duas palavras diferentes de verdade — não tem
+              raiz comum porque não existe raiz nenhuma, só a palavra como foi escrita
+              (sem acento).
+            </P>
+            <P>
+              Quando o texto digitado tem aspas e NENHUM operador <Code>&amp;</Code>/
+              <Code>|</Code>/<Code>!</Code>, <Code>search_bible_verses</Code> /{" "}
+              <Code>search_global_videos</Code> ignoram o caminho de sempre inteiro e
+              consultam só <Code>search_vector_exact</Code>, via uma função nova (não a{" "}
+              <Code>pt_advanced_tsquery</Code> da migração <Code>0032</Code>):{" "}
+              <Code>pt_exact_tsquery</Code>, que troca cada "frase entre aspas" por uma
+              expressão de proximidade calculada com <Code>phraseto_tsquery</Code> na
+              config sem stemmer. Esse modo não tem a reserva de "OU" do texto livre — ele
+              existe justamente para ser restritivo, então trazer menos resultado não é um
+              bug a compensar.
+            </P>
+            <P>
+              Pegadinha descoberta ao implementar: <Code>unaccent</Code> é um dicionário
+              "filtro" — ele sempre repassa o resultado para o PRÓXIMO dicionário da lista
+              decidir se aquilo vira léxico de verdade (é assim que{" "}
+              <Code>pt_unaccent</Code>, a config original, sempre funcionou: encadeada com{" "}
+              <Code>portuguese_stem</Code> logo depois). A primeira versão de{" "}
+              <Code>pt_simple_unaccent</Code> só tinha <Code>unaccent</Code> sozinho no
+              mapeamento — sem nada depois pra "fechar" o token, toda palavra acentuada
+              (a maioria do português) virava vetor vazio silenciosamente, enquanto
+              palavra sem acento continuava funcionando (caem num tipo de token diferente,
+              que nem passa pelo <Code>unaccent</Code>). A migração <Code>0034</Code>{" "}
+              encadeia <Code>unaccent, simple</Code> e recria as colunas geradas do zero —
+              alterar a config não recalcula sozinho o que já tinha sido gravado com o
+              mapeamento antigo.
             </P>
           </Section>
 

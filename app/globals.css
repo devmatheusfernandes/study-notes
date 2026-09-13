@@ -145,6 +145,16 @@ body {
   display: none !important; /* Chrome, Safari, Opera, Edge */
 }
 
+/* Every `type="search"` field in the app (bible-search-input.tsx,
+   header-search-input.tsx) already renders its own clear button — the
+   browser's native one (Chromium draws it in the platform's blue "control"
+   color, unthemeable) just sat on top of it, showing two "x"s side by side. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 /* In-note references — "(mt 7:12)" / "(th 2)" typed into a note body and
    marked up by lib/tiptap/note-reference-mark.ts. Styled here rather than
    with utility classes on the mark so the same treatment applies anywhere a

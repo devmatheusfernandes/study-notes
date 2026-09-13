@@ -116,6 +116,31 @@ export function InlineVideoCard({
     }
   };
 
+  // `relevantStartTime` resolves whenever the VTT fetch above finishes — a
+  // network request racing against the click that opens this card. If the
+  // person presses the native player's play button before that fetch lands,
+  // `handlePlay` above fires with `relevantStartTime` still `null` and never
+  // gets a second chance (nothing re-triggers `onPlay`), so the video plays
+  // from 0:00 despite having been opened specifically to see this excerpt.
+  // Seeking here too, the moment the timestamp becomes known, closes that
+  // window — `readyState` must be at least HAVE_METADATA for `currentTime`
+  // to take, so pending metadata (the more common case, since the video's
+  // own load kicks off no earlier than the transcript fetch) is caught by
+  // `onLoadedMetadata` below instead.
+  useEffect(() => {
+    if (relevantStartTime === null || hasSeekedRef.current) return;
+    const video = videoRef.current;
+    if (!video || video.readyState < 1) return;
+    hasSeekedRef.current = true;
+    video.currentTime = relevantStartTime;
+  }, [relevantStartTime]);
+
+  const handleLoadedMetadata = () => {
+    if (hasSeekedRef.current || relevantStartTime === null || !videoRef.current) return;
+    hasSeekedRef.current = true;
+    videoRef.current.currentTime = relevantStartTime;
+  };
+
   const handleSeekTo = (seconds: number) => {
     if (videoRef.current) {
       videoRef.current.currentTime = seconds;
@@ -189,6 +214,7 @@ export function InlineVideoCard({
             controls
             playsInline
             onPlay={handlePlay}
+            onLoadedMetadata={handleLoadedMetadata}
             onPause={() => setIsPlaying(false)}
             onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
             className="h-full w-full object-contain"

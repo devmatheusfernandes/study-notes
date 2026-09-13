@@ -10,7 +10,7 @@ import { notify } from "@/components/ui/toaster";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { parseBibleReference, formatBibleReference } from "@/lib/bible/parse-reference";
 import { BibleVerseSearchSkeleton, BibleVideoSearchSkeleton } from "./bible-search-skeleton";
-import { BIBLE_SEARCH_PAGE_SIZE } from "@/lib/bible/search-config";
+import { BIBLE_SEARCH_PAGE_SIZE, BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 import {
   searchBibleAndVideos,
   searchBibleVerses,
@@ -87,10 +87,10 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
 
   useEffect(() => {
     const trimmed = query.trim();
-    // Nada a limpar: com menos de duas letras o componente já devolve a dica
+    // Nada a limpar: com menos que o mínimo o componente já devolve a dica
     // antes de chegar às listas, então o resultado anterior nunca chega a ser
     // desenhado, e a próxima busca o substitui inteiro.
-    if (trimmed.length < 2) return;
+    if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return;
 
     let cancelled = false;
     queueMicrotask(() => {
@@ -149,12 +149,13 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
     });
   }, [query, videos.length]);
 
-  if (query.trim().length < 2) {
+  if (query.trim().length < BIBLE_SEARCH_MIN_LENGTH) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-16 text-center">
         <BookOpen className="size-6 text-muted-foreground/60" />
         <p className="text-[13.5px] text-muted-foreground">
-          Digite ao menos duas letras para buscar na Bíblia e nas transcrições dos vídeos.
+          Digite ao menos {BIBLE_SEARCH_MIN_LENGTH} letras para buscar na Bíblia e nas
+          transcrições dos vídeos.
         </p>
       </div>
     );

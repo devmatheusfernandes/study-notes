@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { BIBLE_SEARCH_PAGE_SIZE } from "@/lib/bible/search-config";
+import { BIBLE_SEARCH_PAGE_SIZE, BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 
 export interface BibleVerseHit {
   id: number;
@@ -24,7 +24,7 @@ export interface VideoHit {
   durationFormatted: string | null;
   /** Already-escaped HTML with `<mark>` around the matched words, from the transcript. */
   headline: string;
-  /** Plain text of the same excerpt, for InlineVideoCard's snippet → timestamp seek. */
+  /** Just the matched word(s) themselves (not the surrounding excerpt) — see toMatchedTerms. What InlineVideoCard matches against the VTT to find the right timestamp. */
   snippet: string;
 }
 
@@ -57,10 +57,23 @@ function toHighlightedHtml(headline: string | null): string {
     .join("</mark>");
 }
 
-/** The same excerpt without any markup — what InlineVideoCard matches against the VTT to find the right timestamp. */
-function toPlainSnippet(headline: string | null): string {
+/**
+ * Just the marked word(s) themselves — e.g. "rispa" out of a whole headline
+ * like "...É o de uma mulher chamada [rispa]. Sabemos muito pouco...".
+ *
+ * This, not the full excerpt, is what InlineVideoCard matches against the
+ * VTT to find the right timestamp: ts_headline's surrounding context (down
+ * to MinWords=8 before the match) routinely spans more than one subtitle
+ * cue, so requiring a whole leading chunk of the excerpt to sit inside a
+ * SINGLE .vtt segment often matched nothing at all once the excerpt was
+ * allowed to come from anywhere in the transcript (see the full-text
+ * ts_headline fix) — the searched word itself is reliably within one cue,
+ * the sentence around it is not.
+ */
+function toMatchedTerms(headline: string | null): string {
   if (!headline) return "";
-  return headline.split(MARK_START).join("").split(MARK_END).join("");
+  const matches = [...headline.matchAll(new RegExp(`${MARK_START}([^${MARK_END}]*)${MARK_END}`, "g"))];
+  return matches.map((m) => m[1]).join(" ");
 }
 
 interface VerseRpcRow {
@@ -94,7 +107,7 @@ export async function searchBibleVerses(
   offset = 0
 ): Promise<{ verses?: BibleVerseHit[]; error?: string }> {
   const trimmed = query.trim();
-  if (trimmed.length < 2) return { verses: [] };
+  if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { verses: [] };
 
   const supabase = await createClient();
   const {
@@ -128,7 +141,7 @@ export async function searchVideoTranscripts(
   offset = 0
 ): Promise<{ videos?: VideoHit[]; error?: string }> {
   const trimmed = query.trim();
-  if (trimmed.length < 2) return { videos: [] };
+  if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { videos: [] };
 
   const supabase = await createClient();
   const {
@@ -153,7 +166,7 @@ export async function searchVideoTranscripts(
       subtitlesUrl: row.subtitles_url,
       durationFormatted: row.duration_formatted,
       headline: toHighlightedHtml(row.headline),
-      snippet: toPlainSnippet(row.headline),
+      snippet: toMatchedTerms(row.headline),
     })),
   };
 }
