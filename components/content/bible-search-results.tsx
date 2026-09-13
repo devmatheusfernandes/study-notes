@@ -2,22 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, Film, Play } from "lucide-react";
+import { ArrowRight, BookMarked, BookOpen, Film, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { notify } from "@/components/ui/toaster";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { parseBibleReference, formatBibleReference } from "@/lib/bible/parse-reference";
-import { BibleVerseSearchSkeleton, BibleVideoSearchSkeleton } from "./bible-search-skeleton";
+import { BibleVerseSearchSkeleton, BibleVideoSearchSkeleton, BibleInsightSearchSkeleton } from "./bible-search-skeleton";
 import { BIBLE_SEARCH_PAGE_SIZE, BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 import {
   searchBibleAndVideos,
   searchBibleVerses,
   searchVideoTranscripts,
+  searchInsightChapters,
   type BibleVerseHit,
   type VideoHit,
+  type InsightHit,
 } from "@/app/(app)/bible-search-actions";
+import { getGlobalPublicationChapterContent } from "@/app/(app)/global-publications-actions";
+import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 
 interface BibleSearchResultsProps {
   query: string;
@@ -25,7 +29,7 @@ interface BibleSearchResultsProps {
   onSelectVerse: (bookOrder: number, chapter: number, verse: number | null) => void;
 }
 
-type ResultsTab = "versiculos" | "videos";
+type ResultsTab = "versiculos" | "videos" | "perspicaz";
 
 /**
  * `headline` arrives already escaped from the server, with `<mark>` as the only
@@ -60,12 +64,18 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
   const [tab, setTab] = useState<ResultsTab>("versiculos");
   const [verses, setVerses] = useState<BibleVerseHit[]>([]);
   const [videos, setVideos] = useState<VideoHit[]>([]);
+  const [articles, setArticles] = useState<InsightHit[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMoreVerses, setIsLoadingMoreVerses] = useState(false);
   const [isLoadingMoreVideos, setIsLoadingMoreVideos] = useState(false);
+  const [isLoadingMoreArticles, setIsLoadingMoreArticles] = useState(false);
   const [versesExhausted, setVersesExhausted] = useState(false);
   const [videosExhausted, setVideosExhausted] = useState(false);
+  const [articlesExhausted, setArticlesExhausted] = useState(false);
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
+  const [openArticleId, setOpenArticleId] = useState<string | null>(null);
+  const [articleHtml, setArticleHtml] = useState<string | null>(null);
+  const [isLoadingArticle, setIsLoadingArticle] = useState(false);
 
   // A query that IS a reference ("João 3:16", "sl 23") gets a direct jump
   // offered above the results. Resolved in the browser against the static
@@ -101,19 +111,25 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       if (cancelled) return;
       setVerses(result.verses);
       setVideos(result.videos);
+      setArticles(result.articles);
       setVersesExhausted(result.verses.length < BIBLE_SEARCH_PAGE_SIZE);
       setVideosExhausted(result.videos.length < BIBLE_SEARCH_PAGE_SIZE);
+      setArticlesExhausted(result.articles.length < BIBLE_SEARCH_PAGE_SIZE);
       setOpenVideoId(null);
+      setOpenArticleId(null);
+      setArticleHtml(null);
       setIsLoading(false);
-      // Uma nova busca substitui as duas listas, então qualquer "carregar
-      // mais" ainda em voo foi abandonado — sem zerar estes, o botão ficaria
+      // Uma nova busca substitui as listas, então qualquer "carregar mais"
+      // ainda em voo foi abandonado — sem zerar estes, o botão ficaria
       // girando para sempre.
       setIsLoadingMoreVerses(false);
       setIsLoadingMoreVideos(false);
+      setIsLoadingMoreArticles(false);
       if (result.error) notify.error("Não foi possível buscar", result.error);
       // Land on whichever list actually has something, so a query that only
-      // matches videos doesn't open on an empty "Versículos" tab.
+      // matches videos/Perspicaz doesn't open on an empty "Versículos" tab.
       if (result.verses.length === 0 && result.videos.length > 0) setTab("videos");
+      else if (result.verses.length === 0 && result.videos.length === 0 && result.articles.length > 0) setTab("perspicaz");
       else setTab("versiculos");
     });
 
@@ -148,6 +164,36 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       setIsLoadingMoreVideos(false);
     });
   }, [query, videos.length]);
+
+  const loadMoreArticles = useCallback(() => {
+    const requested = query.trim();
+    setIsLoadingMoreArticles(true);
+    void searchInsightChapters(requested, articles.length).then((result) => {
+      if (activeQueryRef.current.trim() !== requested) return;
+      const page = result.articles ?? [];
+      setArticles((prev) => [...prev, ...page]);
+      setArticlesExhausted(page.length < BIBLE_SEARCH_PAGE_SIZE);
+      setIsLoadingMoreArticles(false);
+    });
+  }, [query, articles.length]);
+
+  const toggleArticle = useCallback(
+    (article: InsightHit) => {
+      if (openArticleId === article.id) {
+        setOpenArticleId(null);
+        setArticleHtml(null);
+        return;
+      }
+      setOpenArticleId(article.id);
+      setArticleHtml(null);
+      setIsLoadingArticle(true);
+      void getGlobalPublicationChapterContent(article.publicationId, article.documentId).then((result) => {
+        setArticleHtml(result.html ?? null);
+        setIsLoadingArticle(false);
+      });
+    },
+    [openArticleId]
+  );
 
   if (query.trim().length < BIBLE_SEARCH_MIN_LENGTH) {
     return (
@@ -205,6 +251,16 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
               <span className="ml-1 font-mono text-[10px] text-accent">
                 {videos.length}
                 {!videosExhausted && "+"}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="perspicaz">
+            <BookMarked className="size-3.5" />
+            Perspicaz
+            {articles.length > 0 && (
+              <span className="ml-1 font-mono text-[10px] text-accent">
+                {articles.length}
+                {!articlesExhausted && "+"}
               </span>
             )}
           </TabsTrigger>
@@ -324,6 +380,62 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
                   className="self-center"
                   isLoading={isLoadingMoreVideos}
                   onClick={loadMoreVideos}
+                >
+                  Carregar mais
+                </Button>
+              )}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="perspicaz" className="flex flex-col gap-2">
+          {isLoading ? (
+            <BibleInsightSearchSkeleton />
+          ) : articles.length === 0 ? (
+            <EmptyHint>Nenhum artigo do Perspicaz encontrado para “{query.trim()}”.</EmptyHint>
+          ) : (
+            <>
+              {articles.map((article) => {
+                const isOpen = openArticleId === article.id;
+                return (
+                  <div key={article.id} className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleArticle(article)}
+                      aria-expanded={isOpen}
+                      className={cn(
+                        "flex flex-col gap-1 rounded-2xl px-4 py-3 text-left transition-colors",
+                        isOpen ? "bg-surface-elevated" : "bg-secondary hover:bg-surface-elevated"
+                      )}
+                    >
+                      <span className="font-mono text-[10.5px] tracking-[0.04em] text-accent">
+                        {article.title}
+                      </span>
+                      <Highlighted
+                        html={article.headline}
+                        className="whitespace-pre-line text-[13.5px] leading-relaxed text-foreground/90"
+                      />
+                    </button>
+
+                    {isOpen && (
+                      <div className="rounded-2xl bg-secondary/60 px-4 py-3 text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl">
+                        {isLoadingArticle ? (
+                          <span className="text-[12px] text-muted-foreground">carregando…</span>
+                        ) : (
+                          <div dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(articleHtml ?? "") }} />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {!articlesExhausted && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-center"
+                  isLoading={isLoadingMoreArticles}
+                  onClick={loadMoreArticles}
                 >
                   Carregar mais
                 </Button>

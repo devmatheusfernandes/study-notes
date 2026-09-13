@@ -168,7 +168,7 @@ async function main() {
     const placeholders = batch.map((chunk, idx) => {
       const base = idx * 4;
       values.push(chunk.chunkIndex, chunk.content, `[${response.data[idx].embedding.join(",")}]`, JSON.stringify(chunk.metadata));
-      return `($${base + 1}, $${base + 2}, $${base + 3}::vector, $${base + 4}::jsonb)`;
+      return `($${base + 1}, $${base + 2}, $${base + 3}::halfvec(1536), $${base + 4}::jsonb)`;
     });
 
     await client.query(

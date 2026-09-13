@@ -228,7 +228,7 @@ async function processSingleVideo(video) {
             INSERT INTO public.global_video_embeddings (
               video_id, chunk_index, content, embedding, metadata
             ) VALUES (
-              ${video.id}, ${chunk.index}, ${chunk.content}, ${vectorString}::vector, ${JSON.stringify(metadataObj)}
+              ${video.id}, ${chunk.index}, ${chunk.content}, ${vectorString}::halfvec(1536), ${JSON.stringify(metadataObj)}
             );
           `;
         }

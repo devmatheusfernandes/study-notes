@@ -24,6 +24,7 @@ import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
 import { VideoScriptureIndexCard } from "@/components/settings/video-scripture-index-card";
 import { ResearchGuideUploadCard } from "@/components/settings/research-guide-upload-card";
+import { InsightUploadCard } from "@/components/settings/insight-upload-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
@@ -195,6 +196,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
               {/* Row 3c: Research Guide (Guia de Pesquisa) upload */}
               <ResearchGuideUploadCard />
+
+              {/* Row 3d: Perspicaz (Insight) upload — shared global content */}
+              <InsightUploadCard />
 
               {/* Row 4: Full Width Tags Card */}
               <TagsSettingsCard />

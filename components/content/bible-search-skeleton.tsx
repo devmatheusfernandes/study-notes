@@ -47,3 +47,14 @@ export function BibleVideoSearchSkeleton() {
     </div>
   );
 }
+
+/** Shown by BibleSearchResults' Perspicaz tab while `searchBibleAndVideos` is in flight — same text-only shape as a verse hit, no thumbnail. */
+export function BibleInsightSearchSkeleton() {
+  return (
+    <div className="flex animate-pulse flex-col gap-2">
+      <VerseHitSkeleton />
+      <VerseHitSkeleton />
+      <VerseHitSkeleton />
+    </div>
+  );
+}

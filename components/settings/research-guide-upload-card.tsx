@@ -17,6 +17,7 @@ import {
 } from "@/app/(app)/research-guide-actions";
 import { splitResearchGuideDocument, RESEARCH_GUIDE_IMPORT_VERSION } from "@/lib/bible/research-guide-parse";
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "@/lib/jwpub/sanitize";
+import { batchBySize } from "@/lib/utils";
 import type { JwpubExtract } from "@/lib/jwpub/types";
 
 /**
@@ -30,32 +31,6 @@ import type { JwpubExtract } from "@/lib/jwpub/types";
  * serialization overhead Server Actions add on top of the raw JSON.
  */
 const MAX_BATCH_BYTES = 1.5 * 1024 * 1024;
-
-/**
- * Slices `items` into batches whose *summed* size never exceeds `maxBytes` —
- * unlike a fixed row count, this stays safe regardless of how unevenly sized
- * the items are. A single item larger than `maxBytes` still gets its own
- * batch rather than being dropped or split.
- */
-function batchBySize<T>(items: T[], sizeOf: (item: T) => number, maxBytes: number): T[][] {
-  const batches: T[][] = [];
-  let current: T[] = [];
-  let currentBytes = 0;
-
-  for (const item of items) {
-    const size = sizeOf(item);
-    if (current.length > 0 && currentBytes + size > maxBytes) {
-      batches.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(item);
-    currentBytes += size;
-  }
-  if (current.length > 0) batches.push(current);
-
-  return batches;
-}
 
 /**
  * Lets the "Guia de Pesquisa" (símbolo `rsg`, JW.org) be (re)imported by

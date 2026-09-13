@@ -363,11 +363,23 @@ export async function searchJwpubContent(query: string): Promise<{ matches: Jwpu
 
 export interface ResolvedJwpubReference {
   mepsDocumentId: number;
-  noteId: string;
+  /** `null` for a global publication (see below) — there's no per-user note behind it. */
+  noteId: string | null;
   publicationId: string;
   publicationTitle: string;
   documentId: number;
   chapterTitle: string;
+  /**
+   * Set only for a hit against the shared `global_publication_chapters`
+   * table (Perspicaz and any future single-copy reference work — see
+   * supabase/migrations/0038_global_publications.sql) — the content is
+   * already in hand, so a caller can skip the `getChapter` round trip that a
+   * per-user hit still needs. `isGlobal` doubles as "hide the 'abrir
+   * publicação completa' button": there's no per-user note/reader route
+   * for this content yet.
+   */
+  contentHtml?: string;
+  isGlobal?: boolean;
 }
 
 /**
@@ -377,6 +389,11 @@ export interface ResolvedJwpubReference {
  * ingest time, since a reference that's inert today becomes clickable the
  * moment the user uploads the publication it points to (and vice versa if
  * they later delete it).
+ *
+ * Falls back to the shared global_publication_chapters table (0038) for
+ * whatever's still unresolved after that — a citation into Perspicaz
+ * resolves here even though nobody uploaded it themselves, instead of
+ * falling all the way through to the "Baixar" prompt.
  */
 export async function resolveJwpubReferences(
   mepsDocumentIds: number[]
@@ -391,6 +408,7 @@ export async function resolveJwpubReferences(
     .in("meps_document_id", uniqueIds);
 
   const resolved: ResolvedJwpubReference[] = [];
+  const resolvedIds = new Set<number>();
   for (const row of data ?? []) {
     if (row.meps_document_id === null) continue;
     const pub = Array.isArray(row.jwpub_publications) ? row.jwpub_publications[0] : row.jwpub_publications;
@@ -403,7 +421,33 @@ export async function resolveJwpubReferences(
       documentId: row.document_id,
       chapterTitle: row.title,
     });
+    resolvedIds.add(row.meps_document_id);
   }
+
+  const stillUnresolved = uniqueIds.filter((id) => !resolvedIds.has(id));
+  if (stillUnresolved.length > 0) {
+    const { data: globalRows } = await supabase
+      .from("global_publication_chapters")
+      .select("meps_document_id, document_id, title, content_html, publication_id, global_publications(title)")
+      .in("meps_document_id", stillUnresolved);
+
+    for (const row of globalRows ?? []) {
+      if (row.meps_document_id === null) continue;
+      const pub = Array.isArray(row.global_publications) ? row.global_publications[0] : row.global_publications;
+      if (!pub) continue;
+      resolved.push({
+        mepsDocumentId: row.meps_document_id,
+        noteId: null,
+        publicationId: row.publication_id,
+        publicationTitle: pub.title,
+        documentId: row.document_id,
+        chapterTitle: row.title,
+        contentHtml: row.content_html ?? "",
+        isGlobal: true,
+      });
+    }
+  }
+
   return { resolved };
 }
 

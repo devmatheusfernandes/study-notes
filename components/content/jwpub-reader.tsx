@@ -399,6 +399,11 @@ export function JwpubReader({
         documentId: resolved.documentId,
         pid,
       });
+      if (resolved.isGlobal) {
+        setReferenceHtml(resolved.contentHtml ?? null);
+        setIsLoadingReference(false);
+        return;
+      }
       void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
         setReferenceHtml(result.html ?? null);
         setIsLoadingReference(false);

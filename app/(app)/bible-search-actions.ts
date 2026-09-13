@@ -96,6 +96,25 @@ interface VideoRpcRow {
   headline: string | null;
 }
 
+export interface InsightHit {
+  id: string;
+  publicationId: string;
+  documentId: number;
+  publicationTitle: string;
+  title: string;
+  /** Already-escaped HTML with `<mark>` — see toHighlightedHtml. */
+  headline: string;
+}
+
+interface InsightRpcRow {
+  id: string;
+  publication_id: string;
+  document_id: number;
+  publication_title: string;
+  title: string;
+  headline: string | null;
+}
+
 /**
  * Both tables are public reference content readable by any signed-in user, so
  * the session check here is about not answering at all when signed out — not
@@ -172,22 +191,64 @@ export async function searchVideoTranscripts(
 }
 
 /**
- * Both lists' first page in one round trip — what the results screen asks for
- * on a fresh search. "Carregar mais" then pages each list on its own through
- * the two actions above.
+ * Perspicaz (and any future entry in global_publications) — see migration
+ * 0039. `search_global_publication_chapters` weights title matches above
+ * body matches (same 'A'/'D' scheme as bible_verses/global_videos), so a
+ * query that matches an article's own title always outranks one that only
+ * turns up somewhere in its body.
+ */
+export async function searchInsightChapters(
+  query: string,
+  offset = 0
+): Promise<{ articles?: InsightHit[]; error?: string }> {
+  const trimmed = query.trim();
+  if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { articles: [] };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase.rpc("search_global_publication_chapters", {
+    query_text: trimmed,
+    max_results: BIBLE_SEARCH_PAGE_SIZE,
+    result_offset: Math.max(0, offset),
+  });
+
+  if (error) return { error: "Não foi possível buscar no Perspicaz." };
+
+  return {
+    articles: ((data ?? []) as InsightRpcRow[]).map((row) => ({
+      id: row.id,
+      publicationId: row.publication_id,
+      documentId: row.document_id,
+      publicationTitle: row.publication_title,
+      title: row.title,
+      headline: toHighlightedHtml(row.headline),
+    })),
+  };
+}
+
+/**
+ * All three lists' first page in one round trip — what the results screen
+ * asks for on a fresh search. "Carregar mais" then pages each list on its
+ * own through the actions above.
  */
 export async function searchBibleAndVideos(
   query: string
-): Promise<{ verses: BibleVerseHit[]; videos: VideoHit[]; error?: string }> {
-  const [verseResult, videoResult] = await Promise.all([
+): Promise<{ verses: BibleVerseHit[]; videos: VideoHit[]; articles: InsightHit[]; error?: string }> {
+  const [verseResult, videoResult, insightResult] = await Promise.all([
     searchBibleVerses(query),
     searchVideoTranscripts(query),
+    searchInsightChapters(query),
   ]);
 
   return {
     verses: verseResult.verses ?? [],
     videos: videoResult.videos ?? [],
-    error: verseResult.error ?? videoResult.error,
+    articles: insightResult.articles ?? [],
+    error: verseResult.error ?? videoResult.error ?? insightResult.error,
   };
 }
 

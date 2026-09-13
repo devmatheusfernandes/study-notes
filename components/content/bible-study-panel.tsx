@@ -410,6 +410,11 @@ export function BibleStudyPanel({
         chapterTitle: resolved.chapterTitle,
         documentId: resolved.documentId,
       });
+      if (resolved.isGlobal) {
+        setReferenceHtml(resolved.contentHtml ?? null);
+        setIsLoadingReference(false);
+        return;
+      }
       void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
         setReferenceHtml(result.html ?? null);
         setIsLoadingReference(false);

@@ -11,7 +11,8 @@ import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 
 export interface JwpubReferenceTarget {
-  noteId: string;
+  /** `null` for a shared global publication (Perspicaz etc.) — there's no per-user note to open, so "abrir publicação completa" is hidden. */
+  noteId: string | null;
   publicationTitle: string;
   chapterTitle: string;
   documentId: number;
@@ -131,14 +132,16 @@ function Body({
 
   return (
     <div className="flex flex-col gap-3">
-      <Button
-        variant="outline"
-        size="sm"
-        leftIcon={<ExternalLink />}
-        onClick={() => router.push(`/notes/${target.noteId}?doc=${target.documentId}`)}
-      >
-        Abrir publicação completa
-      </Button>
+      {target.noteId && (
+        <Button
+          variant="outline"
+          size="sm"
+          leftIcon={<ExternalLink />}
+          onClick={() => router.push(`/notes/${target.noteId}?doc=${target.documentId}`)}
+        >
+          Abrir publicação completa
+        </Button>
+      )}
       <div
         ref={containerRef}
         className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"

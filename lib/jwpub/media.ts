@@ -2,6 +2,7 @@
 
 import { JWPUB_MEDIA_BATCH_SIZE } from "@/lib/storage-config";
 import { uploadPublicationMedia } from "@/app/(app)/jwpub-actions";
+import { uploadGlobalPublicationMedia } from "@/app/(app)/global-publications-actions";
 
 /**
  * Uploads the archive's illustrations to the public `jwpub-media` bucket and
@@ -28,6 +29,31 @@ export async function uploadMedia(
     }
 
     const result = await uploadPublicationMedia(formData);
+    if (result.urls) Object.assign(urls, result.urls);
+    onProgress?.(Math.min(i + batch.length, names.length), names.length);
+  }
+
+  return urls;
+}
+
+/** Same as uploadMedia above, but for a shared global publication (see global-publications-actions.ts) — keyed by `symbol` instead of a per-user `publicationId`. */
+export async function uploadGlobalMedia(
+  symbol: string,
+  media: Map<string, Blob>,
+  onProgress?: (uploaded: number, total: number) => void
+): Promise<Record<string, string>> {
+  const names = [...media.keys()];
+  const urls: Record<string, string> = {};
+
+  for (let i = 0; i < names.length; i += JWPUB_MEDIA_BATCH_SIZE) {
+    const batch = names.slice(i, i + JWPUB_MEDIA_BATCH_SIZE);
+    const formData = new FormData();
+    formData.set("symbol", symbol);
+    for (const name of batch) {
+      formData.append("files", new File([media.get(name)!], name));
+    }
+
+    const result = await uploadGlobalPublicationMedia(formData);
     if (result.urls) Object.assign(urls, result.urls);
     onProgress?.(Math.min(i + batch.length, names.length), names.length);
   }
