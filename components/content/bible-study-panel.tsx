@@ -39,12 +39,14 @@ export interface BiblePersonalNote {
 /** Whatever verse each item belongs to — needed for the whole-chapter view's headings. */
 type WithVerse<T> = T & { verse: number | null };
 
-interface BibleStudyPanelProps {
-  open: boolean;
-  onClose: () => void;
-  tab: BibleStudyTab;
-  onTabChange: (tab: BibleStudyTab) => void;
-
+/**
+ * The data/callback props both `BibleStudyPanel` (the /bible reading screen)
+ * and `JwpubBibleSurface` (a verse reference opened from inside a .jwpub
+ * publication or a note) need — `BibleStudyTabs` below is the shared tab
+ * content, `BibleStudyPanel` just wraps it in the /bible screen's own
+ * `JwpubSidePanel` chrome.
+ */
+interface BibleStudyTabsProps {
   bookName: string;
   chapter: number;
   /** `null` means "nothing tapped yet" — the panel then shows the whole chapter instead of an empty state. */
@@ -93,6 +95,14 @@ interface BibleStudyPanelProps {
   onAddNoteToActiveHighlight?: () => void;
   onColorChangeActiveHighlight?: (colorIndex: number) => void;
   onDeleteActiveHighlight?: () => void;
+
+  tab: BibleStudyTab;
+  onTabChange: (tab: BibleStudyTab) => void;
+}
+
+interface BibleStudyPanelProps extends BibleStudyTabsProps {
+  open: boolean;
+  onClose: () => void;
 }
 
 /**
@@ -275,10 +285,13 @@ function MentionList({ videos, chapter, openVideoId, onToggleVideo }: MentionLis
 }
 
 /**
- * The reader's study surface: cross references, study notes and footnotes,
- * behind one header toggle instead of three. Same `JwpubSidePanel` shell as
- * the .jwpub reader's footnotes — Vault sheet on mobile, content-pushing
- * panel on desktop, never a modal (see CLAUDE.md).
+ * The shared tab content — cross references, study notes, footnotes, videos,
+ * Guia de Pesquisa citations and personal notes, behind one tab strip. Used
+ * both by `BibleStudyPanel` (the /bible reading screen's "Estudo" panel) and
+ * `JwpubBibleSurface` (a verse reference opened from inside a .jwpub
+ * publication or a note), each wrapping it in their own `JwpubSidePanel`
+ * chrome — Vault sheet on mobile, content-pushing panel on desktop, never a
+ * modal (see CLAUDE.md).
  *
  * With no verse tapped, every tab shows the WHOLE chapter grouped by verse,
  * rather than an "escolha um versículo" placeholder — opening the panel is
@@ -287,11 +300,7 @@ function MentionList({ videos, chapter, openVideoId, onToggleVideo }: MentionLis
  * Study notes only exist for Mateus–Filêmon (minus Tito), so an empty Notas
  * tab is the normal case for most of the Bible, not an error.
  */
-export function BibleStudyPanel({
-  open,
-  onClose,
-  tab,
-  onTabChange,
+export function BibleStudyTabs({
   bookName,
   chapter,
   selectedVerse,
@@ -322,7 +331,9 @@ export function BibleStudyPanel({
   onAddNoteToActiveHighlight,
   onColorChangeActiveHighlight,
   onDeleteActiveHighlight,
-}: BibleStudyPanelProps) {
+  tab,
+  onTabChange,
+}: BibleStudyTabsProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Which personal note (if any) is expanded inline — clicking a note used
@@ -340,9 +351,7 @@ export function BibleStudyPanel({
   // --- "Guia de Pesquisa" citation links (data-jwpub-pubref) ---
   //
   // Same resolve-against-the-user's-own-library dance jwpub-reader.tsx does
-  // for its own cross-references — this panel never had any of that
-  // machinery before (Notas/Rodapé only ever link to other Bible verses or
-  // appendices), so it's all new here, not reused from the reader.
+  // for its own cross-references.
   const [resolvedPubRefs, setResolvedPubRefs] = useState<Map<number, ResolvedJwpubReference>>(new Map());
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [referenceTarget, setReferenceTarget] = useState<JwpubReferenceTarget | null>(null);
@@ -523,7 +532,6 @@ export function BibleStudyPanel({
 
   return (
     <>
-    <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={520}>
       <div ref={contentRef} className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[11px] tracking-[0.04em] text-accent">{scopeLabel}</span>
@@ -896,57 +904,65 @@ export function BibleStudyPanel({
           </TabsContent>
         </Tabs>
       </div>
-    </JwpubSidePanel>
 
-    <ConfirmVault
-      open={confirmDeleteNote !== null}
-      onOpenChange={(next) => {
-        if (!next) setConfirmDeleteNote(null);
-      }}
-      title="Excluir nota?"
-      description="Essa ação não pode ser desfeita."
-      confirmLabel="Excluir"
-      onConfirm={() => {
-        if (confirmDeleteNote) onDeletePersonalNote(confirmDeleteNote);
-        setConfirmDeleteNote(null);
-        setExpandedNoteId(null);
-      }}
-    />
+      <ConfirmVault
+        open={confirmDeleteNote !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmDeleteNote(null);
+        }}
+        title="Excluir nota?"
+        description="Essa ação não pode ser desfeita."
+        confirmLabel="Excluir"
+        onConfirm={() => {
+          if (confirmDeleteNote) onDeletePersonalNote(confirmDeleteNote);
+          setConfirmDeleteNote(null);
+          setExpandedNoteId(null);
+        }}
+      />
 
-    <ConfirmVault
-      open={confirmDeleteHighlight}
-      onOpenChange={setConfirmDeleteHighlight}
-      title="Excluir destaque?"
-      description="Essa ação não pode ser desfeita."
-      confirmLabel="Excluir"
-      onConfirm={() => {
-        setConfirmDeleteHighlight(false);
-        onDeleteActiveHighlight?.();
-      }}
-    />
+      <ConfirmVault
+        open={confirmDeleteHighlight}
+        onOpenChange={setConfirmDeleteHighlight}
+        title="Excluir destaque?"
+        description="Essa ação não pode ser desfeita."
+        confirmLabel="Excluir"
+        onConfirm={() => {
+          setConfirmDeleteHighlight(false);
+          onDeleteActiveHighlight?.();
+        }}
+      />
 
-    <JwpubReferenceSurface
-      open={referenceOpen}
-      target={referenceTarget}
-      html={referenceHtml}
-      isLoading={isLoadingReference}
-      unresolvedMepsDocumentId={unresolvedPubRef}
-      onResolved={handlePublicationRefResolved}
-      onClose={() => setReferenceOpen(false)}
-    />
+      <JwpubReferenceSurface
+        open={referenceOpen}
+        target={referenceTarget}
+        html={referenceHtml}
+        isLoading={isLoadingReference}
+        unresolvedMepsDocumentId={unresolvedPubRef}
+        onResolved={handlePublicationRefResolved}
+        onClose={() => setReferenceOpen(false)}
+      />
 
-    <JwpubSidePanel
-      open={openExtractId !== null}
-      title={openExtract?.refTitle ?? "Trecho"}
-      onClose={() => setOpenExtractId(null)}
-    >
-      {openExtract && (
-        <div
-          className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
-          dangerouslySetInnerHTML={{ __html: openExtract.html }}
-        />
-      )}
-    </JwpubSidePanel>
+      <JwpubSidePanel
+        open={openExtractId !== null}
+        title={openExtract?.refTitle ?? "Trecho"}
+        onClose={() => setOpenExtractId(null)}
+      >
+        {openExtract && (
+          <div
+            className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
+            dangerouslySetInnerHTML={{ __html: openExtract.html }}
+          />
+        )}
+      </JwpubSidePanel>
     </>
+  );
+}
+
+/** Thin `JwpubSidePanel` wrapper around `BibleStudyTabs` for the /bible reading screen. */
+export function BibleStudyPanel({ open, onClose, ...tabsProps }: BibleStudyPanelProps) {
+  return (
+    <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={520}>
+      <BibleStudyTabs {...tabsProps} />
+    </JwpubSidePanel>
   );
 }

@@ -1,13 +1,39 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { motion } from "framer-motion";
-import type { BibleVerseRow } from "@/app/(app)/bible-actions";
-import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
+import {
+  getBibleVerseRange,
+  listBibleBooks,
+  type BibleBook,
+  type BibleVerseRow,
+} from "@/app/(app)/bible-actions";
+import {
+  getBibleChapterHighlights,
+  deleteJwlibraryHighlight,
+  deleteJwlibraryNote,
+  updateJwlibraryHighlightColor,
+  type BibleVerseHighlight,
+} from "@/app/(app)/jwlibrary-actions";
+import { notify } from "@/components/ui/toaster";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { wrapTokenRange, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
+import { toPersonalNotes } from "@/lib/bible/personal-notes";
+import {
+  useBibleCrossReferences,
+  useBibleFootnotesAndStudyNotes,
+  useBibleChapterVideos,
+  useBibleResearchGuide,
+} from "@/hooks/use-bible-study-data";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { BibleAppendixSurface } from "./bible-appendix-surface";
+import { BibleStudyTabs, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
+import {
+  JwlibraryNoteEditorVault,
+  type EditableJwlibraryNote,
+  type PrefilledJwlibraryLocation,
+} from "./jwlibrary-note-editor-vault";
 
 interface JwpubBibleSurfaceProps {
   open: boolean;
@@ -32,23 +58,29 @@ function reference(verses: BibleVerseRow[]): string {
   return `${first.book} ${first.chapter}:${first.verse ?? ""}–${last.chapter}:${last.verse ?? ""}`;
 }
 
-function Body({
+/** The single verse a range names, or `null` for a superscription-only or multi-verse range — mirrors BibleStudyPanel's "whole chapter vs one verse" scoping. */
+function soleVerse(verses: BibleVerseRow[] | null): number | null {
+  if (!verses) return null;
+  const real = verses.filter((v) => !v.isSuperscription);
+  return real.length === 1 ? real[0].verse : null;
+}
+
+function VerseText({
   verses,
   isLoading,
   error,
   highlights,
+  expandedNoteId,
+  onToggleNote,
 }: {
   verses: BibleVerseRow[] | null;
   isLoading: boolean;
   error: string | null;
   highlights: BibleVerseHighlight[];
+  expandedNoteId: string | null;
+  onToggleNote: (noteId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Which highlight's note is expanded inline right now — clicking its
-  // margin marker again (or a different one) toggles it. Read-only display,
-  // no separate panel/vault: the whole point is to view the note without
-  // leaving this sidebar.
-  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
 
   // Draws highlight marks + a margin marker per note, same mechanics as
   // BibleChapterView's identical effect — but read-only here (no selection
@@ -63,9 +95,6 @@ function Body({
       const el = container.querySelector<HTMLElement>(`[data-verse="${highlight.verse}"]`);
       if (!el) continue;
 
-      // A note created via "Anotar sem destaque" has no UserMark at all
-      // (colorIndex/startToken/endToken all null) — see the identical branch
-      // in jwpub-chapter-view.tsx.
       if (highlight.colorIndex === null || highlight.startToken === null || highlight.endToken === null) {
         if (!highlight.note) continue;
         el.style.position = "relative";
@@ -109,8 +138,6 @@ function Body({
     }
   }, [verses, highlights]);
 
-  // Clicking a note marker (or the highlighted span it belongs to) toggles
-  // that note's inline preview open/closed.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -120,12 +147,12 @@ function Body({
       const noteMark = el?.closest<HTMLElement>("[data-jwlibrary-note-id]");
       const noteId = noteMark?.dataset.jwlibraryNoteId;
       if (!noteId) return;
-      setExpandedNoteId((prev) => (prev === noteId ? null : noteId));
+      onToggleNote(noteId);
     }
 
     container.addEventListener("click", handleClick);
     return () => container.removeEventListener("click", handleClick);
-  }, []);
+  }, [onToggleNote]);
 
   if (isLoading) {
     return (
@@ -204,11 +231,229 @@ function Body({
   );
 }
 
-/** Same shell as footnotes: Vault sheet on mobile, a content-pushing panel on desktop. */
+/**
+ * A verse reference opened from inside a .jwpub publication (jwpub-reader.tsx)
+ * or a plain note's Bible reference chip (note-reference-surface.tsx) — same
+ * `JwpubSidePanel` shell as footnotes (Vault sheet on mobile, content-pushing
+ * panel on desktop), showing the cited verse text PLUS the same six study
+ * tabs `/bible`'s own "Estudo" panel has (Refs/Notas/Rodapé/Vídeos/Guia/
+ * Pessoal — see BibleStudyTabs in bible-study-panel.tsx), so a citation can be
+ * explored without leaving the publication.
+ *
+ * Fully self-contained: derives book/chapter/verse from the `verses` prop and
+ * fetches everything else itself, so neither caller needs to change. Clicking
+ * a cross-reference or appendix link inside the tabs re-targets this same
+ * panel (fetching the new verse's text + highlights) instead of requiring the
+ * host to know about it.
+ */
 export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = [] }: JwpubBibleSurfaceProps) {
+  const [displayVerses, setDisplayVerses] = useState<BibleVerseRow[] | null>(verses);
+  const [displayHighlights, setDisplayHighlights] = useState<BibleVerseHighlight[]>(highlights);
+  const [displayLoading, setDisplayLoading] = useState(isLoading);
+  const [displayError, setDisplayError] = useState<string | null>(error);
+  const [tabSelectedVerse, setTabSelectedVerse] = useState<number | null>(soleVerse(verses));
+  const [studyTab, setStudyTab] = useState<BibleStudyTab>("referencias");
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [openAppendixId, setOpenAppendixId] = useState<number | null>(null);
+  const [editingNote, setEditingNote] = useState<EditableJwlibraryNote | null>(null);
+  const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
+
+  // Mirrors the parent's own fetch (a new reference clicked in the
+  // publication/note) into local state — this effect never fires from an
+  // in-panel navigation below, since that only touches local state, not
+  // these props.
+  useEffect(() => {
+    // Deferred a tick — same pattern used throughout this codebase for
+    // setState-in-effect (see bible-reader.tsx's identical comments) — rather
+    // than set synchronously in the effect body.
+    queueMicrotask(() => {
+      setDisplayVerses(verses);
+      setDisplayHighlights(highlights);
+      setDisplayLoading(isLoading);
+      setDisplayError(error);
+      setTabSelectedVerse(soleVerse(verses));
+    });
+  }, [verses, highlights, isLoading, error]);
+
+  const [books, setBooks] = useState<BibleBook[]>([]);
+  useEffect(() => {
+    if (!open || books.length > 0) return;
+    void listBibleBooks().then((result) => setBooks(result.books ?? []));
+  }, [open, books.length]);
+
+  const viewBookOrder = displayVerses?.[0]?.bookOrder ?? null;
+  const viewChapter = displayVerses?.[0]?.chapter ?? null;
+  const viewBookName = displayVerses?.[0]?.book ?? "";
+
+  const refreshHighlights = useCallback(() => {
+    if (viewBookOrder === null || viewChapter === null) return;
+    void getBibleChapterHighlights(viewBookOrder, viewChapter).then((result) =>
+      setDisplayHighlights(result.highlights ?? [])
+    );
+  }, [viewBookOrder, viewChapter]);
+
+  const navigateToVerse = useCallback((bookOrder: number, chapter: number, verse: number) => {
+    setOpenAppendixId(null);
+    setDisplayLoading(true);
+    setDisplayError(null);
+    void Promise.all([
+      getBibleVerseRange(bookOrder, chapter, verse, verse),
+      getBibleChapterHighlights(bookOrder, chapter),
+    ]).then(([versesResult, highlightsResult]) => {
+      setDisplayVerses(versesResult.verses ?? null);
+      setDisplayError(versesResult.error ?? null);
+      setDisplayHighlights(highlightsResult.highlights ?? []);
+      setTabSelectedVerse(verse);
+      setDisplayLoading(false);
+    });
+  }, []);
+
+  const studyParams = { bookOrder: viewBookOrder, chapter: viewChapter, selectedVerse: tabSelectedVerse, enabled: open };
+  const { refs, refsLoading, refsTruncated, refsSource, setRefsSource } = useBibleCrossReferences(studyParams);
+  const { footnotes, studyNotes, studyLoading } = useBibleFootnotesAndStudyNotes(studyParams);
+  const { videos, videosLoading } = useBibleChapterVideos(studyParams);
+  const { researchGuideEntries, researchGuideExtracts, researchGuideLoading } = useBibleResearchGuide(studyParams);
+
+  const personalNotes = toPersonalNotes(displayHighlights, tabSelectedVerse);
+
+  const handleEditPersonalNote = useCallback((note: BiblePersonalNote) => {
+    setEditingNote({ id: note.id, title: note.title, content: note.content, userMarkId: note.userMarkId, colorIndex: note.colorIndex });
+  }, []);
+
+  const handleDeletePersonalNote = useCallback((note: BiblePersonalNote) => {
+    setDisplayHighlights((prev) =>
+      prev
+        .map((h) => (h.note?.id === note.id ? { ...h, note: null } : h))
+        .filter((h) => h.colorIndex !== null || h.note !== null)
+    );
+    void deleteJwlibraryNote(note.id).then((result) => {
+      if (result.error) notify.error("Não foi possível excluir a nota", result.error);
+    });
+  }, []);
+
+  // Clicking a note-less highlight's own marker (drawn by VerseText above)
+  // toggles its color/delete controls the same way tapping it in bible-reader.tsx does.
+  const activeHighlight = displayHighlights.find((h) => h.note?.id === expandedNoteId) ?? null;
+
+  const handleColorChangeActiveHighlight = useCallback(
+    (colorIndex: number) => {
+      if (!activeHighlight) return;
+      const id = activeHighlight.id;
+      setDisplayHighlights((prev) => prev.map((h) => (h.id === id ? { ...h, colorIndex } : h)));
+      void updateJwlibraryHighlightColor(id, colorIndex).then((result) => {
+        if (result.error) notify.error("Não foi possível trocar a cor", result.error);
+      });
+    },
+    [activeHighlight]
+  );
+
+  const handleDeleteActiveHighlight = useCallback(() => {
+    if (!activeHighlight) return;
+    const id = activeHighlight.id;
+    setDisplayHighlights((prev) => prev.filter((h) => h.id !== id));
+    setExpandedNoteId(null);
+    void deleteJwlibraryHighlight(id).then((result) => {
+      if (result.error) notify.error("Não foi possível excluir o destaque", result.error);
+    });
+  }, [activeHighlight]);
+
   return (
-    <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose}>
-      <Body verses={verses} isLoading={isLoading} error={error} highlights={highlights} />
-    </JwpubSidePanel>
+    <>
+      <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose} width={520}>
+        <div className="flex flex-col gap-4">
+          <VerseText
+            verses={displayVerses}
+            isLoading={displayLoading}
+            error={displayError}
+            highlights={displayHighlights}
+            expandedNoteId={expandedNoteId}
+            onToggleNote={(noteId) => setExpandedNoteId((prev) => (prev === noteId ? null : noteId))}
+          />
+
+          {viewBookOrder !== null && viewChapter !== null && (
+            <BibleStudyTabs
+              bookName={viewBookName}
+              chapter={viewChapter}
+              selectedVerse={tabSelectedVerse}
+              onClearVerse={() => setTabSelectedVerse(null)}
+              onSelectVerse={setTabSelectedVerse}
+              refs={refs}
+              refsLoading={refsLoading}
+              refsTruncated={refsTruncated}
+              refsSource={refsSource}
+              onChangeRefsSource={setRefsSource}
+              books={books}
+              onSelectReference={navigateToVerse}
+              footnotes={footnotes}
+              studyNotes={studyNotes}
+              studyLoading={studyLoading}
+              onOpenBibleRef={navigateToVerse}
+              onOpenAppendix={setOpenAppendixId}
+              videos={videos}
+              videosLoading={videosLoading}
+              researchGuideEntries={researchGuideEntries}
+              researchGuideExtracts={researchGuideExtracts}
+              researchGuideLoading={researchGuideLoading}
+              personalNotes={personalNotes}
+              onEditPersonalNote={handleEditPersonalNote}
+              onDeletePersonalNote={handleDeletePersonalNote}
+              activeHighlight={activeHighlight}
+              onCloseActiveHighlight={() => setExpandedNoteId(null)}
+              onAddNoteToActiveHighlight={() => {
+                if (!activeHighlight || viewBookOrder === null || viewChapter === null) return;
+                setPendingNoteLocation({
+                  blockType: 2,
+                  blockIdentifier: activeHighlight.verse,
+                  location: {
+                    bookNumber: viewBookOrder,
+                    chapterNumber: viewChapter,
+                    keySymbol: "nwtsty",
+                    mepsLanguage: null,
+                    issueTagNumber: null,
+                    mepsDocumentId: null,
+                    track: null,
+                    locationType: 0,
+                  },
+                  label: `${viewBookName} ${viewChapter}:${activeHighlight.verse}`,
+                  existingUserMarkId: activeHighlight.id,
+                  initialColorIndex: activeHighlight.colorIndex,
+                });
+              }}
+              onColorChangeActiveHighlight={handleColorChangeActiveHighlight}
+              onDeleteActiveHighlight={handleDeleteActiveHighlight}
+              tab={studyTab}
+              onTabChange={setStudyTab}
+            />
+          )}
+        </div>
+      </JwpubSidePanel>
+
+      <BibleAppendixSurface
+        mepsDocumentId={openAppendixId}
+        onClose={() => setOpenAppendixId(null)}
+        onOpenAppendix={setOpenAppendixId}
+        onOpenBibleRef={navigateToVerse}
+      />
+
+      <JwlibraryNoteEditorVault
+        open={editingNote !== null || pendingNoteLocation !== null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setEditingNote(null);
+            setPendingNoteLocation(null);
+          }
+        }}
+        note={editingNote}
+        prefilledLocation={pendingNoteLocation}
+        onSaved={() => {
+          refreshHighlights();
+          setEditingNote(null);
+          setPendingNoteLocation(null);
+        }}
+        onHighlightColorChanged={(userMarkId, colorIndex) => {
+          setDisplayHighlights((prev) => prev.map((h) => (h.id === userMarkId ? { ...h, colorIndex } : h)));
+        }}
+      />
+    </>
   );
 }

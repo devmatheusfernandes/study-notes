@@ -13,14 +13,10 @@ import {
   listBibleBooks,
   getBibleChapterCount,
   getBibleChapterVerses,
-  getVerseCrossReferences,
-  getChapterCrossReferences,
   getChapterStudyContent,
   listBibleAppendixHeaders,
   type BibleBook,
   type BibleVerseRow,
-  type CrossReference,
-  type CrossReferenceSource,
   type BibleFootnote,
   type BibleStudyNote,
   type BibleAppendixHeader,
@@ -33,9 +29,13 @@ import {
   deleteJwlibraryNote,
   type BibleVerseHighlight,
 } from "@/app/(app)/jwlibrary-actions";
-import { getChapterVideos, type ChapterVideo } from "@/app/(app)/bible-search-actions";
-import { getChapterResearchGuide, type ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
+import {
+  useBibleCrossReferences,
+  useBibleChapterVideos,
+  useBibleResearchGuide,
+} from "@/hooks/use-bible-study-data";
+import { toPersonalNotes } from "@/lib/bible/personal-notes";
 import { BibleBookGrid } from "./bible-book-grid";
 import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
@@ -399,123 +399,21 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
 
   // Study panel — hidden by default; while open, tapping/selecting any verse
   // (the same gesture that opens the highlight-color popup) re-scopes it to
-  // that verse. While closed, no cross-reference request is made.
+  // that verse. While closed, no cross-reference/video/guide request is made.
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyTab, setStudyTab] = useState<BibleStudyTab>("referencias");
-  const [refs, setRefs] = useState<(CrossReference & { verse: number | null })[]>([]);
-  const [isLoadingRefs, setIsLoadingRefs] = useState(false);
-  const [refsTruncated, setRefsTruncated] = useState(false);
-  const [refsSource, setRefsSource] = useState<CrossReferenceSource>("nwt");
 
   const handleVerseSelected = useCallback((verse: number) => setSelectedVerse(verse), []);
 
-  // Driven by an effect rather than the tap handler so that switching the
-  // reference source (marginais ↔ estendidas) or clearing the verse refetches
-  // without duplicating the request in three places.
-  //
-  // With no verse selected the panel shows the whole chapter, so this fetches
-  // the chapter's references instead of nothing — that's what makes opening
-  // the panel useful before tapping anything.
-  useEffect(() => {
-    if (!studyOpen) return;
-    let cancelled = false;
-    // Deferred a tick rather than set synchronously in the effect body — same
-    // pattern as the chapter/highlight loads above.
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingRefs(true);
-    });
-
-    const request =
-      selectedVerse === null
-        ? getChapterCrossReferences(bookOrder, chapter, refsSource)
-        : getVerseCrossReferences(bookOrder, chapter, selectedVerse, refsSource).then((result) => ({
-            // The per-verse action doesn't echo the verse back (the caller
-            // already knows it); the panel groups on it, so it's added here.
-            refs: result.refs?.map((ref) => ({ ...ref, verse: selectedVerse })),
-            truncated: false,
-          }));
-
-    void request.then((result) => {
-      if (cancelled) return;
-      setRefs(result.refs ?? []);
-      setRefsTruncated(result.truncated ?? false);
-      setIsLoadingRefs(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [studyOpen, selectedVerse, refsSource, bookOrder, chapter]);
-
-  // Vídeos do JW.org ligados a este capítulo — o título ou a transcrição deles
-  // cita algum texto daqui (ver video_scripture_refs, migração 0025).
-  //
-  // Buscado por CAPÍTULO, não por versículo, mesmo quando um versículo está
-  // selecionado: são poucas linhas, e filtrar em memória deixa alternar entre
-  // "capítulo inteiro" e um versículo instantâneo em vez de uma ida ao
-  // servidor por toque — o mesmo motivo pelo qual as notas de rodapé já são
-  // carregadas por capítulo.
-  const [chapterVideos, setChapterVideos] = useState<ChapterVideo[]>([]);
-  const [isLoadingChapterVideos, setIsLoadingChapterVideos] = useState(false);
-
-  useEffect(() => {
-    if (!studyOpen) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingChapterVideos(true);
-    });
-    void getChapterVideos(bookOrder, chapter).then((result) => {
-      if (cancelled) return;
-      setChapterVideos(result.videos ?? []);
-      setIsLoadingChapterVideos(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [studyOpen, bookOrder, chapter]);
-
-  // Um vídeo cujo tema é o capítulo inteiro continua aparecendo com um
-  // versículo selecionado — ele fala do versículo por definição. Some só quem
-  // aponta explicitamente para outros versículos.
-  const panelVideos = useMemo(() => {
-    if (selectedVerse === null) return chapterVideos;
-    return chapterVideos.filter(
-      (video) => video.verses.length === 0 || video.verses.includes(selectedVerse)
-    );
-  }, [chapterVideos, selectedVerse]);
-
-  // Guia de Pesquisa (JW.org) — citações de outras publicações por versículo,
-  // importadas via Configurações (ver research-guide-actions.ts). Mesmo
-  // padrão de carregar o capítulo inteiro e filtrar em memória que os
-  // vídeos/rodapé já usam.
-  const [researchGuideEntries, setResearchGuideEntries] = useState<{ verse: number | null; contentHtml: string }[]>([]);
-  // Excerpts embedded in the guide itself, keyed by the extractId each
-  // entry's own data-jwpub-extract attribute names — see
-  // getChapterResearchGuide, which bundles these in the same request instead
-  // of a second round trip per citation clicked.
-  const [researchGuideExtracts, setResearchGuideExtracts] = useState<Record<number, ResearchGuideExtract>>({});
-  const [isLoadingResearchGuide, setIsLoadingResearchGuide] = useState(false);
-
-  useEffect(() => {
-    if (!studyOpen) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingResearchGuide(true);
-    });
-    void getChapterResearchGuide(bookOrder, chapter).then((result) => {
-      if (cancelled) return;
-      setResearchGuideEntries(result.entries ?? []);
-      setResearchGuideExtracts(result.extracts ?? {});
-      setIsLoadingResearchGuide(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [studyOpen, bookOrder, chapter]);
-
-  const panelResearchGuide = useMemo(() => {
-    if (selectedVerse === null) return researchGuideEntries;
-    return researchGuideEntries.filter((entry) => entry.verse === selectedVerse);
-  }, [researchGuideEntries, selectedVerse]);
+  const studyParams = { bookOrder, chapter, selectedVerse, enabled: studyOpen };
+  const { refs, refsLoading: isLoadingRefs, refsTruncated, refsSource, setRefsSource } =
+    useBibleCrossReferences(studyParams);
+  const { videos: panelVideos, videosLoading: isLoadingChapterVideos } = useBibleChapterVideos(studyParams);
+  const {
+    researchGuideEntries: panelResearchGuide,
+    researchGuideExtracts,
+    researchGuideLoading: isLoadingResearchGuide,
+  } = useBibleResearchGuide(studyParams);
 
   const handleOpenStudy = useCallback((verse: number, tab: BibleStudyTab) => {
     setSelectedVerse(verse);
@@ -545,19 +443,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   // (see getBibleChapterHighlights), so this is just the subset that has a
   // note attached, reshaped for the study panel's "Pessoal" tab instead of
   // needing a whole separate sidebar just to list them.
-  const panelPersonalNotes = useMemo(() => {
-    const withNotes = highlights
-      .filter((h): h is typeof h & { note: NonNullable<(typeof h)["note"]> } => h.note !== null)
-      .map((h) => ({
-        id: h.note.id,
-        title: h.note.title,
-        content: h.note.content,
-        userMarkId: h.colorIndex !== null ? h.id : null,
-        colorIndex: h.colorIndex,
-        verse: h.verse,
-      }));
-    return selectedVerse === null ? withNotes : withNotes.filter((n) => n.verse === selectedVerse);
-  }, [highlights, selectedVerse]);
+  const panelPersonalNotes = useMemo(() => toPersonalNotes(highlights, selectedVerse), [highlights, selectedVerse]);
 
   // Clicking a note-less highlight used to open its own third sidebar
   // (JwlibraryHighlightNotePanel's note-less branch) — same redundancy as
