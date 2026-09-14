@@ -16,7 +16,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
-import { searchOwnChapterTitles } from "./jwpub-actions";
+import { searchOwnChapterTitles, searchOwnChapterTitlesInPublication } from "./jwpub-actions";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -37,6 +37,7 @@ export interface VideoTitleHit {
 
 const CHAPTER_LIMIT = 5;
 const VIDEO_LIMIT = 4;
+const SCOPED_CHAPTER_LIMIT = 8;
 
 interface GlobalChapterRpcRow {
   document_id: number;
@@ -63,6 +64,49 @@ async function searchGlobalChapterTitles(supabase: SupabaseClient, query: string
   }));
 }
 
+/**
+ * Same idea as searchGlobalChapterTitles, but scoped to one already-named
+ * publication (see searchOwnChapterTitlesInPublication's own comment) — a
+ * plain `ilike` against global_publication_chapters directly rather than the
+ * title-weighted FTS RPC, since with the publication already known there's
+ * nothing left to rank across. Also allows an empty query, to browse the
+ * publication's chapters in order before typing anything.
+ */
+async function searchGlobalChapterTitlesInPublication(
+  supabase: SupabaseClient,
+  symbol: string,
+  query: string,
+  limit: number
+): Promise<ChapterTitleHit[]> {
+  const { data: publication } = await supabase
+    .from("global_publications")
+    .select("id, title")
+    .ilike("symbol", symbol)
+    .maybeSingle();
+  if (!publication) return [];
+
+  let request = supabase
+    .from("global_publication_chapters")
+    .select("document_id, title")
+    .eq("publication_id", publication.id)
+    .order("position", { ascending: true })
+    .limit(limit);
+
+  const trimmed = query.trim();
+  if (trimmed) request = request.ilike("title", `%${trimmed}%`);
+
+  const { data } = await request;
+  return (data ?? []).map((row) => ({
+    source: "global" as const,
+    publicationId: publication.id,
+    publicationTitle: publication.title,
+    symbol,
+    documentId: row.document_id,
+    chapterTitle: row.title,
+    noteId: null,
+  }));
+}
+
 async function searchGlobalVideoTitles(supabase: SupabaseClient, query: string): Promise<VideoTitleHit[]> {
   const { data } = await supabase
     .from("global_videos")
@@ -74,16 +118,38 @@ async function searchGlobalVideoTitles(supabase: SupabaseClient, query: string):
 }
 
 export async function searchNoteReferenceCandidates(
-  query: string
+  query: string,
+  options?: {
+    /**
+     * Set once the "@" menu's query has already named a publication (see
+     * publicationScopeOf) — the search then looks only inside that one
+     * publication's chapters, by title, and skips videos entirely (a
+     * publication has no videos to find).
+     */
+    publicationSymbol?: string;
+  }
 ): Promise<{ chapters: ChapterTitleHit[]; videos: VideoTitleHit[] }> {
   const trimmed = query.trim();
-  if (trimmed.length < 2) return { chapters: [], videos: [] };
+  const symbol = options?.publicationSymbol?.trim().toLowerCase();
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { chapters: [], videos: [] };
+
+  if (symbol) {
+    const [ownResult, globalChapters] = await Promise.all([
+      searchOwnChapterTitlesInPublication(symbol, trimmed, SCOPED_CHAPTER_LIMIT),
+      searchGlobalChapterTitlesInPublication(supabase, symbol, trimmed, SCOPED_CHAPTER_LIMIT),
+    ]);
+    const ownHits: ChapterTitleHit[] = ownResult.hits.map((hit) => ({ source: "own", ...hit }));
+    const ownDocumentIds = new Set(ownHits.map((hit) => hit.documentId));
+    const dedupedGlobal = globalChapters.filter((hit) => !ownDocumentIds.has(hit.documentId));
+    return { chapters: [...ownHits, ...dedupedGlobal].slice(0, SCOPED_CHAPTER_LIMIT), videos: [] };
+  }
+
+  if (trimmed.length < 2) return { chapters: [], videos: [] };
 
   const [ownResult, globalChapters, videos] = await Promise.all([
     searchOwnChapterTitles(trimmed, CHAPTER_LIMIT),

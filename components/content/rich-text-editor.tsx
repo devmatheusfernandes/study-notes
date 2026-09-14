@@ -42,6 +42,7 @@ import {
 import {
   buildReferenceSuggestions,
   namePartOf,
+  publicationScopeOf,
   type NoteOption,
   type PublicationOption,
   type ReferenceSearchResults,
@@ -191,10 +192,15 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const searchRequestRef = useRef(0);
 
   useEffect(() => {
-    const namePart = suggestion ? namePartOf(suggestion.query) : "";
+    // Once the query names a known publication ("it esdras", "it "), search
+    // only inside that one publication — and unlike the general search
+    // below, an empty query is allowed: with the publication already picked,
+    // browsing its chapter list is exactly as useful as filtering it.
+    const scope = suggestion ? publicationScopeOf(suggestion.query, symbolsRef.current) : null;
+    const namePart = scope ? namePartOf(scope.rest) : suggestion ? namePartOf(suggestion.query) : "";
     const requestId = ++searchRequestRef.current;
 
-    if (namePart.length < 2) {
+    if (!scope && namePart.length < 2) {
       // Deferred a tick rather than set synchronously in the effect body —
       // same pattern note-reference-surface.tsx uses for its own load states.
       queueMicrotask(() => {
@@ -209,13 +215,15 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       if (searchRequestRef.current === requestId) setIsSearching(true);
     });
     const timer = setTimeout(() => {
-      void searchNoteReferenceCandidates(namePart).then((result) => {
-        // A later keystroke may have started a newer search — a slow response
-        // to a stale query must not overwrite results for what's typed now.
-        if (searchRequestRef.current !== requestId) return;
-        setSearchResults(result);
-        setIsSearching(false);
-      });
+      void searchNoteReferenceCandidates(namePart, scope ? { publicationSymbol: scope.symbol } : undefined).then(
+        (result) => {
+          // A later keystroke may have started a newer search — a slow response
+          // to a stale query must not overwrite results for what's typed now.
+          if (searchRequestRef.current !== requestId) return;
+          setSearchResults(result);
+          setIsSearching(false);
+        }
+      );
     }, REFERENCE_SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
@@ -344,6 +352,28 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         : next
     );
   }, []);
+
+  // Clicking outside the editor and outside the menu itself closes it —
+  // otherwise it's stuck open (typing inside the editor is the only thing
+  // that naturally re-triggers the plugin's own `view.update`, so a click
+  // that lands elsewhere on the page, e.g. dismissing the publication-scoped
+  // search mode from lib/notes/reference-suggestions.ts, wouldn't do
+  // anything on its own). A menu row's own onMouseDown already calls
+  // preventDefault (see reference-suggestion-menu.tsx), so a selection click
+  // never reaches this listener as a "click".
+  useEffect(() => {
+    if (!suggestion) return;
+    function handlePointerDown(event: MouseEvent) {
+      const targetNode = event.target as Node | null;
+      if (!targetNode) return;
+      if (editorRef.current?.view.dom.contains(targetNode)) return;
+      if ((targetNode as HTMLElement).closest?.("[data-reference-menu]")) return;
+      dismissedAt.current = suggestionRef.current?.from ?? null;
+      setSuggestion(null);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [suggestion]);
 
   // onReferenceClick is a prop, so it needs the ref treatment; the two
   // suggestion callbacks above are already stable useCallbacks and can be

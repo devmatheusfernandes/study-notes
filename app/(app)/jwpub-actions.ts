@@ -962,3 +962,49 @@ export async function searchOwnChapterTitles(query: string, limit = 5): Promise<
   }
   return { hits };
 }
+
+/**
+ * Same shape as searchOwnChapterTitles, but scoped to one publication the
+ * user has already named (the "@" menu's publication-scoped search mode —
+ * see publicationScopeOf in lib/notes/reference-suggestions.ts). Unlike the
+ * general search, an empty query is allowed here: with the publication
+ * already picked, browsing its chapter list in order is exactly as useful as
+ * filtering it by a typed title, which is why this orders by `position`
+ * rather than relying on `ilike`'s ranking.
+ */
+export async function searchOwnChapterTitlesInPublication(
+  symbol: string,
+  query: string,
+  limit = 8
+): Promise<{ hits: OwnChapterTitleHit[] }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { hits: [] };
+
+  let request = supabase
+    .from("jwpub_chapters")
+    .select("document_id, title, publication_id, jwpub_publications!inner(note_id, title, symbol, status)")
+    .eq("jwpub_publications.status", "ready")
+    .eq("jwpub_publications.symbol", symbol)
+    .order("position", { ascending: true })
+    .limit(limit);
+
+  const trimmed = query.trim();
+  if (trimmed) request = request.ilike("title", `%${trimmed}%`);
+
+  const { data } = await request;
+
+  const hits: OwnChapterTitleHit[] = [];
+  for (const row of data ?? []) {
+    const pub = Array.isArray(row.jwpub_publications) ? row.jwpub_publications[0] : row.jwpub_publications;
+    if (!pub || !pub.symbol) continue;
+    hits.push({
+      publicationId: row.publication_id,
+      publicationTitle: pub.title,
+      symbol: pub.symbol.toLowerCase(),
+      documentId: row.document_id,
+      chapterTitle: row.title,
+      noteId: pub.note_id,
+    });
+  }
+  return { hits };
+}

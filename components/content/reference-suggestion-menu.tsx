@@ -59,6 +59,7 @@ export function ReferenceSuggestionMenu({
       transition={{ duration: 0.12, ease: "easeOut" }}
       role="listbox"
       aria-label="Sugestões de referência"
+      data-reference-menu
       style={{
         position: "fixed",
         width: MENU_WIDTH,

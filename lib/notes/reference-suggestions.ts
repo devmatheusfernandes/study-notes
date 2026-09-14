@@ -69,6 +69,33 @@ export function namePartOf(query: string): string {
   return query.replace(/[\d\s:.\-–—]+$/u, "").trim();
 }
 
+/**
+ * True once the query names a known publication symbol followed by
+ * whitespace — "it esdras", "it 202", or just "it " with nothing after it
+ * yet. From that point on the menu should search only inside that one
+ * publication (by title or number) instead of listing books/publications in
+ * general: knowing whether "it 1:1" or "it 1" is the right shape for a given
+ * publication isn't something users can be expected to remember, so once
+ * they've named the publication the rest of what they type should just find
+ * it.
+ *
+ * Deliberately checked against the raw query (not `.trim()`ed) — the
+ * trailing space is what marks the symbol as committed rather than still
+ * being typed; a bare "it" with no space yet still falls through to the
+ * ordinary name-completion rows below, letting the user finish typing "it-1"
+ * etc. first.
+ */
+export function publicationScopeOf(
+  query: string,
+  symbols: ReadonlySet<string>
+): { symbol: string; rest: string } | null {
+  const match = /^\s*([a-z][a-z0-9]{0,6}(?:-\d{1,2})?)(\s+)([\s\S]*)$/i.exec(query);
+  if (!match) return null;
+  const symbol = match[1].toLowerCase();
+  if (!symbols.has(symbol)) return null;
+  return { symbol, rest: match[3] };
+}
+
 export function buildReferenceSuggestions(
   query: string,
   publications: PublicationOption[],
@@ -92,19 +119,47 @@ export function buildReferenceSuggestions(
         text: `(${formatBibleReference(parsed)})`,
         reference: parsed,
       });
-    } else if (parsed.kind === "publication") {
+    } else if (parsed.kind === "publication" && parsed.chapter !== null) {
+      // A bare symbol ("it", chapter null) deliberately gets no insert row
+      // here — see the scope block below, which turns naming the publication
+      // into "search inside it" instead of jumping straight to its first
+      // chapter.
       const publication = publications.find((p) => p.symbol === parsed.symbol);
       items.push({
         type: "insert",
-        label:
-          parsed.chapter === null
-            ? publication?.title ?? parsed.symbol.toUpperCase()
-            : `${publication?.title ?? parsed.symbol.toUpperCase()} — ${parsed.chapter}`,
+        label: `${publication?.title ?? parsed.symbol.toUpperCase()} — ${parsed.chapter}`,
         hint: "Publicação",
-        text: parsed.chapter === null ? `(${parsed.symbol})` : `(${parsed.symbol} ${parsed.chapter})`,
+        text: `(${parsed.symbol} ${parsed.chapter})`,
         reference: parsed,
       });
     }
+  }
+
+  // Once the query names a known publication followed by whitespace, every
+  // remaining suggestion searches only inside that one publication by title —
+  // the generic Bible-book/publication-name rows below would just be noise
+  // once the user has already committed to which publication they mean.
+  const scope = publicationScopeOf(query, symbols);
+  if (scope) {
+    const publicationTitle = publications.find((p) => p.symbol === scope.symbol)?.title;
+    for (const chapter of search.chapters) {
+      if (items.length >= MAX_ITEMS) break;
+      items.push({
+        type: "insert",
+        label: chapter.chapterTitle,
+        hint: "Publicação",
+        text: `(${publicationTitle ?? chapter.publicationTitle} — ${chapter.chapterTitle})`,
+        reference: {
+          kind: "publication",
+          symbol: chapter.symbol || scope.symbol,
+          chapter: null,
+          documentId: chapter.documentId,
+          publicationId: chapter.publicationId,
+          isGlobal: chapter.source === "global",
+        },
+      });
+    }
+    return items.slice(0, MAX_ITEMS);
   }
 
   const needle = normalizeForSearch(namePartOf(trimmed) || trimmed);
@@ -146,7 +201,12 @@ export function buildReferenceSuggestions(
     if (items.length >= MAX_ITEMS) break;
     const haystacks = [normalizeForSearch(publication.symbol), normalizeForSearch(publication.title)];
     if (!haystacks.some((h) => h.startsWith(needle) || h.includes(needle))) continue;
-    if (parsed?.kind === "publication" && parsed.symbol === publication.symbol) continue;
+    // The insert row above already covers a fully-numbered match ("it 202");
+    // a bare symbol match ("it") still needs its prefix row so selecting it
+    // enters the scoped search above instead of being silently dropped.
+    if (parsed?.kind === "publication" && parsed.symbol === publication.symbol && parsed.chapter !== null) {
+      continue;
+    }
     items.push({
       type: "prefix",
       label: publication.title || publication.symbol.toUpperCase(),
