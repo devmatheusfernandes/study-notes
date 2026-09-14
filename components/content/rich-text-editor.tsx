@@ -59,6 +59,19 @@ import { searchNoteReferenceCandidates } from "@/app/(app)/note-reference-search
 const REFERENCE_SEARCH_DEBOUNCE_MS = 250;
 const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
 
+// Module-level, not inline in JSX: BubbleMenu (@tiptap/react/menus) puts
+// `shouldShow` in a useEffect dependency array that, on every identity
+// change, dispatches a ProseMirror transaction to push the new options into
+// the plugin. An inline arrow function here would get a new identity on
+// every render of RichTextEditor — including ones caused by typing in the
+// unrelated title <input> above this component in note-editor.tsx — so
+// every keystroke there was forcing a full editor transaction/plugin cycle
+// (decorations, onUpdate → getHTML() over the whole doc) for no reason,
+// which is heavy enough on a substantial note to make typing feel frozen.
+function bubbleMenuShouldShow({ state }: { state: { selection: { empty: boolean } } }) {
+  return !state.selection.empty;
+}
+
 async function insertImageFile(editor: Editor, file: File) {
   if (!file.type.startsWith("image/")) return;
 
@@ -472,7 +485,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     <div className={cn("relative", className)}>
       <BubbleMenu
         editor={editor}
-        shouldShow={({ state }: { state: { selection: { empty: boolean } } }) => !state.selection.empty}
+        shouldShow={bubbleMenuShouldShow}
         className="flex items-center gap-0.5 rounded-full border border-border bg-card p-1 shadow-lg"
       >
         <ToolbarButton
