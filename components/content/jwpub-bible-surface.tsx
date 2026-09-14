@@ -37,6 +37,21 @@ import {
   type PrefilledJwlibraryLocation,
 } from "./jwlibrary-note-editor-vault";
 
+// Stable reference for callers (e.g. note-reference-surface.tsx) that don't
+// pass `highlights` at all: an inline `highlights = []` default below would
+// create a NEW array every render, which — fed straight into the effect a
+// few lines down that mirrors props into local state — made that effect's
+// dependency change on every render, re-running it, re-triggering the
+// re-render, forever. Because that cycle runs through setState-inside-a-
+// queueMicrotask rather than setState-during-render, React's own
+// "Maximum update depth exceeded" guard (which only watches renders, not
+// microtasks) never caught it — it just pegged the tab at 100% CPU with no
+// error, indistinguishable from a true infinite loop. Verified empirically:
+// reproduced the hang with a real headless Chromium session (even
+// `Profiler.stop` over CDP couldn't interrupt it), then confirmed this exact
+// line was the cause by bisection.
+const EMPTY_HIGHLIGHTS: BibleVerseHighlight[] = [];
+
 interface JwpubBibleSurfaceProps {
   open: boolean;
   verses: BibleVerseRow[] | null;
@@ -248,7 +263,7 @@ function VerseText({
  * panel (fetching the new verse's text + highlights) instead of requiring the
  * host to know about it.
  */
-export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = [] }: JwpubBibleSurfaceProps) {
+export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = EMPTY_HIGHLIGHTS }: JwpubBibleSurfaceProps) {
   const [displayVerses, setDisplayVerses] = useState<BibleVerseRow[] | null>(verses);
   const [displayHighlights, setDisplayHighlights] = useState<BibleVerseHighlight[]>(highlights);
   const [displayLoading, setDisplayLoading] = useState(isLoading);
