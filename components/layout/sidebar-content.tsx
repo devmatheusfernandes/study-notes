@@ -10,6 +10,7 @@ import { usePendingSyncCount } from "@/lib/store/notes-store";
 import { useDeviceStore } from "@/hooks/ui/use-device";
 import { ChatList } from "@/components/chat/chat-list";
 import { InstallNudgeCard } from "./install-nudge-card";
+import { UpdateNudgeCard } from "./update-nudge-card";
 
 interface SidebarContentProps {
   collapsed?: boolean;
@@ -122,6 +123,7 @@ export function SidebarContent({ collapsed = false, onNavigate }: SidebarContent
               </span>
             </div>
           )}
+          {!collapsed && <UpdateNudgeCard />}
           {!collapsed && <InstallNudgeCard />}
           <NavLink
             href="/trash"
