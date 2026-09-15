@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
-  PAGE_HEIGHT,
   PAGE_WIDTH,
   drawStroke,
   renderStrokes,
@@ -18,8 +17,8 @@ interface DrawingCanvasProps {
   tool: DrawTool;
   color: string;
   size: number;
-  /** Playback mode: the page is a viewer, not an input surface. */
-  readOnly?: boolean;
+  /** False when the note is in typing mode (or replaying): the layer shows ink but lets every event through to the text underneath. */
+  active: boolean;
   /** Renders only the ink drawn up to this position on the recording timeline. */
   revealUntilMs?: number;
   /** Current position on the recording timeline, or undefined when not recording — stamped onto each stroke so playback can replay it. */
@@ -30,12 +29,18 @@ interface DrawingCanvasProps {
   className?: string;
 }
 
+/**
+ * A transparent ink layer sized to whatever it covers — in this app, the note
+ * being written. It is absolutely positioned over the text rather than being
+ * a page of its own, which is what lets one note hold both typing and
+ * handwriting instead of forcing the user to pick a note "type" up front.
+ */
 export function DrawingCanvas({
   strokes,
   tool,
   color,
   size,
-  readOnly = false,
+  active,
   revealUntilMs,
   recordingElapsed,
   onCommitStroke,
@@ -46,7 +51,7 @@ export function DrawingCanvas({
   const liveRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
+  const [box, setBox] = useState({ width: 0, height: 0 });
 
   const pointsRef = useRef<DrawPoint[]>([]);
   const strokeStartRef = useRef<{ perf: number; t?: number } | null>(null);
@@ -54,47 +59,45 @@ export function DrawingCanvas({
   const erasingRef = useRef(false);
   const erasedThisGestureRef = useRef(false);
   /**
-   * Palm rejection: once a real stylus has touched this page, finger contact
-   * stops drawing. Without it the hand resting on a tablet paints over the
-   * writing — and there's no way to tell a palm from a deliberate finger
-   * stroke except by trusting the pen when one is present.
+   * Palm rejection: once a real stylus has touched this note, finger contact
+   * stops drawing and goes back to scrolling the page. Without it the hand
+   * resting on a tablet paints over the writing — and there's no way to tell a
+   * palm from a deliberate finger stroke except by trusting the pen when one
+   * is present.
    */
   const [penSeen, setPenSeen] = useState(false);
 
-  // ── Fit the A4 page into whatever space the layout gives us ───────────────
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
-
     const observer = new ResizeObserver(() => {
       const { width, height } = wrap.getBoundingClientRect();
-      if (width === 0 || height === 0) return;
-      const scale = Math.min(width / PAGE_WIDTH, height / PAGE_HEIGHT);
-      setPageSize({ width: PAGE_WIDTH * scale, height: PAGE_HEIGHT * scale });
+      setBox({ width, height });
     });
     observer.observe(wrap);
     return () => observer.disconnect();
   }, []);
 
-  /** Puts a canvas into page coordinates at device resolution, so ink stays crisp on a retina tablet. */
+  /** Puts a canvas into logical units at device resolution, so ink stays crisp on a retina tablet. */
   const prepare = useCallback(
     (canvas: HTMLCanvasElement | null) => {
-      if (!canvas || pageSize.width === 0) return null;
+      if (!canvas || box.width === 0 || box.height === 0) return null;
       const dpr = window.devicePixelRatio || 1;
-      const pixelWidth = Math.round(pageSize.width * dpr);
-      if (canvas.width !== pixelWidth) {
+      const pixelWidth = Math.round(box.width * dpr);
+      const pixelHeight = Math.round(box.height * dpr);
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
         canvas.width = pixelWidth;
-        canvas.height = Math.round(pageSize.height * dpr);
+        canvas.height = pixelHeight;
       }
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const scale = (pageSize.width * dpr) / PAGE_WIDTH;
-      ctx.scale(scale, scale);
+      const unit = (box.width * dpr) / PAGE_WIDTH;
+      ctx.scale(unit, unit);
       return ctx;
     },
-    [pageSize]
+    [box]
   );
 
   useEffect(() => {
@@ -102,14 +105,19 @@ export function DrawingCanvas({
     if (ctx) renderStrokes(ctx, strokes, revealUntilMs);
   }, [strokes, revealUntilMs, prepare]);
 
-  const toPagePoint = useCallback((clientX: number, clientY: number) => {
-    const rect = liveRef.current?.getBoundingClientRect();
-    if (!rect || rect.width === 0) return null;
-    return {
-      x: ((clientX - rect.left) / rect.width) * PAGE_WIDTH,
-      y: ((clientY - rect.top) / rect.height) * PAGE_HEIGHT,
-    };
-  }, []);
+  const toPagePoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = liveRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return null;
+      return {
+        x: ((clientX - rect.left) / rect.width) * PAGE_WIDTH,
+        // Same unit on both axes — the layer isn't a fixed-aspect page, so y
+        // is simply "how far down", in the width's own units.
+        y: (clientY - rect.top) / (rect.width / PAGE_WIDTH),
+      };
+    },
+    []
+  );
 
   const drawLive = useCallback(() => {
     const ctx = prepare(liveRef.current);
@@ -140,7 +148,7 @@ export function DrawingCanvas({
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (readOnly) return;
+    if (!active) return;
     if (event.pointerType === "pen") setPenSeen(true);
     else if (penSeen && event.pointerType === "touch") return;
     if (activePointerRef.current !== null) return;
@@ -169,7 +177,7 @@ export function DrawingCanvas({
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (readOnly || activePointerRef.current !== event.pointerId) return;
+    if (!active || activePointerRef.current !== event.pointerId) return;
 
     if (erasingRef.current) {
       const point = toPagePoint(event.clientX, event.clientY);
@@ -227,26 +235,25 @@ export function DrawingCanvas({
   }
 
   return (
-    <div ref={wrapRef} className={cn("flex min-h-0 flex-1 items-center justify-center", className)}>
-      <div
-        className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
-        style={{ width: pageSize.width || undefined, height: pageSize.height || undefined }}
-      >
-        <canvas ref={baseRef} className="absolute inset-0 size-full" />
-        <canvas
-          ref={liveRef}
-          className={cn(
-            "absolute inset-0 size-full",
-            readOnly ? "cursor-default" : tool === "eraser" ? "cursor-cell" : "cursor-crosshair"
-          )}
-          // The page must never scroll or zoom out from under the pen mid-stroke.
-          style={{ touchAction: "none" }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={endStroke}
-          onPointerCancel={endStroke}
-        />
-      </div>
+    <div ref={wrapRef} className={cn("absolute inset-0", className)} aria-hidden={!active}>
+      <canvas ref={baseRef} className="pointer-events-none absolute inset-0 size-full" />
+      <canvas
+        ref={liveRef}
+        className={cn(
+          "absolute inset-0 size-full",
+          active ? (tool === "eraser" ? "cursor-cell" : "cursor-crosshair") : "pointer-events-none"
+        )}
+        style={{
+          // With a stylus in play, touch goes back to scrolling the note and
+          // only the pen draws. Without one, touch *is* the pen, so scrolling
+          // means leaving pen mode.
+          touchAction: !active ? undefined : penSeen ? "pan-y" : "none",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endStroke}
+        onPointerCancel={endStroke}
+      />
     </div>
   );
 }

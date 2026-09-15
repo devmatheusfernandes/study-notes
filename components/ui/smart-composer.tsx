@@ -10,7 +10,6 @@ import {
   FileText,
   FolderPlus,
   NotebookPen,
-  PenLine,
   Scroll,
   Sparkles,
   Upload,
@@ -411,21 +410,6 @@ export function SmartComposer(props: SmartComposerProps) {
                 >
                   <NotebookPen className="size-3 shrink-0" />
                   <span>Nota</span>
-                </button>
-
-                {/* Novo desenho */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDrawerOpen(false);
-                    const params = new URLSearchParams({ type: "desenho" });
-                    if (activeFolderId) params.set("folder", activeFolderId);
-                    router.push(`/notes/new?${params.toString()}`);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
-                >
-                  <PenLine className="size-3 shrink-0" />
-                  <span>Desenho</span>
                 </button>
 
                 {/* Nova pasta */}

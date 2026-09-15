@@ -112,7 +112,7 @@ function toTag(row: TagRow): Tag {
  * first instead of stacking, so a burst of offline keystrokes queues once.
  */
 type PendingOp =
-  | { key: string; entityId: string; kind: "createNote"; payload: { id: string; title: string; body: string; folderId?: string; type?: "nota" | "desenho" } }
+  | { key: string; entityId: string; kind: "createNote"; payload: { id: string; title: string; body: string; folderId?: string } }
   | { key: string; entityId: string; kind: "updateNote"; payload: { id: string; patch: { title?: string; body?: string } } }
   | { key: string; entityId: string; kind: "setNotePinned"; payload: { id: string; pinned: boolean } }
   | { key: string; entityId: string; kind: "setNoteStatus"; payload: { id: string; status: NoteStatus } }
@@ -184,7 +184,7 @@ interface NotesStore {
   bulkRestore: (ids: string[]) => void;
   bulkTrash: (ids: string[]) => void;
   bulkDeletePermanently: (ids: string[]) => void;
-  addNote: (note: { title: string; body: string; folderId?: string; type?: "nota" | "desenho" }) => string;
+  addNote: (note: { title: string; body: string; folderId?: string }) => string;
   upsertNoteFromDb: (note: { id: string; title: string; body: string; type?: NoteType }) => void;
   updateNote: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
   /** Flips one checklist item's checked state directly from a card preview, by its index among all task items in the note. */
@@ -693,7 +693,7 @@ export const useNotesStore = create<NotesStore>()(
           });
       },
 
-      addNote: ({ title, body, folderId, type = "nota" }) => {
+      addNote: ({ title, body, folderId }) => {
         const id = crypto.randomUUID();
         const now = Date.now();
 
@@ -701,7 +701,7 @@ export const useNotesStore = create<NotesStore>()(
           notes: [
             {
               id,
-              type,
+              type: "nota" as const,
               title,
               body,
               meta: formatRelativeMeta(now),
@@ -710,14 +710,14 @@ export const useNotesStore = create<NotesStore>()(
               syncStatus: "local" as const,
               updatedAt: now,
               folderId,
-              vectorStatus: type === "nota" ? "pending" : "none",
+              vectorStatus: "pending",
               tagIds: [],
             },
             ...s.notes,
           ],
         }));
 
-        const op: PendingOp = { key: `note:${id}`, entityId: id, kind: "createNote", payload: { id, title, body, folderId, type } };
+        const op: PendingOp = { key: `note:${id}`, entityId: id, kind: "createNote", payload: { id, title, body, folderId } };
         void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
           if (outcome === "rejected") {
             set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));

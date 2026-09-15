@@ -36,14 +36,12 @@ export interface DrawingDoc {
 }
 
 /**
- * The page is a fixed logical size and every point is stored in these units,
- * so a note drawn on a phone replays identically on a tablet (and survives a
- * device rotation) instead of stretching with whatever viewport it was made
- * on. 1000×1414 is the A4 portrait ratio — the same "a page of paper" shape
- * every handwriting app shows.
+ * Ink is stored in a logical space whose width is always this, whatever the
+ * screen — so a note written on a phone keeps its proportions on a tablet.
+ * Height is deliberately unbounded: the ink layer is as tall as the note it
+ * covers, and the note grows as the user writes.
  */
 export const PAGE_WIDTH = 1000;
-export const PAGE_HEIGHT = 1414;
 
 /**
  * Ink colors are persisted user data, not theme chrome — a stroke drawn red
@@ -64,6 +62,17 @@ export const HIGHLIGHT_COLORS = ["#F2C744", "#7BE08A", "#6FC5F0", "#F08AC0"] as 
 
 export const PEN_SIZES = [3, 6, 12] as const;
 export const HIGHLIGHTER_SIZE = 28;
+
+/** Bottom-most ink, in logical units — the ink layer must stay at least this tall or strokes get clipped. */
+export function lowestInkY(strokes: Stroke[]): number {
+  let lowest = 0;
+  for (const stroke of strokes) {
+    for (const point of stroke.points) {
+      if (point[1] > lowest) lowest = point[1];
+    }
+  }
+  return lowest;
+}
 
 /** Radius, in page units, within which the eraser considers a stroke "touched". */
 const ERASER_RADIUS = 14;
