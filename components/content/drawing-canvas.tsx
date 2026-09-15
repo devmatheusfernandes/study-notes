@@ -33,6 +33,19 @@ interface DrawingCanvasProps {
   className?: string;
 }
 
+/** The element that actually scrolls behind the ink layer, or null when that's the page itself. */
+function scrollableAncestor(from: HTMLElement): HTMLElement | null {
+  let node = from.parentElement;
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 /**
  * A transparent ink layer sized to whatever it covers — in this app, the note
  * being written. It is absolutely positioned over the text rather than being
@@ -65,6 +78,7 @@ export function DrawingCanvas({
   const erasingRef = useRef(false);
   const erasedThisGestureRef = useRef(false);
   const penReportedRef = useRef(false);
+  const touchScrollRef = useRef<{ pointerId: number; lastY: number; target: HTMLElement | null } | null>(null);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -152,9 +166,19 @@ export function DrawingCanvas({
       penReportedRef.current = true;
       onPenDetected();
     }
-    // Palm rejection: with pen-only on, a hand resting on a tablet scrolls
-    // rather than painting over the writing.
-    if (penOnly && event.pointerType === "touch") return;
+    // Palm rejection: with pen-only on, a hand resting on a tablet scrolls the
+    // note rather than painting over the writing. The scrolling is done by
+    // hand here because the layer has to keep `touch-action: none` — see the
+    // note on the canvas element below.
+    if (penOnly && event.pointerType === "touch") {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      touchScrollRef.current = {
+        pointerId: event.pointerId,
+        lastY: event.clientY,
+        target: scrollableAncestor(event.currentTarget),
+      };
+      return;
+    }
     if (activePointerRef.current !== null) return;
 
     activePointerRef.current = event.pointerId;
@@ -181,6 +205,15 @@ export function DrawingCanvas({
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    const scrolling = touchScrollRef.current;
+    if (scrolling?.pointerId === event.pointerId) {
+      const delta = scrolling.lastY - event.clientY;
+      scrolling.lastY = event.clientY;
+      if (scrolling.target) scrolling.target.scrollBy(0, delta);
+      else window.scrollBy(0, delta);
+      return;
+    }
+
     if (!active || activePointerRef.current !== event.pointerId) return;
 
     if (erasingRef.current) {
@@ -210,6 +243,10 @@ export function DrawingCanvas({
   }
 
   function endStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (touchScrollRef.current?.pointerId === event.pointerId) {
+      touchScrollRef.current = null;
+      return;
+    }
     if (activePointerRef.current !== event.pointerId) return;
     activePointerRef.current = null;
 
@@ -248,9 +285,13 @@ export function DrawingCanvas({
           active ? (tool === "eraser" ? "cursor-cell" : "cursor-crosshair") : "pointer-events-none"
         )}
         style={{
-          // In pen-only mode touch keeps scrolling the note; otherwise touch
-          // *is* the pen, so the layer has to swallow the gesture.
-          touchAction: !active ? undefined : penOnly ? "pan-y" : "none",
+          // Never `pan-y`, not even in pen-only mode: `touch-action` can't be
+          // narrowed to one pointer type, so allowing the browser to pan meant
+          // it treated a *pen* drag as a scroll and cancelled the stroke a few
+          // pixels in — handwriting came out as dots. The layer swallows the
+          // gesture and pen-only mode scrolls by hand instead (see
+          // handlePointerDown).
+          touchAction: active ? "none" : undefined,
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
