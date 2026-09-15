@@ -83,6 +83,22 @@ export const IMAGE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 export const IMAGE_RATE_LIMIT_MAX_UPLOADS = 40;
 
 /**
+ * Voice recordings attached to a drawing note (see lib/drawing/strokes.ts).
+ * Private like `files` — a recording of the user's own voice is as personal as
+ * the note's text — so playback goes through a signed URL, not a public one.
+ *
+ * Unlike every other bucket here, the browser uploads to it *directly* via a
+ * service-role-issued signed upload URL (see app/(app)/drawing-actions.ts): a
+ * long recording easily passes Vercel's hard ~4.5 MB Serverless request-body
+ * cap, which `serverActions.bodySizeLimit` cannot raise (same constraint
+ * JWPUB_MEDIA_BATCH_MAX_BYTES exists for).
+ */
+export const NOTE_AUDIO_BUCKET = "note-audio";
+
+/** 40 MB — roughly 6+ hours of the Opus bitrate MediaRecorder produces for speech. */
+export const MAX_AUDIO_SIZE = 40 * 1024 * 1024;
+
+/**
  * Illustrations extracted out of a `.jwpub` archive. Public-read for the same
  * reason as `note-images` (an <img src> in stored chapter HTML needs a stable
  * URL), but kept in its own bucket so deleting a publication is a single

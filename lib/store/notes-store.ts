@@ -33,6 +33,7 @@ import {
 import { toggleChecklistItemInHtml } from "@/lib/note-preview";
 import { removedNoteImagePaths } from "@/lib/note-images";
 import { deleteNoteImages } from "@/app/(app)/note-images-actions";
+import { saveDrawing } from "@/app/(app)/drawing-actions";
 
 export type { NoteType };
 export type NoteStatus = "active" | "archived" | "trashed";
@@ -117,6 +118,7 @@ type PendingOp =
   | { key: string; entityId: string; kind: "setNoteStatus"; payload: { id: string; status: NoteStatus } }
   | { key: string; entityId: string; kind: "setNoteFolder"; payload: { id: string; folderId?: string } }
   | { key: string; entityId: string; kind: "deleteNote"; payload: { id: string } }
+  | { key: string; entityId: string; kind: "saveDrawing"; payload: { id: string; strokes: string } }
   | { key: string; entityId: string; kind: "createFolder"; payload: { id: string; name: string; parentId?: string } }
   | { key: string; entityId: string; kind: "renameFolder"; payload: { id: string; name: string } }
   | { key: string; entityId: string; kind: "deleteFolder"; payload: { id: string } }
@@ -187,6 +189,8 @@ interface NotesStore {
   updateNote: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
   /** Flips one checklist item's checked state directly from a card preview, by its index among all task items in the note. */
   toggleChecklistItem: (id: string, itemIndex: number) => void;
+  /** Persists a drawing note's strokes through the same offline outbox as every other mutation — the strokes themselves live in `note_drawings`, not in this store. */
+  saveDrawingStrokes: (id: string, strokes: string) => void;
 }
 
 /** Runs a Server Action; a thrown error means the request never reached the origin (offline), so it's queued instead of surfaced as a failure. Returns which of the two happened. */
@@ -242,6 +246,8 @@ function opAction(op: PendingOp): () => Promise<{ error?: string }> {
       return () => setNoteFolderRow(op.payload.id, op.payload.folderId ?? null);
     case "deleteNote":
       return () => deleteNoteRowPermanently(op.payload.id);
+    case "saveDrawing":
+      return () => saveDrawing(op.payload.id, op.payload.strokes);
     case "createFolder":
       return () => createFolderRow(op.payload);
     case "renameFolder":
@@ -813,6 +819,29 @@ export const useNotesStore = create<NotesStore>()(
         const note = get().notes.find((n) => n.id === id);
         if (!note) return;
         get().updateNote(id, { body: toggleChecklistItemInHtml(note.body, itemIndex) });
+      },
+
+      saveDrawingStrokes: (id, strokes) => {
+        const now = Date.now();
+        set((s) => ({
+          notes: s.notes.map((n) =>
+            n.id === id ? { ...n, updatedAt: now, meta: formatRelativeMeta(now), syncStatus: "local" as const } : n
+          ),
+        }));
+
+        // One slot per drawing: a page is saved whole, so a queued save is
+        // always superseded by the next one rather than stacking.
+        const op: PendingOp = { key: `drawing:${id}`, entityId: id, kind: "saveDrawing", payload: { id, strokes } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          set((s) => ({
+            notes: s.notes.map((n) =>
+              n.id === id
+                ? { ...n, syncStatus: outcome === "synced" ? "synced" : outcome === "queued" ? "local" : "offline" }
+                : n
+            ),
+          }));
+          if (outcome === "rejected") notify.error("Não foi possível salvar o desenho");
+        });
       },
     }),
     {

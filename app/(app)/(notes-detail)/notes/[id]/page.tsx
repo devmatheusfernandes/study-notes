@@ -5,6 +5,7 @@ import { JwpubReader } from "@/components/content/jwpub-reader";
 import { PdfReader } from "@/components/content/pdf-reader";
 import { getPublication } from "@/app/(app)/jwpub-actions";
 import { getNoteRow } from "@/app/(app)/notes-actions";
+import { getDrawing } from "@/app/(app)/drawing-actions";
 
 export const metadata: Metadata = {
   title: "Nota — Study Notes",
@@ -38,6 +39,10 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
     return <PdfReader noteId={id} initialNote={note} />;
   }
 
-  return <NoteEditor noteId={id} initialNote={note} />;
+  // Any note can carry a handwriting layer and a recording over its text, so
+  // this is fetched for every note rather than gated on a note "type".
+  const drawing = await getDrawing(id);
+
+  return <NoteEditor noteId={id} initialNote={note} initialDrawing={drawing} />;
 }
 
