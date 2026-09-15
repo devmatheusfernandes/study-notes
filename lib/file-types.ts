@@ -2,7 +2,7 @@
 // server upload action, so it must not pull in "use client" or "use server"
 // code from either side (that would create a circular import).
 
-export type NoteType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "jwlibrary" | "arquivo";
+export type NoteType = "nota" | "pdf" | "docx" | "xlsx" | "jwpub" | "jwlibrary" | "desenho" | "arquivo";
 
 /** Maps an uploaded file's extension onto one of our card types. */
 export function typeFromFileName(name: string): NoteType {

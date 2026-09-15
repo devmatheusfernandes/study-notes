@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { deleteStorageFile } from "./files-actions";
 import { deleteNoteImages } from "./note-images-actions";
 import { deletePublicationMediaForNote } from "./jwpub-actions";
+import { deleteDrawingAudioForNotes } from "./drawing-actions";
 import { extractNoteImagePaths } from "@/lib/note-images";
 import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
@@ -150,9 +151,12 @@ export async function createNoteRow(input: {
   title: string;
   body: string;
   folderId?: string;
+  type?: "nota" | "desenho";
 }): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada. Entre novamente." };
+
+  const type = input.type ?? "nota";
 
   const { error } = await supabase.from("notes").insert({
     id: input.id,
@@ -160,10 +164,12 @@ export async function createNoteRow(input: {
     title: encryptText(input.title),
     body: encryptText(input.body),
     folder_id: input.folderId ?? null,
-    type: "nota",
+    type,
   });
 
-  if (!error) {
+  // A drawing note's content is strokes, not text — there's nothing for the
+  // embedding to index beyond a title it doesn't have yet.
+  if (!error && type === "nota") {
     void enqueueNoteForVectorization(input.id);
   }
 
@@ -250,6 +256,7 @@ export async function deleteNotePermanently(id: string): Promise<{ error?: strin
   if (body) await deleteNoteImages(extractNoteImagePaths(body));
   // Publication rows cascade from `notes`, but their Storage media doesn't.
   if (note?.type === "jwpub") await deletePublicationMediaForNote(id);
+  if (note?.type === "desenho") await deleteDrawingAudioForNotes([id]);
 
   const { error } = await supabase.from("notes").delete().eq("id", id);
   return error ? { error: "Não foi possível excluir." } : {};
@@ -266,10 +273,12 @@ export async function bulkDeleteNotesPermanently(ids: string[]): Promise<{ error
     return body ? extractNoteImagePaths(body) : [];
   });
   const publicationIds = (notes ?? []).filter((n) => n.type === "jwpub").map((n) => n.id);
+  const drawingIds = (notes ?? []).filter((n) => n.type === "desenho").map((n) => n.id);
   await Promise.all([
     ...filePaths.map((p) => deleteStorageFile(p)),
     deleteNoteImages(imagePaths),
     ...publicationIds.map((noteId) => deletePublicationMediaForNote(noteId)),
+    deleteDrawingAudioForNotes(drawingIds),
   ]);
 
   const { error } = await supabase.from("notes").delete().in("id", ids);
