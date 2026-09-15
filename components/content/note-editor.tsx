@@ -15,6 +15,7 @@ import { DrawingCanvas } from "@/components/content/drawing-canvas";
 import { DrawingToolbar } from "@/components/content/drawing-toolbar";
 import { NoteAudioPlayer } from "@/components/content/note-audio-player";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { bodyToPlainText } from "@/lib/note-preview";
 import { shareNote } from "@/lib/share";
 import { useHydrated } from "@/components/providers/store-hydration";
@@ -132,6 +133,8 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const [penSize, setPenSize] = useState<number>(PEN_SIZES[1]);
   const [clearInkOpen, setClearInkOpen] = useState(false);
   const inkDirtyRef = useRef(false);
+  const penOnly = usePreferencesStore((s) => s.penOnly);
+  const setPenOnly = usePreferencesStore((s) => s.setPenOnly);
 
   // The ink layer must stay tall enough to hold every stroke even if the text
   // under it later shrinks — otherwise handwriting past the new bottom is
@@ -401,6 +404,23 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     if (recording) await uploadRecording(recording);
   }
 
+  const isRecordingNow = recorder.state === "recording" || recorder.state === "paused";
+
+  /** Leaving mid-recording would drop the take on the floor — close it out first, then navigate. */
+  async function leaveNote() {
+    if (isRecordingNow) await stopRecording();
+    if (onBack) onBack();
+    else router.push("/notes");
+  }
+
+  // Reloading or closing the tab can't be awaited, so all this can do is ask.
+  useEffect(() => {
+    if (!isRecordingNow) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isRecordingNow]);
+
   // ── Playback ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!audioPath || audioUrl) return;
@@ -487,7 +507,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             variant="ghost"
             size="sm"
             leftIcon={<ArrowLeft />}
-            onClick={() => (onBack ? onBack() : router.push("/notes"))}
+            onClick={() => void leaveNote()}
           >
             Voltar
           </Button>
@@ -553,6 +573,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 size={tool === "highlighter" ? HIGHLIGHTER_SIZE : penSize}
                 canUndo={past.length > 0}
                 canRedo={future.length > 0}
+                penOnly={penOnly}
                 recorderState={recorder.state}
                 recordingElapsedMs={recorder.elapsedMs}
                 onToolChange={setTool}
@@ -561,7 +582,10 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 onUndo={undoInk}
                 onRedo={redoInk}
                 onClear={() => setClearInkOpen(true)}
+                onPenOnlyChange={setPenOnly}
                 onStartRecording={() => void startRecording()}
+                onPauseRecording={recorder.pause}
+                onResumeRecording={recorder.resume}
                 onStopRecording={() => void stopRecording()}
               />
             )}
@@ -617,6 +641,11 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             color={inkColor}
             size={tool === "highlighter" ? HIGHLIGHTER_SIZE : penSize}
             active={penMode && !isPlaying}
+            penOnly={penOnly}
+            // A stylus showing up is proof this device has one, so palm
+            // rejection turns itself on the first time the pen touches the
+            // screen — the toolbar's own toggle then overrides it either way.
+            onPenDetected={() => setPenOnly(true)}
             revealUntilMs={revealUntilMs}
             recordingElapsed={recorder.elapsedNow}
             onCommitStroke={commitStroke}

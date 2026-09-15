@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type RecorderState = "idle" | "recording" | "saving";
+export type RecorderState = "idle" | "recording" | "paused" | "saving";
 
 export interface Recording {
   blob: Blob;
@@ -32,18 +32,31 @@ export function useAudioRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const startedAtRef = useRef<number | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /**
+   * Recorded time is summed per segment rather than measured from a single
+   * start: pausing stops the audio advancing, so a wall-clock elapsed would
+   * drift past it by however long the pause lasted — and every stroke stamped
+   * after that would replay at the wrong moment.
+   */
+  const accumulatedRef = useRef(0);
+  const segmentStartedAtRef = useRef<number | null>(null);
 
   /**
    * Read synchronously by the canvas to stamp each stroke onto the recording's
    * timeline — a ref, not the state above, because a stroke starting between
-   * two 200ms ticks must still land at its real moment.
+   * two 200ms ticks must still land at its real moment. `undefined` means
+   * "no recording in progress", which is what makes a stroke always-visible.
    */
-  const elapsedNow = useCallback(
-    () => (startedAtRef.current === null ? undefined : performance.now() - startedAtRef.current),
-    []
-  );
+  const elapsedNow = useCallback(() => {
+    if (segmentStartedAtRef.current === null) {
+      // Paused still counts as "in this recording": ink drawn while paused
+      // belongs at the moment the audio was paused, not outside the timeline.
+      return recorderRef.current ? accumulatedRef.current : undefined;
+    }
+    return accumulatedRef.current + (performance.now() - segmentStartedAtRef.current);
+  }, []);
 
   const cleanup = useCallback(() => {
     if (tickRef.current) clearInterval(tickRef.current);
@@ -51,7 +64,8 @@ export function useAudioRecorder() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     recorderRef.current = null;
-    startedAtRef.current = null;
+    accumulatedRef.current = 0;
+    segmentStartedAtRef.current = null;
   }, []);
 
   useEffect(() => cleanup, [cleanup]);
@@ -82,23 +96,42 @@ export function useAudioRecorder() {
     // A timeslice keeps chunks flowing instead of buffering the whole take in
     // one blob, so a long recording doesn't sit entirely in memory.
     recorder.start(1000);
-    startedAtRef.current = performance.now();
+    accumulatedRef.current = 0;
+    segmentStartedAtRef.current = performance.now();
     setElapsedMs(0);
     setState("recording");
 
-    tickRef.current = setInterval(() => {
-      if (startedAtRef.current !== null) setElapsedMs(performance.now() - startedAtRef.current);
-    }, 200);
+    tickRef.current = setInterval(() => setElapsedMs(elapsedNow() ?? 0), 200);
 
     return {};
-  }, [state]);
+  }, [state, elapsedNow]);
+
+  const pause = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== "recording") return;
+    recorder.pause();
+    if (segmentStartedAtRef.current !== null) {
+      accumulatedRef.current += performance.now() - segmentStartedAtRef.current;
+      segmentStartedAtRef.current = null;
+    }
+    setElapsedMs(accumulatedRef.current);
+    setState("paused");
+  }, []);
+
+  const resume = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== "paused") return;
+    recorder.resume();
+    segmentStartedAtRef.current = performance.now();
+    setState("recording");
+  }, []);
 
   const stop = useCallback(async (): Promise<Recording | null> => {
     const recorder = recorderRef.current;
-    if (!recorder || state !== "recording") return null;
+    if (!recorder || (state !== "recording" && state !== "paused")) return null;
 
-    setState("saving");
     const durationMs = elapsedNow() ?? 0;
+    setState("saving");
     const extension = recorder.mimeType.includes("mp4") ? ("mp4" as const) : ("webm" as const);
 
     // Dropping the `;codecs=opus` suffix matters: Supabase validates a bucket's
@@ -109,6 +142,7 @@ export function useAudioRecorder() {
 
     const blob = await new Promise<Blob>((resolve) => {
       recorder.onstop = () => resolve(new Blob(chunksRef.current, { type: baseMimeType }));
+      // A paused recorder still needs an explicit stop to flush its last chunk.
       recorder.stop();
     });
 
@@ -119,5 +153,5 @@ export function useAudioRecorder() {
     return { blob, durationMs, extension };
   }, [state, elapsedNow, cleanup]);
 
-  return { state, elapsedMs, elapsedNow, start, stop };
+  return { state, elapsedMs, elapsedNow, start, pause, resume, stop };
 }

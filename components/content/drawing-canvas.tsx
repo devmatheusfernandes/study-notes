@@ -19,6 +19,10 @@ interface DrawingCanvasProps {
   size: number;
   /** False when the note is in typing mode (or replaying): the layer shows ink but lets every event through to the text underneath. */
   active: boolean;
+  /** Only a stylus draws; touch scrolls the note instead. A mouse still draws either way — this is about a resting palm, not about pointing devices. */
+  penOnly: boolean;
+  /** Fired the first time a real stylus is seen, so the host can switch `penOnly` on by itself. */
+  onPenDetected: () => void;
   /** Renders only the ink drawn up to this position on the recording timeline. */
   revealUntilMs?: number;
   /** Current position on the recording timeline, or undefined when not recording — stamped onto each stroke so playback can replay it. */
@@ -41,6 +45,8 @@ export function DrawingCanvas({
   color,
   size,
   active,
+  penOnly,
+  onPenDetected,
   revealUntilMs,
   recordingElapsed,
   onCommitStroke,
@@ -58,14 +64,7 @@ export function DrawingCanvas({
   const activePointerRef = useRef<number | null>(null);
   const erasingRef = useRef(false);
   const erasedThisGestureRef = useRef(false);
-  /**
-   * Palm rejection: once a real stylus has touched this note, finger contact
-   * stops drawing and goes back to scrolling the page. Without it the hand
-   * resting on a tablet paints over the writing — and there's no way to tell a
-   * palm from a deliberate finger stroke except by trusting the pen when one
-   * is present.
-   */
-  const [penSeen, setPenSeen] = useState(false);
+  const penReportedRef = useRef(false);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -149,8 +148,13 @@ export function DrawingCanvas({
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!active) return;
-    if (event.pointerType === "pen") setPenSeen(true);
-    else if (penSeen && event.pointerType === "touch") return;
+    if (event.pointerType === "pen" && !penReportedRef.current) {
+      penReportedRef.current = true;
+      onPenDetected();
+    }
+    // Palm rejection: with pen-only on, a hand resting on a tablet scrolls
+    // rather than painting over the writing.
+    if (penOnly && event.pointerType === "touch") return;
     if (activePointerRef.current !== null) return;
 
     activePointerRef.current = event.pointerId;
@@ -244,10 +248,9 @@ export function DrawingCanvas({
           active ? (tool === "eraser" ? "cursor-cell" : "cursor-crosshair") : "pointer-events-none"
         )}
         style={{
-          // With a stylus in play, touch goes back to scrolling the note and
-          // only the pen draws. Without one, touch *is* the pen, so scrolling
-          // means leaving pen mode.
-          touchAction: !active ? undefined : penSeen ? "pan-y" : "none",
+          // In pen-only mode touch keeps scrolling the note; otherwise touch
+          // *is* the pen, so the layer has to swallow the gesture.
+          touchAction: !active ? undefined : penOnly ? "pan-y" : "none",
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

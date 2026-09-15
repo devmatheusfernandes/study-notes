@@ -1,6 +1,6 @@
 "use client";
 
-import { Eraser, Highlighter, Mic, Pen, Redo2, Square, Trash2, Undo2 } from "lucide-react";
+import { Eraser, Hand, Highlighter, Mic, Pause, Pen, Play, Redo2, Square, Trash2, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,7 @@ interface DrawingToolbarProps {
   size: number;
   canUndo: boolean;
   canRedo: boolean;
+  penOnly: boolean;
   recorderState: RecorderState;
   recordingElapsedMs: number;
   onToolChange: (tool: DrawTool) => void;
@@ -25,7 +26,10 @@ interface DrawingToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
+  onPenOnlyChange: (penOnly: boolean) => void;
   onStartRecording: () => void;
+  onPauseRecording: () => void;
+  onResumeRecording: () => void;
   onStopRecording: () => void;
 }
 
@@ -46,6 +50,7 @@ export function DrawingToolbar({
   size,
   canUndo,
   canRedo,
+  penOnly,
   recorderState,
   recordingElapsedMs,
   onToolChange,
@@ -54,11 +59,15 @@ export function DrawingToolbar({
   onUndo,
   onRedo,
   onClear,
+  onPenOnlyChange,
   onStartRecording,
+  onPauseRecording,
+  onResumeRecording,
   onStopRecording,
 }: DrawingToolbarProps) {
   const palette = tool === "highlighter" ? HIGHLIGHT_COLORS : INK_COLORS;
   const isRecording = recorderState === "recording";
+  const isPaused = recorderState === "paused";
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 rounded-full border border-border bg-card/90 px-2 py-1.5 backdrop-blur-md">
@@ -145,16 +154,54 @@ export function DrawingToolbar({
 
       <span className="h-5 w-px bg-border" aria-hidden />
 
-      {isRecording ? (
-        <Button
-          variant="destructive"
-          size="sm"
-          leftIcon={<Square className="size-3 fill-current" />}
-          onClick={onStopRecording}
-          className="font-mono tabular-nums"
-        >
-          {formatTime(recordingElapsedMs)}
-        </Button>
+      <Button
+        variant={penOnly ? "secondary" : "ghost"}
+        size="sm"
+        aria-label="Escrever só com a caneta"
+        aria-pressed={penOnly}
+        onClick={() => onPenOnlyChange(!penOnly)}
+        className={cn("px-2.5", penOnly && "text-accent")}
+      >
+        <Hand className="size-4" />
+      </Button>
+
+      <span className="h-5 w-px bg-border" aria-hidden />
+
+      {isRecording || isPaused ? (
+        <div className="flex items-center gap-1">
+          <Button
+            variant={isPaused ? "secondary" : "ghost"}
+            size="sm"
+            aria-label={isPaused ? "Retomar gravação" : "Pausar gravação"}
+            onClick={isPaused ? onResumeRecording : onPauseRecording}
+            className="px-2.5"
+          >
+            {isPaused ? <Play className="size-4" /> : <Pause className="size-4" />}
+          </Button>
+          <span
+            className={cn(
+              "flex items-center gap-1.5 font-mono text-[12px] tabular-nums",
+              isPaused ? "text-muted-foreground" : "text-destructive"
+            )}
+          >
+            <span
+              className={cn(
+                "size-2 rounded-full",
+                isPaused ? "bg-muted-foreground" : "animate-pulse bg-destructive"
+              )}
+            />
+            {formatTime(recordingElapsedMs)}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Encerrar gravação"
+            onClick={onStopRecording}
+            className="px-2.5 text-destructive"
+          >
+            <Square className="size-3.5 fill-current" />
+          </Button>
+        </div>
       ) : (
         <Button
           variant="ghost"
