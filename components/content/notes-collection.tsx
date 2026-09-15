@@ -466,8 +466,11 @@ export function NotesCollection({
                 <FolderCard
                   key={folder.id}
                   name={folder.name}
+                  // Subfolders count too: a folder holding nothing but other
+                  // folders was reporting "0 itens" while visibly not empty.
                   itemCount={
-                    notes.filter((n) => n.folderId === folder.id && n.status === "active").length
+                    notes.filter((n) => n.folderId === folder.id && n.status === "active").length +
+                    folders.filter((f) => f.parentId === folder.id).length
                   }
                   onOpen={() => setActiveFolder(folder.id)}
                   onRename={(name) => renameFolder(folder.id, name)}
