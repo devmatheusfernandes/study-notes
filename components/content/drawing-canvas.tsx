@@ -33,6 +33,13 @@ interface DrawingCanvasProps {
   className?: string;
 }
 
+/**
+ * Ceiling on each layer's backing store, in device pixels (~12 MP ≈ 48 MB).
+ * The ink layer is as tall as the note, so without a cap a long one asks the
+ * browser for a buffer it won't give.
+ */
+const MAX_CANVAS_PIXELS = 12_000_000;
+
 /** The element that actually scrolls behind the ink layer, or null when that's the page itself. */
 function scrollableAncestor(from: HTMLElement): HTMLElement | null {
   let node = from.parentElement;
@@ -79,6 +86,7 @@ export function DrawingCanvas({
   const erasedThisGestureRef = useRef(false);
   const penReportedRef = useRef(false);
   const touchScrollRef = useRef<{ pointerId: number; lastY: number; target: HTMLElement | null } | null>(null);
+  const liveDirtyRef = useRef<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -91,11 +99,28 @@ export function DrawingCanvas({
     return () => observer.disconnect();
   }, []);
 
-  /** Puts a canvas into logical units at device resolution, so ink stays crisp on a retina tablet. */
-  const prepare = useCallback(
+  /** Page height in the same logical units as the stored points. */
+  const logicalHeight = box.width > 0 ? (box.height * PAGE_WIDTH) / box.width : 0;
+
+  /**
+   * Sizes a canvas and puts it into logical units. Does NOT clear — callers
+   * clear only what they're about to repaint, which for the live layer is a
+   * small box rather than the whole note.
+   */
+  const configure = useCallback(
     (canvas: HTMLCanvasElement | null) => {
       if (!canvas || box.width === 0 || box.height === 0) return null;
-      const dpr = window.devicePixelRatio || 1;
+
+      // A note grows as it's written on, and a full-height canvas at native
+      // device resolution gets enormous — a few screens of writing on a 3x
+      // tablet is hundreds of MB per layer, past what the browser will even
+      // allocate (it hands back a blank canvas) and enough to take the tab
+      // down. Resolution is capped by total area instead, which only starts
+      // costing sharpness on notes far longer than a screen.
+      const area = box.width * box.height;
+      const maxScale = area > 0 ? Math.sqrt(MAX_CANVAS_PIXELS / area) : 1;
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, maxScale));
+
       const pixelWidth = Math.round(box.width * dpr);
       const pixelHeight = Math.round(box.height * dpr);
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -105,18 +130,28 @@ export function DrawingCanvas({
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const unit = (box.width * dpr) / PAGE_WIDTH;
+      const unit = pixelWidth / PAGE_WIDTH;
       ctx.scale(unit, unit);
       return ctx;
     },
     [box]
   );
 
+  const clearLive = useCallback(() => {
+    const ctx = configure(liveRef.current);
+    const dirty = liveDirtyRef.current;
+    if (ctx && dirty) {
+      ctx.clearRect(dirty.minX, dirty.minY, dirty.maxX - dirty.minX, dirty.maxY - dirty.minY);
+    }
+    return ctx;
+  }, [configure]);
+
   useEffect(() => {
-    const ctx = prepare(baseRef.current);
-    if (ctx) renderStrokes(ctx, strokes, revealUntilMs);
-  }, [strokes, revealUntilMs, prepare]);
+    const ctx = configure(baseRef.current);
+    if (!ctx) return;
+    ctx.clearRect(0, 0, PAGE_WIDTH, logicalHeight);
+    renderStrokes(ctx, strokes, revealUntilMs);
+  }, [strokes, revealUntilMs, configure, logicalHeight]);
 
   const toPagePoint = useCallback(
     (clientX: number, clientY: number) => {
@@ -133,16 +168,38 @@ export function DrawingCanvas({
   );
 
   const drawLive = useCallback(() => {
-    const ctx = prepare(liveRef.current);
-    if (!ctx || pointsRef.current.length === 0) return;
+    const ctx = clearLive();
+    const points = pointsRef.current;
+    if (!ctx || points.length === 0) return;
+
     drawStroke(ctx, {
       id: "live",
       color,
       size,
       tool: tool === "highlighter" ? "highlighter" : "pen",
-      points: pointsRef.current,
+      points,
     });
-  }, [prepare, color, size, tool]);
+
+    // Remember what was painted so the next frame clears only that, instead of
+    // wiping a canvas that may be several screens tall on every pointermove.
+    const pad = size * 2 + 8;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const point of points) {
+      if (point[0] < minX) minX = point[0];
+      if (point[0] > maxX) maxX = point[0];
+      if (point[1] < minY) minY = point[1];
+      if (point[1] > maxY) maxY = point[1];
+    }
+    liveDirtyRef.current = {
+      minX: minX - pad,
+      minY: minY - pad,
+      maxX: maxX + pad,
+      maxY: maxY + pad,
+    };
+  }, [clearLive, color, size, tool]);
 
   function pushPoint(event: React.PointerEvent, clientX: number, clientY: number, pressure: number) {
     const point = toPagePoint(clientX, clientY);
@@ -260,9 +317,10 @@ export function DrawingCanvas({
     pointsRef.current = [];
     strokeStartRef.current = null;
 
-    // `prepare` clears as it re-establishes the transform — the live layer is
-    // wiped here because the stroke is about to be handed to the base layer.
-    prepare(liveRef.current);
+    // The stroke is about to be handed to the base layer, so the live one has
+    // to give it up in the same frame or it shows through twice.
+    clearLive();
+    liveDirtyRef.current = null;
 
     if (!start || points.length === 0) return;
     onCommitStroke({

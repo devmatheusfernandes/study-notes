@@ -140,33 +140,32 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // under it later shrinks — otherwise handwriting past the new bottom is
   // clipped, and can't be erased because it no longer has a surface.
   const inkWrapRef = useRef<HTMLDivElement>(null);
-  const textColumnRef = useRef<HTMLDivElement>(null);
   const [inkWrapWidth, setInkWrapWidth] = useState(0);
-  const [textColumnHeight, setTextColumnHeight] = useState(0);
   useEffect(() => {
     const wrap = inkWrapRef.current;
-    const column = textColumnRef.current;
-    if (!wrap || !column) return;
-    const observer = new ResizeObserver(() => {
-      setInkWrapWidth(wrap.getBoundingClientRect().width);
-      setTextColumnHeight(column.getBoundingClientRect().height);
-    });
+    if (!wrap) return;
+    // Width only, never height. The text column inside stretches to this
+    // element, so sizing this element from a measurement of that one is a
+    // feedback loop: the note grew without bound, scrolled by itself and took
+    // the browser down with it. Height must come from things layout can't
+    // change — here, the strokes themselves.
+    const observer = new ResizeObserver(() => setInkWrapWidth(wrap.getBoundingClientRect().width));
     observer.observe(wrap);
-    observer.observe(column);
     return () => observer.disconnect();
   }, []);
 
   /**
    * Room to keep writing. Rather than Samsung Notes' drag-to-add-a-page
-   * gesture, the note simply always keeps a screenful of blank space below
-   * whatever is lowest on it while the pen is out — so writing to the bottom
-   * extends the page by itself and there's no page boundary to manage. The
-   * space collapses again when the pen is put away, so a typed note is never
+   * gesture, the note keeps a screenful of blank space below its lowest
+   * content while the pen is out — so writing toward the bottom extends the
+   * page by itself and there's no page boundary to manage. Two independent,
+   * non-circular pieces: this minimum keeps space under the lowest *stroke*,
+   * and the spacer at the end of the text column keeps space under the
+   * *text*. Both collapse when the pen is put away, so a typed note is never
    * padded with emptiness.
    */
   const inkBottom = inkWrapWidth > 0 ? (lowestInkY(strokes) + 40) * (inkWrapWidth / PAGE_WIDTH) : 0;
-  const contentBottom = Math.max(inkBottom, textColumnHeight);
-  const inkMinHeight = penMode ? `calc(${contentBottom}px + 60svh)` : `${inkBottom}px`;
+  const inkMinHeight = penMode ? `calc(${inkBottom}px + 60svh)` : `${inkBottom}px`;
 
   // ── Voice recording ───────────────────────────────────────────────────────
   const recorder = useAudioRecorder();
@@ -598,26 +597,32 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               />
             )}
 
-            <div className={cn("flex items-center gap-1", !penMode && "ml-auto")}>
-              <button
-                type="button"
-                onClick={async () => {
-                  const result = await shareNote(title || "Nova nota", bodyToPlainText(body));
-                  if (result === "copied") notify.success("Copiado", "O conteúdo da nota foi copiado.");
-                }}
-                aria-label="Compartilhar nota"
-                className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                <Share className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => editorRef.current?.openImagePicker()}
-                aria-label="Inserir imagem"
-                className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                <ImagePlus className="size-4" />
-              </button>
+            <div className={cn("flex shrink-0 items-center gap-1", !penMode && "ml-auto")}>
+              {/* Sharing and image insert belong to typing — while the pen is
+                  out they'd only crowd the toolbar beside them. */}
+              {!penMode && (
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const result = await shareNote(title || "Nova nota", bodyToPlainText(body));
+                      if (result === "copied") notify.success("Copiado", "O conteúdo da nota foi copiado.");
+                    }}
+                    aria-label="Compartilhar nota"
+                    className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    <Share className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editorRef.current?.openImagePicker()}
+                    aria-label="Inserir imagem"
+                    className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    <ImagePlus className="size-4" />
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setPenMode((on) => !on)}
@@ -690,10 +695,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             width — handwriting shouldn't stop at a margin the typing happens
             to use. */}
         <div ref={inkWrapRef} className="relative flex flex-1 flex-col" style={{ minHeight: inkMinHeight }}>
-          <div
-            ref={textColumnRef}
-            className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6"
-          >
+          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6">
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -715,6 +717,10 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               notes={noteMentionOptions}
               onReferenceClick={setOpenReference}
             />
+
+            {/* Blank paper below the text while the pen is out. Real content
+                rather than a computed height, so nothing has to be measured. */}
+            {penMode && <div className="h-[60svh] shrink-0" aria-hidden />}
           </div>
 
           <DrawingCanvas
