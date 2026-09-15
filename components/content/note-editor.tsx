@@ -565,7 +565,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
         </header>
 
         {(penMode || audioPath !== null || pendingUpload) && (
-          <div className="sticky top-0 z-20 flex flex-col items-center gap-2 bg-background/85 px-3 py-2 backdrop-blur-md">
+          <div className="sticky top-0 z-20 flex flex-col gap-2 bg-background/85 px-3 py-2 backdrop-blur-md">
             {penMode && (
               <DrawingToolbar
                 tool={tool}
@@ -590,19 +590,21 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               />
             )}
             {(audioPath !== null || pendingUpload) && (
-              <NoteAudioPlayer
-                isPlaying={isPlaying}
-                positionMs={positionMs}
-                durationMs={audioDurationMs}
-                pendingUpload={pendingUpload}
-                onTogglePlay={togglePlay}
-                onSeek={seek}
-                onRetryUpload={() => {
-                  const recording = pendingRecordingRef.current;
-                  if (recording) void uploadRecording(recording);
-                }}
-                onDelete={() => void removeAudio()}
-              />
+              <div className="flex justify-center">
+                <NoteAudioPlayer
+                  isPlaying={isPlaying}
+                  positionMs={positionMs}
+                  durationMs={audioDurationMs}
+                  pendingUpload={pendingUpload}
+                  onTogglePlay={togglePlay}
+                  onSeek={seek}
+                  onRetryUpload={() => {
+                    const recording = pendingRecordingRef.current;
+                    if (recording) void uploadRecording(recording);
+                  }}
+                  onDelete={() => void removeAudio()}
+                />
+              </div>
             )}
           </div>
         )}

@@ -276,13 +276,19 @@ export function DrawingCanvas({
   }
 
   return (
-    <div ref={wrapRef} className={cn("absolute inset-0", className)} aria-hidden={!active}>
-      <canvas ref={baseRef} className="pointer-events-none absolute inset-0 size-full" />
+    // The wrapper must stay `pointer-events-none`: it spans the whole note, so
+    // with the default it swallows every tap meant for the text underneath —
+    // the ink layer would silently make the note impossible to type in. Only
+    // the live canvas opts back in, and only while drawing is active.
+    <div ref={wrapRef} className={cn("pointer-events-none absolute inset-0", className)} aria-hidden={!active}>
+      <canvas ref={baseRef} className="absolute inset-0 size-full" />
       <canvas
         ref={liveRef}
         className={cn(
           "absolute inset-0 size-full",
-          active ? (tool === "eraser" ? "cursor-cell" : "cursor-crosshair") : "pointer-events-none"
+          active
+            ? cn("pointer-events-auto", tool === "eraser" ? "cursor-cell" : "cursor-crosshair")
+            : null
         )}
         style={{
           // Never `pan-y`, not even in pen-only mode: `touch-action` can't be

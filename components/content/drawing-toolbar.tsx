@@ -70,150 +70,155 @@ export function DrawingToolbar({
   const isPaused = recorderState === "paused";
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 rounded-full border border-border bg-card/90 px-2 py-1.5 backdrop-blur-md">
-      <div className="flex items-center gap-1">
-        {TOOLS.map((item) => (
-          <Button
-            key={item.id}
-            variant={tool === item.id ? "secondary" : "ghost"}
-            size="sm"
-            aria-pressed={tool === item.id}
-            aria-label={item.label}
-            onClick={() => onToolChange(item.id)}
-            className={cn("px-2.5", tool === item.id && "text-accent")}
-          >
-            <item.icon className="size-4" />
-          </Button>
-        ))}
-      </div>
+    // Scrolls sideways rather than wrapping or squeezing: on a phone the full
+    // set of tools can't fit a single line, and wrapping pushed the note's own
+    // content down by a whole row every time pen mode was on.
+    <div className="w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mx-auto flex w-max items-center gap-2 rounded-full border border-border bg-card/90 px-2 py-1.5 backdrop-blur-md">
+        <div className="flex shrink-0 items-center gap-1">
+          {TOOLS.map((item) => (
+            <Button
+              key={item.id}
+              variant={tool === item.id ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={tool === item.id}
+              aria-label={item.label}
+              onClick={() => onToolChange(item.id)}
+              className={cn("px-2.5", tool === item.id && "text-accent")}
+            >
+              <item.icon className="size-4" />
+            </Button>
+          ))}
+        </div>
 
-      <span className="h-5 w-px bg-border" aria-hidden />
+        <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
 
-      {tool !== "eraser" && (
-        <>
-          <div className="flex items-center gap-1.5">
-            {palette.map((swatch) => (
-              <button
-                key={swatch}
-                type="button"
-                aria-label={`Cor ${swatch}`}
-                aria-pressed={color === swatch}
-                onClick={() => onColorChange(swatch)}
-                style={{ backgroundColor: swatch }}
-                className={cn(
-                  "size-6 rounded-full border transition-transform",
-                  color === swatch
-                    ? "scale-110 border-accent ring-2 ring-accent/40"
-                    : "border-border hover:scale-105"
-                )}
-              />
-            ))}
-          </div>
+        {tool !== "eraser" && (
+          <>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {palette.map((swatch) => (
+                <button
+                  key={swatch}
+                  type="button"
+                  aria-label={`Cor ${swatch}`}
+                  aria-pressed={color === swatch}
+                  onClick={() => onColorChange(swatch)}
+                  style={{ backgroundColor: swatch }}
+                  className={cn(
+                    "size-6 shrink-0 rounded-full border transition-transform",
+                    color === swatch
+                      ? "scale-110 border-accent ring-2 ring-accent/40"
+                      : "border-border hover:scale-105"
+                  )}
+                />
+              ))}
+            </div>
 
-          {tool === "pen" && (
-            <>
-              <span className="h-5 w-px bg-border" aria-hidden />
-              <div className="flex items-center gap-1">
-                {PEN_SIZES.map((penSize) => (
-                  <button
-                    key={penSize}
-                    type="button"
-                    aria-label={`Espessura ${penSize}`}
-                    aria-pressed={size === penSize}
-                    onClick={() => onSizeChange(penSize)}
-                    className={cn(
-                      "flex size-7 items-center justify-center rounded-full transition-colors",
-                      size === penSize ? "bg-secondary" : "hover:bg-secondary/60"
-                    )}
-                  >
-                    <span
-                      className={cn("rounded-full bg-foreground", size === penSize && "bg-accent")}
-                      style={{ width: penSize + 2, height: penSize + 2 }}
-                    />
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          <span className="h-5 w-px bg-border" aria-hidden />
-        </>
-      )}
-
-      <div className="flex items-center gap-1">
-        <Button variant="ghost" size="sm" aria-label="Desfazer" disabled={!canUndo} onClick={onUndo} className="px-2.5">
-          <Undo2 className="size-4" />
-        </Button>
-        <Button variant="ghost" size="sm" aria-label="Refazer" disabled={!canRedo} onClick={onRedo} className="px-2.5">
-          <Redo2 className="size-4" />
-        </Button>
-        <Button variant="ghost" size="sm" aria-label="Apagar traços" onClick={onClear} className="px-2.5 text-destructive">
-          <Trash2 className="size-4" />
-        </Button>
-      </div>
-
-      <span className="h-5 w-px bg-border" aria-hidden />
-
-      <Button
-        variant={penOnly ? "secondary" : "ghost"}
-        size="sm"
-        aria-label="Escrever só com a caneta"
-        aria-pressed={penOnly}
-        onClick={() => onPenOnlyChange(!penOnly)}
-        className={cn("px-2.5", penOnly && "text-accent")}
-      >
-        <Hand className="size-4" />
-      </Button>
-
-      <span className="h-5 w-px bg-border" aria-hidden />
-
-      {isRecording || isPaused ? (
-        <div className="flex items-center gap-1">
-          <Button
-            variant={isPaused ? "secondary" : "ghost"}
-            size="sm"
-            aria-label={isPaused ? "Retomar gravação" : "Pausar gravação"}
-            onClick={isPaused ? onResumeRecording : onPauseRecording}
-            className="px-2.5"
-          >
-            {isPaused ? <Play className="size-4" /> : <Pause className="size-4" />}
-          </Button>
-          <span
-            className={cn(
-              "flex items-center gap-1.5 font-mono text-[12px] tabular-nums",
-              isPaused ? "text-muted-foreground" : "text-destructive"
+            {tool === "pen" && (
+              <>
+                <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+                <div className="flex shrink-0 items-center gap-1">
+                  {PEN_SIZES.map((penSize) => (
+                    <button
+                      key={penSize}
+                      type="button"
+                      aria-label={`Espessura ${penSize}`}
+                      aria-pressed={size === penSize}
+                      onClick={() => onSizeChange(penSize)}
+                      className={cn(
+                        "flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                        size === penSize ? "bg-secondary" : "hover:bg-secondary/60"
+                      )}
+                    >
+                      <span
+                        className={cn("rounded-full bg-foreground", size === penSize && "bg-accent")}
+                        style={{ width: penSize + 2, height: penSize + 2 }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-          >
+
+            <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+          </>
+        )}
+
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="ghost" size="sm" aria-label="Desfazer" disabled={!canUndo} onClick={onUndo} className="px-2.5">
+            <Undo2 className="size-4" />
+          </Button>
+          <Button variant="ghost" size="sm" aria-label="Refazer" disabled={!canRedo} onClick={onRedo} className="px-2.5">
+            <Redo2 className="size-4" />
+          </Button>
+          <Button variant="ghost" size="sm" aria-label="Apagar traços" onClick={onClear} className="px-2.5 text-destructive">
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+
+        <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+
+        <Button
+          variant={penOnly ? "secondary" : "ghost"}
+          size="sm"
+          aria-label="Escrever só com a caneta"
+          aria-pressed={penOnly}
+          onClick={() => onPenOnlyChange(!penOnly)}
+          className={cn("px-2.5", penOnly && "text-accent")}
+        >
+          <Hand className="size-4" />
+        </Button>
+
+        <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+
+        {isRecording || isPaused ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant={isPaused ? "secondary" : "ghost"}
+              size="sm"
+              aria-label={isPaused ? "Retomar gravação" : "Pausar gravação"}
+              onClick={isPaused ? onResumeRecording : onPauseRecording}
+              className="px-2.5"
+            >
+              {isPaused ? <Play className="size-4" /> : <Pause className="size-4" />}
+            </Button>
             <span
               className={cn(
-                "size-2 rounded-full",
-                isPaused ? "bg-muted-foreground" : "animate-pulse bg-destructive"
+                "flex shrink-0 items-center gap-1.5 font-mono text-[12px] tabular-nums",
+                isPaused ? "text-muted-foreground" : "text-destructive"
               )}
-            />
-            {formatTime(recordingElapsedMs)}
-          </span>
+            >
+              <span
+                className={cn(
+                  "size-2 rounded-full",
+                  isPaused ? "bg-muted-foreground" : "animate-pulse bg-destructive"
+                )}
+              />
+              {formatTime(recordingElapsedMs)}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Encerrar gravação"
+              onClick={onStopRecording}
+              className="px-2.5 text-destructive"
+            >
+              <Square className="size-3.5 fill-current" />
+            </Button>
+          </div>
+        ) : (
           <Button
             variant="ghost"
             size="sm"
-            aria-label="Encerrar gravação"
-            onClick={onStopRecording}
-            className="px-2.5 text-destructive"
+            aria-label="Gravar áudio"
+            disabled={recorderState === "saving"}
+            onClick={onStartRecording}
+            className="px-2.5"
           >
-            <Square className="size-3.5 fill-current" />
+            <Mic className="size-4" />
           </Button>
-        </div>
-      ) : (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Gravar áudio"
-          disabled={recorderState === "saving"}
-          onClick={onStartRecording}
-          className="px-2.5"
-        >
-          <Mic className="size-4" />
-        </Button>
-      )}
+        )}
+      </div>
     </div>
   );
 }
