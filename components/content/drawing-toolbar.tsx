@@ -1,6 +1,8 @@
 "use client";
 
-import { Eraser, Hand, Highlighter, Mic, Pause, Pen, Play, Redo2, Square, Trash2, Undo2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Check, Eraser, Hand, Highlighter, Mic, Pause, Pen, Play, Redo2, Square, Trash2, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +33,11 @@ interface DrawingToolbarProps {
   onPauseRecording: () => void;
   onResumeRecording: () => void;
   onStopRecording: () => void;
+  /** Feedback for the stop → upload round trip, so ending a recording visibly succeeds instead of the timer just vanishing. */
+  audioSaveState: "idle" | "saving" | "saved";
+  /** The note's player, rendered inline here so a recording doesn't cost the note a second row. */
+  audioSlot?: ReactNode;
+  className?: string;
 }
 
 const TOOLS: { id: DrawTool; label: string; icon: typeof Pen }[] = [
@@ -64,6 +71,9 @@ export function DrawingToolbar({
   onPauseRecording,
   onResumeRecording,
   onStopRecording,
+  audioSaveState,
+  audioSlot,
+  className,
 }: DrawingToolbarProps) {
   const palette = tool === "highlighter" ? HIGHLIGHT_COLORS : INK_COLORS;
   const isRecording = recorderState === "recording";
@@ -73,7 +83,12 @@ export function DrawingToolbar({
     // Scrolls sideways rather than wrapping or squeezing: on a phone the full
     // set of tools can't fit a single line, and wrapping pushed the note's own
     // content down by a whole row every time pen mode was on.
-    <div className="w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div
+      className={cn(
+        "overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        className
+      )}
+    >
       <div className="mx-auto flex w-max items-center gap-2 rounded-full border border-border bg-card/90 px-2 py-1.5 backdrop-blur-md">
         <div className="flex shrink-0 items-center gap-1">
           {TOOLS.map((item) => (
@@ -206,17 +221,59 @@ export function DrawingToolbar({
               <Square className="size-3.5 fill-current" />
             </Button>
           </div>
+        ) : audioSaveState !== "idle" ? (
+          <AnimatePresence mode="wait">
+            <motion.span
+              key={audioSaveState}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.18 }}
+              className={cn(
+                "flex shrink-0 items-center gap-2 px-1 text-[12px]",
+                audioSaveState === "saved" ? "text-success" : "text-muted-foreground"
+              )}
+            >
+              {audioSaveState === "saving" ? (
+                <>
+                  {/* Three bars rising and falling — a recording being written, not a generic spinner. */}
+                  <span className="flex items-end gap-0.5" aria-hidden>
+                    {[0, 0.15, 0.3].map((delay) => (
+                      <motion.span
+                        key={delay}
+                        className="w-0.5 rounded-full bg-accent"
+                        animate={{ height: [4, 12, 4] }}
+                        transition={{ duration: 0.7, repeat: Infinity, delay, ease: "easeInOut" }}
+                      />
+                    ))}
+                  </span>
+                  Salvando áudio…
+                </>
+              ) : (
+                <>
+                  <Check className="size-3.5" />
+                  Gravação salva
+                </>
+              )}
+            </motion.span>
+          </AnimatePresence>
         ) : (
           <Button
             variant="ghost"
             size="sm"
             aria-label="Gravar áudio"
-            disabled={recorderState === "saving"}
             onClick={onStartRecording}
             className="px-2.5"
           >
             <Mic className="size-4" />
           </Button>
+        )}
+
+        {audioSlot && (
+          <>
+            <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+            <div className="shrink-0">{audioSlot}</div>
+          </>
         )}
       </div>
     </div>

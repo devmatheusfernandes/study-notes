@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, ImagePlus, PenLine, Pin, Share } from "lucide-react";
+import { ArrowLeft, AudioLines, ImagePlus, PenLine, Pin, Share } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -140,15 +140,33 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // under it later shrinks — otherwise handwriting past the new bottom is
   // clipped, and can't be erased because it no longer has a surface.
   const inkWrapRef = useRef<HTMLDivElement>(null);
+  const textColumnRef = useRef<HTMLDivElement>(null);
   const [inkWrapWidth, setInkWrapWidth] = useState(0);
+  const [textColumnHeight, setTextColumnHeight] = useState(0);
   useEffect(() => {
     const wrap = inkWrapRef.current;
-    if (!wrap) return;
-    const observer = new ResizeObserver(() => setInkWrapWidth(wrap.getBoundingClientRect().width));
+    const column = textColumnRef.current;
+    if (!wrap || !column) return;
+    const observer = new ResizeObserver(() => {
+      setInkWrapWidth(wrap.getBoundingClientRect().width);
+      setTextColumnHeight(column.getBoundingClientRect().height);
+    });
     observer.observe(wrap);
+    observer.observe(column);
     return () => observer.disconnect();
   }, []);
-  const inkMinHeight = inkWrapWidth > 0 ? (lowestInkY(strokes) + 40) * (inkWrapWidth / PAGE_WIDTH) : 0;
+
+  /**
+   * Room to keep writing. Rather than Samsung Notes' drag-to-add-a-page
+   * gesture, the note simply always keeps a screenful of blank space below
+   * whatever is lowest on it while the pen is out — so writing to the bottom
+   * extends the page by itself and there's no page boundary to manage. The
+   * space collapses again when the pen is put away, so a typed note is never
+   * padded with emptiness.
+   */
+  const inkBottom = inkWrapWidth > 0 ? (lowestInkY(strokes) + 40) * (inkWrapWidth / PAGE_WIDTH) : 0;
+  const contentBottom = Math.max(inkBottom, textColumnHeight);
+  const inkMinHeight = penMode ? `calc(${contentBottom}px + 60svh)` : `${inkBottom}px`;
 
   // ── Voice recording ───────────────────────────────────────────────────────
   const recorder = useAudioRecorder();
@@ -160,6 +178,11 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const [pendingUpload, setPendingUpload] = useState(false);
   const pendingRecordingRef = useRef<Recording | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  // Covers the whole stop → upload round trip, not just MediaRecorder's own
+  // stop, so the toolbar can say the recording actually landed.
+  const [audioSaveState, setAudioSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  /** Whether the player is on screen while typing — in pen mode it's always in the toolbar instead. */
+  const [audioOpen, setAudioOpen] = useState(false);
 
   // Baseline to diff autosaves against, for an EXISTING note only — `null`
   // for a brand-new one, so its very first save still goes through
@@ -401,7 +424,23 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
 
   async function stopRecording() {
     const recording = await recorder.stop();
-    if (recording) await uploadRecording(recording);
+    if (!recording) return;
+    setAudioSaveState("saving");
+    await uploadRecording(recording);
+    // A tick of explicit confirmation before the toolbar goes back to normal —
+    // otherwise the timer just disappears and it's not obvious it worked.
+    setAudioSaveState(pendingRecordingRef.current ? "idle" : "saved");
+  }
+
+  useEffect(() => {
+    if (audioSaveState !== "saved") return;
+    const timer = setTimeout(() => setAudioSaveState("idle"), 2200);
+    return () => clearTimeout(timer);
+  }, [audioSaveState]);
+
+  function retryAudioUpload() {
+    const recording = pendingRecordingRef.current;
+    if (recording) void uploadRecording(recording);
   }
 
   const isRecordingNow = recorder.state === "recording" || recorder.state === "paused";
@@ -502,72 +541,25 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
         transition={{ duration: 0.3, ease: "easeOut" }}
         className="flex min-w-0 flex-1 flex-col"
       >
-        <header className="flex items-center gap-2 px-4 py-3 sm:px-6">
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={<ArrowLeft />}
-            onClick={() => void leaveNote()}
-          >
-            Voltar
-          </Button>
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={async () => {
-                const result = await shareNote(title || "Nova nota", bodyToPlainText(body));
-                if (result === "copied") notify.success("Copiado", "O conteúdo da nota foi copiado.");
-              }}
-              aria-label="Compartilhar nota"
-              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        {/* Sticky, because in pen mode this carries the drawing toolbar —
+            which has to stay reachable while writing down a long note. The
+            player rides along in the same block so it never has to guess the
+            header's height. */}
+        <div className="sticky top-0 z-20 bg-background/85 backdrop-blur-md">
+          <header className="flex items-center gap-2 px-4 py-2 sm:px-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={<ArrowLeft />}
+              onClick={() => void leaveNote()}
+              className={cn(penMode && "max-sm:px-2")}
             >
-              <Share className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => editorRef.current?.openImagePicker()}
-              aria-label="Inserir imagem"
-              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <ImagePlus className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPenMode((on) => !on)}
-              aria-label={penMode ? "Voltar a digitar" : "Escrever à mão"}
-              aria-pressed={penMode}
-              className={cn(
-                "rounded-full p-2 transition-colors",
-                penMode
-                  ? "bg-primary/[0.18] text-accent"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <PenLine className="size-4" />
-            </button>
-            {current && (
-              <button
-                type="button"
-                onClick={() => togglePin(current.id)}
-                aria-label={pinned ? "Desafixar nota" : "Fixar nota"}
-                aria-pressed={pinned}
-                className={cn(
-                  "rounded-full p-2 transition-colors",
-                  pinned
-                    ? "bg-primary/[0.18] text-accent"
-                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                )}
-              >
-                <Pin className={cn("size-4", pinned && "fill-current")} />
-              </button>
-            )}
-          </div>
-        </header>
+              <span className={cn(penMode && "max-sm:hidden")}>Voltar</span>
+            </Button>
 
-        {(penMode || audioPath !== null || pendingUpload) && (
-          <div className="sticky top-0 z-20 flex flex-col gap-2 bg-background/85 px-3 py-2 backdrop-blur-md">
             {penMode && (
               <DrawingToolbar
+                className="min-w-0 flex-1"
                 tool={tool}
                 color={inkColor}
                 size={tool === "highlighter" ? HIGHLIGHTER_SIZE : penSize}
@@ -576,6 +568,22 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 penOnly={penOnly}
                 recorderState={recorder.state}
                 recordingElapsedMs={recorder.elapsedMs}
+                audioSaveState={audioSaveState}
+                audioSlot={
+                  audioPath !== null || pendingUpload ? (
+                    <NoteAudioPlayer
+                      embedded
+                      isPlaying={isPlaying}
+                      positionMs={positionMs}
+                      durationMs={audioDurationMs}
+                      pendingUpload={pendingUpload}
+                      onTogglePlay={togglePlay}
+                      onSeek={seek}
+                      onRetryUpload={retryAudioUpload}
+                      onDelete={() => void removeAudio()}
+                    />
+                  ) : undefined
+                }
                 onToolChange={setTool}
                 onColorChange={setInkColor}
                 onSizeChange={setPenSize}
@@ -589,31 +597,103 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 onStopRecording={() => void stopRecording()}
               />
             )}
-            {(audioPath !== null || pendingUpload) && (
-              <div className="flex justify-center">
-                <NoteAudioPlayer
-                  isPlaying={isPlaying}
-                  positionMs={positionMs}
-                  durationMs={audioDurationMs}
-                  pendingUpload={pendingUpload}
-                  onTogglePlay={togglePlay}
-                  onSeek={seek}
-                  onRetryUpload={() => {
-                    const recording = pendingRecordingRef.current;
-                    if (recording) void uploadRecording(recording);
-                  }}
-                  onDelete={() => void removeAudio()}
-                />
-              </div>
-            )}
-          </div>
-        )}
+
+            <div className={cn("flex items-center gap-1", !penMode && "ml-auto")}>
+              <button
+                type="button"
+                onClick={async () => {
+                  const result = await shareNote(title || "Nova nota", bodyToPlainText(body));
+                  if (result === "copied") notify.success("Copiado", "O conteúdo da nota foi copiado.");
+                }}
+                aria-label="Compartilhar nota"
+                className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <Share className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => editorRef.current?.openImagePicker()}
+                aria-label="Inserir imagem"
+                className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <ImagePlus className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPenMode((on) => !on)}
+                aria-label={penMode ? "Voltar a digitar" : "Escrever à mão"}
+                aria-pressed={penMode}
+                className={cn(
+                  "rounded-full p-2 transition-colors",
+                  penMode
+                    ? "bg-primary/[0.18] text-accent"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                )}
+              >
+                <PenLine className="size-4" />
+              </button>
+              {/* Playing back a recording shouldn't require picking up the pen. */}
+              {!penMode && (audioPath !== null || pendingUpload) && (
+                <button
+                  type="button"
+                  onClick={() => setAudioOpen((open) => !open)}
+                  aria-label={audioOpen ? "Ocultar gravação" : "Ouvir gravação"}
+                  aria-pressed={audioOpen}
+                  className={cn(
+                    "rounded-full p-2 transition-colors",
+                    audioOpen
+                      ? "bg-primary/[0.18] text-accent"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <AudioLines className="size-4" />
+                </button>
+              )}
+              {current && (
+                <button
+                  type="button"
+                  onClick={() => togglePin(current.id)}
+                  aria-label={pinned ? "Desafixar nota" : "Fixar nota"}
+                  aria-pressed={pinned}
+                  className={cn(
+                    "rounded-full p-2 transition-colors",
+                    pinned
+                      ? "bg-primary/[0.18] text-accent"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  )}
+                >
+                  <Pin className={cn("size-4", pinned && "fill-current")} />
+                </button>
+              )}
+            </div>
+          </header>
+
+          {/* Typing mode keeps the player out of the way until asked for; in
+              pen mode it lives in the toolbar instead. */}
+          {!penMode && audioOpen && (audioPath !== null || pendingUpload) && (
+            <div className="flex justify-center px-3 pb-2">
+              <NoteAudioPlayer
+                isPlaying={isPlaying}
+                positionMs={positionMs}
+                durationMs={audioDurationMs}
+                pendingUpload={pendingUpload}
+                onTogglePlay={togglePlay}
+                onSeek={seek}
+                onRetryUpload={retryAudioUpload}
+                onDelete={() => void removeAudio()}
+              />
+            </div>
+          )}
+        </div>
 
         {/* The ink layer spans this whole column, not just the text's reading
             width — handwriting shouldn't stop at a margin the typing happens
             to use. */}
-        <div ref={inkWrapRef} className="relative flex flex-1 flex-col" style={{ minHeight: inkMinHeight || undefined }}>
-          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6">
+        <div ref={inkWrapRef} className="relative flex flex-1 flex-col" style={{ minHeight: inkMinHeight }}>
+          <div
+            ref={textColumnRef}
+            className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6"
+          >
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
