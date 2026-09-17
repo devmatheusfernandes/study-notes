@@ -391,7 +391,10 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
 
   return (
     <>
-      <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose} width={520}>
+      {/* Was 520 — sized to fit six un-shrunk tabs on one line. Now that the
+          tab row scrolls horizontally instead (see BibleStudyTabs), the
+          panel itself can go back to the reader's normal side-panel width. */}
+      <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose} width={380}>
         <div className="flex flex-col gap-4">
           <VerseText
             verses={displayVerses}

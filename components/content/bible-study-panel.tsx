@@ -437,6 +437,25 @@ export function BibleStudyTabs({
     if (verse !== null) onSelectVerse(verse);
   };
 
+  // Each tab is its own independently-rounded pill (not one shared bar
+  // wrapping all six, which is what TabsList's default variant normally
+  // draws) — this row scrolls horizontally, and a single bar wider than the
+  // panel shows straight, clipped edges once scrolled to its middle instead
+  // of the bar's actual rounded ends, which are off-screen. The active
+  // color uses the same `data-active:` modifier TabsTrigger's own base
+  // classes already use for its default active background, not a plain
+  // unconditional class — so twMerge sees both as the same conflict group
+  // (same modifier, same property) and deterministically keeps this one,
+  // rather than leaving two same-specificity background rules for the
+  // browser to pick between.
+  const tabPillClass = (value: BibleStudyTab) =>
+    cn(
+      "rounded-full",
+      tab === value
+        ? "data-active:bg-primary/[0.18] data-active:text-accent"
+        : "bg-secondary text-muted-foreground"
+    );
+
   return (
     <>
       <div ref={contentRef} className="flex flex-col gap-3">
@@ -454,48 +473,68 @@ export function BibleStudyTabs({
         </div>
 
         <Tabs value={tab} onValueChange={(value) => onTabChange(value as BibleStudyTab)}>
-          {/* Seis abas dentro de um painel de 420px: sem apertar a fonte, o
-              espaçamento e o ícone, elas estouram a linha em vez de caber,
-              já que os gatilhos usam whitespace-nowrap. */}
-          <TabsList className="w-full [&_[data-slot=tabs-trigger]]:gap-1 [&_[data-slot=tabs-trigger]]:px-0.5 [&_[data-slot=tabs-trigger]]:text-[11.5px] [&_[data-slot=tabs-trigger]_svg]:size-3">
-            <TabsTrigger value="referencias">
-              Refs
-              {refs.length > 0 && <span className="ml-1 font-mono text-[10px] text-accent">{refs.length}</span>}
-            </TabsTrigger>
-            <TabsTrigger value="notas">
-              Notas
-              {studyNotes.length > 0 && (
-                <span className="ml-1 font-mono text-[10px] text-accent">{studyNotes.length}</span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="rodape">
-              Rodapé
-              {footnotes.length > 0 && (
-                <span className="ml-1 font-mono text-[10px] text-accent">{footnotes.length}</span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="videos">
-              <Film className="size-3" />
-              Vídeos
-              {videos.length > 0 && (
-                <span className="ml-1 font-mono text-[10px] text-accent">{videos.length}</span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="guia">
-              <BookMarked className="size-3" />
-              Guia
-              {researchGuideEntries.length > 0 && (
-                <span className="ml-1 font-mono text-[10px] text-accent">{researchGuideEntries.length}</span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="pessoal">
-              <Gem className="size-3" />
-              Pessoal
-              {personalNotes.length > 0 && (
-                <span className="ml-1 font-mono text-[10px] text-accent">{personalNotes.length}</span>
-              )}
-            </TabsTrigger>
-          </TabsList>
+          {/* Six tabs at a comfortable, un-shrunk size are wider than the
+              panel — this row keeps its natural width and scrolls
+              horizontally instead of squeezing font/padding/icon size to
+              fit one line. Deliberately NOT bled past the parent's own
+              padding like VerseHeading's sticky header does: a negative
+              margin here would widen the actual overflow-x-auto scrollport
+              past the panel's visible width (ancestors only clip
+              vertically), so the row would spill past the card edge instead
+              of scrolling inside it — plus JwpubSidePanel's desktop padding
+              (p-5/20px) and VaultContent's mobile padding (px-6/24px)
+              differ, so one fixed compensation couldn't fit both anyway.
+              Sitting in normal flow keeps the scrollport exactly as wide as
+              whichever ancestor's content column really is. `min-w-0`
+              overrides the flex item's default `min-width: auto` (this div
+              is itself a flex item of contentRef's `flex flex-col`, which
+              would otherwise refuse to shrink below the TabsList's content
+              width) so overflow-x-auto actually gets to clip/scroll.
+              `shrink-0`/`flex-none` on each trigger stops TabsTrigger's own
+              `flex-1` from fighting the scroll — a scrollbar never renders
+              (globals.css hides them globally), so this just reads as a
+              plain swipeable row. */}
+          <div className="min-w-0 overflow-x-auto">
+            <TabsList className="w-max justify-start gap-1.5 bg-transparent p-0 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:shrink-0 [&_[data-slot=tabs-trigger]]:gap-1.5 [&_[data-slot=tabs-trigger]]:px-3">
+              <TabsTrigger value="referencias" className={tabPillClass("referencias")}>
+                Refs
+                {refs.length > 0 && <span className="ml-1 font-mono text-[10px] text-accent">{refs.length}</span>}
+              </TabsTrigger>
+              <TabsTrigger value="notas" className={tabPillClass("notas")}>
+                Notas
+                {studyNotes.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-accent">{studyNotes.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="rodape" className={tabPillClass("rodape")}>
+                Rodapé
+                {footnotes.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-accent">{footnotes.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="videos" className={tabPillClass("videos")}>
+                <Film className="size-3" />
+                Vídeos
+                {videos.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-accent">{videos.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="guia" className={tabPillClass("guia")}>
+                <BookMarked className="size-3" />
+                Guia
+                {researchGuideEntries.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-accent">{researchGuideEntries.length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="pessoal" className={tabPillClass("pessoal")}>
+                <Gem className="size-3" />
+                Pessoal
+                {personalNotes.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-accent">{personalNotes.length}</span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="referencias" className="flex flex-col gap-3">
             <div className="flex items-center gap-0.5 self-start rounded-full bg-secondary p-0.5">
@@ -873,7 +912,10 @@ export function BibleStudyPanel({
 
   return (
     <>
-      <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={520}>
+      {/* Was 520 — sized to fit six un-shrunk tabs on one line. Now that the
+          tab row scrolls horizontally instead (see BibleStudyTabs), the
+          panel itself can go back to the reader's normal side-panel width. */}
+      <JwpubSidePanel open={open} title="Estudo" onClose={onClose} width={380}>
         <BibleStudyTabs
           {...tabsProps}
           researchGuideEntries={researchGuideEntries}
