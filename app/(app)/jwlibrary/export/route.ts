@@ -245,7 +245,17 @@ export async function GET() {
       bookNumber: null,
       chapterNumber: null,
       keySymbol: publication.symbol,
-      mepsLanguage: publication.meps_language_index,
+      // NOT publication.meps_language_index: that's the jwpub archive's own
+      // decryption-key index, a different thing from JW Library's Location.
+      // MepsLanguage — every jw.org Location coming from a real .jwlibrary
+      // backup (Note/UserMark/TagMap/Bookmark, and jwlibrary_input_fields
+      // itself) carries MepsLanguage NULL for the user's own primary-language
+      // content, verified against a real backup. Filling it here created a
+      // second, distinct Location for the same real document, which the
+      // official app can't match to what it already has locally — so an
+      // answer typed in this app's own jwpub reader landed on an orphan
+      // Location and reimported as a blank field.
+      mepsLanguage: null,
       issueTagNumber: publication.issue_tag_number,
       mepsDocumentId,
       track: null,
