@@ -315,15 +315,31 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   const [verses, setVerses] = useState<BibleVerseRow[] | null>(null);
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
 
+  // Verse cache, keyed "bookOrder-chapter" — filled by both the active-chapter
+  // load below and the next-chapter prefetch right after it, same pattern as
+  // JwpubReader's chapterHtmlCache: flipping forward while reading usually
+  // hits the cache instead of a fresh round trip, and going back doesn't
+  // refetch either.
+  const chapterVerseCache = useRef(new Map<string, BibleVerseRow[]>());
+
   useEffect(() => {
     if (screen !== "reading") return;
+    const key = `${bookOrder}-${chapter}`;
+    const cached = chapterVerseCache.current.get(key);
+    if (cached) {
+      setVerses(cached);
+      setIsLoadingChapter(false);
+      return;
+    }
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) setIsLoadingChapter(true);
     });
     void getBibleChapterVerses(bookOrder, chapter).then((result) => {
       if (cancelled) return;
-      setVerses(result.verses ?? []);
+      const chapterVerses = result.verses ?? [];
+      chapterVerseCache.current.set(key, chapterVerses);
+      setVerses(chapterVerses);
       setIsLoadingChapter(false);
       if (result.error) notify.error("Não foi possível abrir o capítulo", result.error);
     });
@@ -331,6 +347,23 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       cancelled = true;
     };
   }, [screen, bookOrder, chapter]);
+
+  // Prefetches the next chapter's verses in the background as soon as the
+  // current one settles — mirrors JwpubReader's next-chapter prefetch. Stays
+  // within the current book; crossing into the next book also needs a fresh
+  // chapterCount lookup, not worth prefetching speculatively here.
+  useEffect(() => {
+    if (screen !== "reading" || chapterCount === null || chapter >= chapterCount) return;
+    const key = `${bookOrder}-${chapter + 1}`;
+    if (chapterVerseCache.current.has(key)) return;
+    let cancelled = false;
+    void getBibleChapterVerses(bookOrder, chapter + 1).then((result) => {
+      if (!cancelled) chapterVerseCache.current.set(key, result.verses ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, bookOrder, chapter, chapterCount]);
 
   const [highlights, setHighlights] = useState<BibleVerseHighlight[]>([]);
   const refreshHighlights = useCallback(() => {

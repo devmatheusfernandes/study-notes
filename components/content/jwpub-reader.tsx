@@ -235,6 +235,14 @@ export function JwpubReader({
 
   const activeChapter = chapters[activeIndex];
 
+  // Chapter HTML cache, keyed by documentId — filled by both the active-chapter
+  // load below and the next-chapter prefetch right after it, so flipping
+  // forward (the overwhelmingly common direction while reading) never waits
+  // on a round trip, and going back to an already-visited chapter doesn't
+  // refetch it either. A ref, not state: purely a perf cache, never rendered
+  // directly.
+  const chapterHtmlCache = useRef(new Map<number, string>());
+
   // Fetched per chapter (unlike answers, which are per-publication) — each
   // chapter has its own meps_document_id, and the query is already scoped
   // directly to it (see getChapterHighlights), so this stays cheap.
@@ -267,6 +275,14 @@ export function JwpubReader({
 
   useEffect(() => {
     if (!activeChapter) return;
+
+    const cached = chapterHtmlCache.current.get(activeChapter.documentId);
+    if (cached !== undefined) {
+      setHtml(cached);
+      setIsLoadingChapter(false);
+      return;
+    }
+
     let cancelled = false;
 
     queueMicrotask(() => {
@@ -275,7 +291,9 @@ export function JwpubReader({
 
     void getChapter(publication.id, activeChapter.documentId).then((result) => {
       if (cancelled) return;
-      setHtml(result.html ?? "");
+      const chapterHtml = result.html ?? "";
+      chapterHtmlCache.current.set(activeChapter.documentId, chapterHtml);
+      setHtml(chapterHtml);
       setIsLoadingChapter(false);
       if (result.error) notify.error("Não foi possível abrir o capítulo", result.error);
     });
@@ -284,6 +302,21 @@ export function JwpubReader({
       cancelled = true;
     };
   }, [publication.id, activeChapter]);
+
+  // Prefetches the next chapter's HTML in the background as soon as the
+  // current one settles, so tapping "Próximo" (or the chapter list) usually
+  // hits the cache above instead of paying a fresh round trip.
+  useEffect(() => {
+    const nextChapter = chapters[activeIndex + 1];
+    if (!nextChapter || chapterHtmlCache.current.has(nextChapter.documentId)) return;
+    let cancelled = false;
+    void getChapter(publication.id, nextChapter.documentId).then((result) => {
+      if (!cancelled) chapterHtmlCache.current.set(nextChapter.documentId, result.html ?? "");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [publication.id, activeIndex, chapters]);
 
   // Scans the just-loaded chapter for cross-references and resolves them
   // against whatever this user currently has ingested — re-runs on every

@@ -217,9 +217,19 @@ export async function getPublication(
 
   if (!publication) return {};
 
+  // NOT content_html here — ChapterSummary is "deliberately without the HTML"
+  // (see its own doc comment in lib/jwpub/types.ts), but this used to select
+  // the column anyway just to derive `hasContent`, which nothing in the app
+  // actually reads. For a real publication that's every chapter's full body
+  // shipped from Postgres to this Server Action and straight into the
+  // garbage — on every single open of the reader, before the client's own
+  // per-chapter getChapter() call (below) fetches the one chapter it's about
+  // to show. `hasContent` stays in the type/response shape unchanged, just
+  // hardcoded true — `chapters.length === 0` (jwpub-reader.tsx's `failed`
+  // check) is what actually detects a publication with nothing parsed.
   const { data: chapters } = await supabase
     .from("jwpub_chapters")
-    .select("document_id, meps_document_id, position, title, content_html")
+    .select("document_id, meps_document_id, position, title")
     .eq("publication_id", publication.id)
     .order("position", { ascending: true });
 
@@ -237,7 +247,7 @@ export async function getPublication(
       mepsDocumentId: chapter.meps_document_id,
       position: chapter.position,
       title: chapter.title,
-      hasContent: !!chapter.content_html,
+      hasContent: true,
     })),
   };
 }
