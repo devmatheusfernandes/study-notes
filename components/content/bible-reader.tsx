@@ -9,6 +9,8 @@ import { notify } from "@/components/ui/toaster";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { SidebarToggleButton } from "@/components/layout/sidebar-toggle-button";
 import { UserMenuClient } from "@/components/layout/user-menu-client";
+import { HistoryVaultButton } from "@/components/layout/history-vault-button";
+import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import {
   listBibleBooks,
   getBibleChapterCount,
@@ -136,6 +138,7 @@ function BibleTopHeader({
             <Layers className="size-4" />
           </button>
         )}
+        <HistoryVaultButton />
         <UserMenuClient email={userEmail} />
       </div>
     </header>
@@ -261,6 +264,8 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     setScreen("chapters");
   }
 
+  const recordHistoryVisit = useNavigationHistoryStore((s) => s.recordVisit);
+
   const enterReading = useCallback(
     (nextBookOrder: number, nextChapter: number, verse?: number | null) => {
       setBookOrder(nextBookOrder);
@@ -283,9 +288,46 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       if (verse) params.set("verse", String(verse));
       else params.delete("verse");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+
+      // Logged here rather than in a `screen`-watching effect: every real
+      // navigation (chapter grid, prev/next, a cross-reference, a search
+      // jump) funnels through this one function, so this is the single
+      // place that's guaranteed to fire once per chapter actually opened —
+      // an effect keyed on [screen, bookOrder, chapter] would also need to
+      // special-case the initial deep-link load separately.
+      const nextBookName = books?.find((b) => b.bookOrder === nextBookOrder)?.book;
+      if (nextBookName) {
+        recordHistoryVisit({
+          id: `bible:${nextBookOrder}:${nextChapter}`,
+          type: "bible",
+          title: `${nextBookName} ${nextChapter}`,
+          href: `/bible?book=${nextBookOrder}&chapter=${nextChapter}`,
+        });
+      }
     },
-    [pathname, router, searchParams]
+    [pathname, router, searchParams, books, recordHistoryVisit]
   );
+
+  // The one case enterReading above doesn't cover: landing on /bible with
+  // ?book=&chapter= already in the URL (a deep link, a bookmark, a reload)
+  // starts straight on the reading screen without ever calling enterReading.
+  // Runs once books have loaded (book name needed for the title) and only
+  // while still on that initial chapter — enterReading takes over from here
+  // for every navigation after this first one.
+  const didRecordInitialVisit = useRef(false);
+  useEffect(() => {
+    if (didRecordInitialVisit.current || !books || screen !== "reading") return;
+    didRecordInitialVisit.current = true;
+    const bookName = books.find((b) => b.bookOrder === bookOrder)?.book;
+    if (bookName) {
+      recordHistoryVisit({
+        id: `bible:${bookOrder}:${chapter}`,
+        type: "bible",
+        title: `${bookName} ${chapter}`,
+        href: `/bible?book=${bookOrder}&chapter=${chapter}`,
+      });
+    }
+  }, [books, screen, bookOrder, chapter, recordHistoryVisit]);
 
   async function goToPrevChapter() {
     if (chapter > 1) {

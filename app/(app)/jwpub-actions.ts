@@ -100,7 +100,30 @@ export async function savePublication(
     .single();
   if (!note) return { error: "Publicação não encontrada." };
 
-  // Re-ingesting replaces whatever was there: chapters/footnotes cascade away.
+  // "Sua resposta" is the user's OWN writing, not parsed content, and it
+  // cascades away with the publication row (jwpub_answers.publication_id is
+  // `on delete cascade`, migration 0007) — so it's carried across the
+  // replace below by hand. Its key `(document_id, pid)` comes from the
+  // archive itself and is stable across a reimport of the same publication,
+  // which is what makes this a straight re-attach rather than a remap.
+  // Highlights and notes need no such treatment: they live in the
+  // `jwlibrary_*` tables keyed by location (key_symbol + meps_document_id +
+  // …), never by publication_id, and their `resolved_publication_id`
+  // snapshot is `on delete set null` and re-resolved on every read anyway
+  // (see listJwlibraryContent).
+  const { data: previousPublication } = await supabase
+    .from("jwpub_publications")
+    .select("id")
+    .eq("note_id", input.noteId)
+    .maybeSingle();
+  const { data: previousAnswers } = previousPublication
+    ? await supabase
+        .from("jwpub_answers")
+        .select("document_id, pid, answer")
+        .eq("publication_id", previousPublication.id)
+    : { data: null };
+
+  // Re-ingesting replaces whatever was there: chapters/footnotes/extracts cascade away.
   await supabase.from("jwpub_publications").delete().eq("note_id", input.noteId);
 
   const displayTitle = withIssuePeriod(input.title, input.issueTagNumber);
@@ -121,6 +144,25 @@ export async function savePublication(
     .single();
 
   if (error || !publication) return { error: "Não foi possível registrar a publicação." };
+
+  // Best-effort: losing a re-attach would be bad, but failing the whole
+  // ingest over it would leave the user with no publication at all.
+  if (previousAnswers && previousAnswers.length > 0) {
+    await supabase
+      .from("jwpub_answers")
+      .insert(
+        previousAnswers.map((row) => ({
+          user_id: user.id,
+          publication_id: publication.id,
+          document_id: row.document_id,
+          pid: row.pid,
+          answer: row.answer,
+        }))
+      )
+      .then(({ error: answersError }) => {
+        if (answersError) console.error("Não foi possível preservar as respostas ao reprocessar:", answersError);
+      });
+  }
 
   // The note row was created with the raw filename as its title (before
   // parsing knew any better) — swap in the publication's real title now that

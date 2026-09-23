@@ -16,6 +16,7 @@ import { DrawingToolbar } from "@/components/content/drawing-toolbar";
 import { NoteAudioPlayer } from "@/components/content/note-audio-player";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
+import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { bodyToPlainText } from "@/lib/note-preview";
 import { shareNote } from "@/lib/share";
 import { useHydrated } from "@/components/providers/store-hydration";
@@ -190,6 +191,22 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const lastSaved = useRef<{ title: string; body: string } | null>(
     noteId ? { title: effectiveTitle, body: effectiveBody } : null
   );
+
+  // Logged to the header's history Vault — only for an EXISTING note (not
+  // the still-unsaved /notes/new draft). Keyed on the title text itself
+  // (not the `existing` object, which gets a new identity every render off
+  // `notes.find(...)`) so this only re-fires when the title actually changes.
+  const recordHistoryVisit = useNavigationHistoryStore((s) => s.recordVisit);
+  const existingTitle = existing?.title;
+  useEffect(() => {
+    if (!noteId || existingTitle === undefined) return;
+    recordHistoryVisit({
+      id: noteId,
+      type: "note",
+      title: existingTitle.trim() || "Nota sem título",
+      href: `/notes/${noteId}`,
+    });
+  }, [noteId, existingTitle, recordHistoryVisit]);
 
   // The user's .jwpub library, for in-note references: it decides whether a
   // typed "(th 2)" is a real reference and it populates the "/" menu. Fetched

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { LogOut, Settings, User } from "lucide-react";
+import { History, LogOut, Settings, User } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/app/login/actions";
+import { useHistoryVaultUiStore } from "@/lib/store/history-vault-ui-store";
 
 interface UserMenuClientProps {
   email?: string;
@@ -18,6 +19,7 @@ interface UserMenuClientProps {
 
 export function UserMenuClient({ email }: UserMenuClientProps) {
   const router = useRouter();
+  const setHistoryOpen = useHistoryVaultUiStore((s) => s.setOpen);
   const initial = email?.[0]?.toUpperCase() ?? "?";
 
   return (
@@ -37,6 +39,14 @@ export function UserMenuClient({ email }: UserMenuClientProps) {
           <span className="truncate">{email ?? "Minha conta"}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {/* Mirrors the standalone <HistoryVaultButton> icon next to this
+            avatar — that one is `hidden sm:inline-flex`, so this item picks
+            up the same action below that breakpoint instead of the header
+            growing a third icon on a phone-width screen. */}
+        <DropdownMenuItem className="sm:hidden" onSelect={() => setHistoryOpen(true)}>
+          <History className="size-4" />
+          Histórico
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => router.push("/settings")}>
           <Settings className="size-4" />
           Configurações

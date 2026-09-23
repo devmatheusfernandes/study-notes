@@ -2,6 +2,7 @@ import { SidebarToggleButton } from "./sidebar-toggle-button";
 //import { HeaderActions } from "./header-actions";
 import { HeaderSearchInput } from "./header-search-input";
 import { UserMenu } from "./user-menu";
+import { HistoryVaultButton } from "./history-vault-button";
 //import { AssistantToggleButton } from "@/components/assistant/assistant-toggle-button";
 
 interface HeaderProps {
@@ -26,6 +27,7 @@ export function Header({ variant, title, searchPlaceholder }: HeaderProps) {
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
         {/* {showActions && <HeaderActions />}
         < AssistantToggleButton /> */}
+        <HistoryVaultButton />
         <UserMenu />
       </div>
     </header>

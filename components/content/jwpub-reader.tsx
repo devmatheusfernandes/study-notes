@@ -27,6 +27,7 @@ import {
   type BibleVerseHighlight,
 } from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
@@ -68,6 +69,21 @@ export function JwpubReader({
 
   const [publication, setPublication] = useState(initialPublication);
   const [chapters, setChapters] = useState(initialChapters);
+
+  // Logged once per open — the publication's own title is enough to identify
+  // it in the history Vault, so this doesn't need to re-fire on every chapter
+  // switch within it (unlike bible-reader.tsx, where each chapter is its own
+  // entry).
+  const recordHistoryVisit = useNavigationHistoryStore((s) => s.recordVisit);
+  const publicationTitle = publication.title;
+  useEffect(() => {
+    recordHistoryVisit({
+      id: noteId,
+      type: "publication",
+      title: publicationTitle || "Publicação",
+      href: `/notes/${noteId}`,
+    });
+  }, [noteId, publicationTitle, recordHistoryVisit]);
 
   // `doc` (JWPUB documentId) is a stable, unique-per-chapter number — resolve
   // it with an exact match ONLY, no title heuristics. Some books have a

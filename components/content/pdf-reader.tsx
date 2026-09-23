@@ -10,6 +10,7 @@ import { notify } from "@/components/ui/toaster";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { useNotesStore, type Note } from "@/lib/store/notes-store";
+import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import type { NoteRow } from "@/app/(app)/notes-actions";
 
 interface PdfReaderProps {
@@ -33,6 +34,18 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
   const [error, setError] = useState<string | null>(null);
 
   const storagePath = note?.storagePath;
+
+  const recordHistoryVisit = useNavigationHistoryStore((s) => s.recordVisit);
+  const noteTitle = note?.title;
+  useEffect(() => {
+    if (noteTitle === undefined) return;
+    recordHistoryVisit({
+      id: noteId,
+      type: "publication",
+      title: noteTitle.trim() || "PDF",
+      href: `/notes/${noteId}`,
+    });
+  }, [noteId, noteTitle, recordHistoryVisit]);
 
   const loadPdf = async () => {
     if (!storagePath) {
