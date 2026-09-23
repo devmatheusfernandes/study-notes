@@ -30,6 +30,7 @@ import { useResearchGuideReference } from "@/hooks/use-research-guide-reference"
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
+import { JwpubExtractSurface } from "./jwpub-extract-surface";
 import { BibleStudyTabs, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
 import {
   JwlibraryNoteEditorVault,
@@ -340,11 +341,13 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     closeReference,
     openPublicationRef,
     handlePublicationRefResolved,
-    openExtractId,
+    openExtractIds,
     openExtract: onOpenExtract,
     closeExtract,
   } = useResearchGuideReference(researchGuideEntries);
-  const openExtract = openExtractId !== null ? researchGuideExtracts[openExtractId] : undefined;
+  const openExtracts = (openExtractIds ?? [])
+    .map((id) => researchGuideExtracts[id])
+    .filter((extract) => extract !== undefined);
 
   const personalNotes = toPersonalNotes(displayHighlights, tabSelectedVerse);
 
@@ -481,14 +484,12 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
         onClose={closeReference}
       />
 
-      <JwpubSidePanel open={openExtractId !== null} title={openExtract?.refTitle ?? "Trecho"} onClose={closeExtract}>
-        {openExtract && (
-          <div
-            className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
-            dangerouslySetInnerHTML={{ __html: openExtract.html }}
-          />
-        )}
-      </JwpubSidePanel>
+      <JwpubExtractSurface
+        open={openExtractIds !== null}
+        extracts={openExtracts}
+        onClose={closeExtract}
+        onOpenSource={openPublicationRef}
+      />
 
       <JwlibraryNoteEditorVault
         open={editingNote !== null || pendingNoteLocation !== null}

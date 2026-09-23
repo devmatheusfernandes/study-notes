@@ -13,6 +13,7 @@ import type { ChapterVideo } from "@/app/(app)/bible-search-actions";
 import type { ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
+import { JwpubExtractSurface } from "./jwpub-extract-surface";
 import { BibleStudyRowsSkeleton, BibleStudyVideosSkeleton } from "./bible-study-panel-skeleton";
 import type {
   BibleBook,
@@ -82,8 +83,8 @@ interface BibleStudyTabsProps {
   researchGuideLoading: boolean;
   /** A `data-jwpub-pubref` citation link inside a Guia entry was clicked — the caller owns the resolve-against-the-user's-library state and renders `JwpubReferenceSurface` itself (see useResearchGuideReference), because that surface must be a flex SIBLING of this component's own host panel to behave as a real sidebar, not nested inside it. */
   onOpenPublicationRef: (mepsDocumentId: number) => void;
-  /** A `data-jwpub-extract` link (an excerpt already embedded in the guide) was clicked — same reasoning as onOpenPublicationRef above. */
-  onOpenExtract: (extractId: number) => void;
+  /** A `data-jwpub-extract` link (excerpts already embedded in the guide) was clicked — same reasoning as onOpenPublicationRef above. One link can name several excerpts, hence the list. */
+  onOpenExtract: (extractIds: number[]) => void;
 
   personalNotes: WithVerse<BiblePersonalNote>[];
   /** "Editar" on an expanded personal note — opens the full editor vault. */
@@ -385,10 +386,16 @@ export function BibleStudyTabs({
 
       const extractLink = target?.closest<HTMLElement>("[data-jwpub-extract]");
       if (extractLink) {
-        const id = Number(extractLink.dataset.jwpubExtract);
-        if (Number.isFinite(id)) {
+        // Comma-joined: one citation can stand for several excerpts (see
+        // rewriteJwpubLinks). A single `Number()` over the whole attribute
+        // would come back NaN for those and drop the click entirely.
+        const ids = (extractLink.dataset.jwpubExtract ?? "")
+          .split(",")
+          .map(Number)
+          .filter((id) => Number.isFinite(id));
+        if (ids.length > 0) {
           event.preventDefault();
-          onOpenExtract(id);
+          onOpenExtract(ids);
         }
         return;
       }
@@ -904,11 +911,13 @@ export function BibleStudyPanel({
     closeReference,
     openPublicationRef,
     handlePublicationRefResolved,
-    openExtractId,
+    openExtractIds,
     openExtract: onOpenExtract,
     closeExtract,
   } = useResearchGuideReference(researchGuideEntries);
-  const openExtract = openExtractId !== null ? researchGuideExtracts[openExtractId] : undefined;
+  const openExtracts = (openExtractIds ?? [])
+    .map((id) => researchGuideExtracts[id])
+    .filter((extract) => extract !== undefined);
 
   return (
     <>
@@ -934,14 +943,12 @@ export function BibleStudyPanel({
         onClose={closeReference}
       />
 
-      <JwpubSidePanel open={openExtractId !== null} title={openExtract?.refTitle ?? "Trecho"} onClose={closeExtract}>
-        {openExtract && (
-          <div
-            className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
-            dangerouslySetInnerHTML={{ __html: openExtract.html }}
-          />
-        )}
-      </JwpubSidePanel>
+      <JwpubExtractSurface
+        open={openExtractIds !== null}
+        extracts={openExtracts}
+        onClose={closeExtract}
+        onOpenSource={openPublicationRef}
+      />
     </>
   );
 }

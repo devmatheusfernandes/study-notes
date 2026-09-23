@@ -19,8 +19,20 @@ import {
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "@/lib/jwpub/sanitize";
 import { uploadGlobalMedia, rewriteMediaUrls } from "@/lib/jwpub/media";
 
-/** Bump whenever the parsing/rewriting pipeline below changes — see checkGlobalPublicationNeedsImport's own comment for why a source-hash-only check would wrongly skip a reupload after a bug fix here. */
-const INSIGHT_IMPORT_VERSION = 1;
+/**
+ * Bump whenever the parsing/rewriting pipeline below changes — see
+ * checkGlobalPublicationNeedsImport's own comment for why a source-hash-only
+ * check would wrongly skip a reupload after a bug fix here.
+ *
+ *   1 — initial import
+ *   2 — stops emitting `data-jwpub-extract` here. Version 1 passed the
+ *       archive's excerpt index into rewriteJwpubLinks, but nothing persists
+ *       a GLOBAL publication's excerpts, so those citations rendered as
+ *       links with nothing behind them (and, before the ExtractId fix, were
+ *       pointing at the wrong excerpt anyway). Perspicaz's own citations are
+ *       plain `data-jwpub-pubref` again.
+ */
+const INSIGHT_IMPORT_VERSION = 2;
 
 const MAX_BATCH_BYTES = 1.5 * 1024 * 1024;
 
@@ -115,8 +127,11 @@ export function InsightUploadCard() {
           rewriteJwpubLinks(
             rewriteMediaUrls(chapter.html, mediaUrls),
             parsed.bibleCitations,
-            chapter.documentId,
-            parsed.extractsByHyperlinkId
+            // Deliberately NO `extracts` here: nothing persists this global
+            // publication's own excerpts, so emitting data-jwpub-extract
+            // would produce links with nothing behind them. Perspicaz's
+            // citations stay ordinary data-jwpub-pubref.
+            chapter.documentId
           )
         ),
       }));

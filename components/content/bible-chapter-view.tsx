@@ -44,6 +44,48 @@ interface BibleChapterViewProps {
   onOpenStudy?: (verse: number, tab: "notas" | "rodape") => void;
 }
 
+/** Roughly half the selection pill's rendered width (6 swatches + divider + note button), used only to keep it inside the viewport. */
+const SELECTION_POPUP_HALF_WIDTH = 110;
+
+/**
+ * Every `[data-verse]` paragraph the selection actually covers, each paired
+ * with the selection clipped to that one verse.
+ *
+ * A single-verse selection has its `commonAncestorContainer` inside the
+ * verse, but a selection spanning two or more lands on the container instead
+ * — so this walks the verses and intersects, rather than climbing up from
+ * the range. Verses the range only grazes (it ends exactly at a boundary, so
+ * the clipped piece is empty or whitespace) are dropped, which is what keeps
+ * a drag that stops right at the start of the next verse from creating a
+ * pointless zero-width highlight on it.
+ */
+function versesInRange(container: HTMLElement, range: Range): { verse: number; range: Range }[] {
+  const result: { verse: number; range: Range }[] = [];
+
+  for (const el of container.querySelectorAll<HTMLElement>("[data-verse]")) {
+    if (!range.intersectsNode(el)) continue;
+    const verse = Number(el.dataset.verse);
+    if (!Number.isFinite(verse)) continue;
+
+    const clipped = document.createRange();
+    clipped.selectNodeContents(el);
+    // Pull each boundary inward to whichever of the two ranges is narrower
+    // there — leaving the verse's own boundary in place where the selection
+    // runs past it (the middle verses of a long drag).
+    if (range.compareBoundaryPoints(Range.START_TO_START, clipped) > 0) {
+      clipped.setStart(range.startContainer, range.startOffset);
+    }
+    if (range.compareBoundaryPoints(Range.END_TO_END, clipped) < 0) {
+      clipped.setEnd(range.endContainer, range.endOffset);
+    }
+    if (clipped.collapsed || clipped.toString().trim() === "") continue;
+
+    result.push({ verse, range: clipped });
+  }
+
+  return result;
+}
+
 /**
  * Bible-reading counterpart to jwpub-chapter-view.tsx — same highlight/note
  * mechanics (word-token ranges via lib/jwlibrary/paragraph-tokens.ts, the
@@ -138,9 +180,24 @@ export function BibleChapterView({
   // extracting a shared hook now would risk regressing the already-working
   // publication reader for a DRY win that isn't worth it for two call sites.
   const SELECTION_PROMPT_DELAY_MS = 350;
-  const [selectionPrompt, setSelectionPrompt] = useState<{ x: number; y: number; verse: number; range: Range } | null>(
-    null
-  );
+  /**
+   * One entry per verse the selection touches — NOT a single verse. A drag
+   * across "3 ... 4 ..." puts the range's `commonAncestorContainer` on the
+   * container div rather than on either `<p data-verse>`, so the old
+   * `closest("[data-verse]")` lookup came back null and the popup silently
+   * refused to appear at all for any multi-verse selection. Each verse gets
+   * its own clipped sub-range here, so confirming the popup creates one
+   * highlight per verse — which is what the underlying model wants anyway:
+   * a jwlibrary UserMark's BlockRange is scoped to a single block, so a span
+   * crossing verses is genuinely several marks, not one.
+   */
+  const [selectionPrompt, setSelectionPrompt] = useState<{
+    x: number;
+    /** Viewport coordinates of the selection's own bounding box. */
+    top: number;
+    bottom: number;
+    verses: { verse: number; range: Range }[];
+  } | null>(null);
 
   useEffect(() => {
     let delayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -156,10 +213,8 @@ export function BibleChapterView({
       }
 
       const range = selection.getRangeAt(0);
-      const anchor = range.commonAncestorContainer;
-      const anchorEl = anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : (anchor as Element);
-      const verseEl = anchorEl?.closest<HTMLElement>("[data-verse]");
-      if (!verseEl || !container.contains(verseEl) || !verseEl.dataset.verse) {
+      const verses = versesInRange(container, range);
+      if (verses.length === 0) {
         setSelectionPrompt(null);
         return;
       }
@@ -170,11 +225,10 @@ export function BibleChapterView({
         return;
       }
 
-      const verse = Number(verseEl.dataset.verse);
-      const clonedRange = range.cloneRange();
+      const snapshot = { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom, verses };
       delayTimer = setTimeout(() => {
-        setSelectionPrompt({ x: rect.left + rect.width / 2, y: rect.top, verse, range: clonedRange });
-        onVerseSelected?.(verse);
+        setSelectionPrompt(snapshot);
+        onVerseSelected?.(verses[0].verse);
       }, SELECTION_PROMPT_DELAY_MS);
     }
 
@@ -188,19 +242,29 @@ export function BibleChapterView({
 
   function confirmSelectionSpan(colorIndex?: number) {
     if (!selectionPrompt) return;
-    const verseEl = containerRef.current?.querySelector<HTMLElement>(`[data-verse="${selectionPrompt.verse}"]`);
-    if (!verseEl) return;
 
-    const tokenRange = getTokenRangeForSelection(verseEl, selectionPrompt.range);
-    const selectedText = selectionPrompt.range.toString();
+    const spans: { verse: number; start: number; end: number }[] = [];
+    for (const { verse, range } of selectionPrompt.verses) {
+      const verseEl = containerRef.current?.querySelector<HTMLElement>(`[data-verse="${verse}"]`);
+      if (!verseEl) continue;
+      const tokenRange = getTokenRangeForSelection(verseEl, range);
+      if (tokenRange) spans.push({ verse, start: tokenRange.start, end: tokenRange.end });
+    }
+    const selectedText = selectionPrompt.verses.map((v) => v.range.toString()).join(" ");
+
     window.getSelection()?.removeAllRanges();
     setSelectionPrompt(null);
-    if (!tokenRange) return;
+    if (spans.length === 0) return;
+
     if (colorIndex !== undefined) {
-      onCreateHighlight?.(selectionPrompt.verse, tokenRange.start, tokenRange.end, colorIndex);
-    } else {
-      onPickVerseSpan?.(selectionPrompt.verse, tokenRange.start, tokenRange.end, selectedText);
+      // One UserMark per verse — see the comment on `selectionPrompt` above.
+      for (const span of spans) onCreateHighlight?.(span.verse, span.start, span.end, colorIndex);
+      return;
     }
+    // A note anchors to exactly one block, so a multi-verse selection
+    // contributes its first verse as the anchor and the whole selection as
+    // the editor's preview text.
+    onPickVerseSpan?.(spans[0].verse, spans[0].start, spans[0].end, selectedText);
   }
 
   // Draws highlights — identical mechanics to jwpub-chapter-view.tsx's own
@@ -372,8 +436,16 @@ export function BibleChapterView({
           data-verse-ui
           style={{
             position: "fixed",
-            left: selectionPrompt.x,
-            top: Math.max(8, selectionPrompt.y - 44),
+            // Clamped horizontally so the pill can't hang off either edge
+            // when the selection sits near one.
+            left: Math.min(Math.max(selectionPrompt.x, SELECTION_POPUP_HALF_WIDTH + 8), window.innerWidth - SELECTION_POPUP_HALF_WIDTH - 8),
+            // BELOW the selection, never above it: Android/iOS draw their own
+            // non-suppressible "Copiar / Selecionar tudo / Compartilhar" bar
+            // directly over the top of a text selection, which covered this
+            // pill completely. Clamped to the viewport bottom rather than
+            // flipped back above it, so it stays out from under that bar even
+            // for a selection that ends near the bottom of the screen.
+            top: Math.min(selectionPrompt.bottom + 10, window.innerHeight - 52),
             transform: "translateX(-50%)",
           }}
           className="z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_rgba(0,0,0,0.4)]"

@@ -18,7 +18,6 @@ import {
 import { splitResearchGuideDocument, RESEARCH_GUIDE_IMPORT_VERSION } from "@/lib/bible/research-guide-parse";
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "@/lib/jwpub/sanitize";
 import { batchBySize } from "@/lib/utils";
-import type { JwpubExtract } from "@/lib/jwpub/types";
 
 /**
  * A ceiling on each Server Action call's own payload, not a row count — a
@@ -109,14 +108,6 @@ export function ResearchGuideUploadCard() {
       // same excerpt) — sending it once per verse would multiply a possibly
       // sizable HTML blob for nothing.
       const extractsById = new Map<number, ResearchGuideExtractInput>();
-      // extractsByHyperlinkId is keyed by the CITING id (one per citation
-      // instance, so tens of thousands of entries) — this reverse map, keyed
-      // by the excerpt's own (far fewer, shared) id, is what the loop below
-      // actually needs, and avoids an O(citations × excerpts) linear scan.
-      const extractsByExtractId = new Map<number, JwpubExtract>();
-      for (const extract of parsed.extractsByHyperlinkId.values()) {
-        if (!extractsByExtractId.has(extract.extractId)) extractsByExtractId.set(extract.extractId, extract);
-      }
 
       for (const chapter of parsed.chapters) {
         for (const block of splitResearchGuideDocument(chapter.html)) {
@@ -125,7 +116,7 @@ export function ResearchGuideUploadCard() {
           // data-jwpub-pubref — this is the one call site that hands it
           // parsed.extractsByHyperlinkId, so this behavior is specific to
           // the Research Guide until something else needs it too.
-          const rewritten = rewriteJwpubLinks(block.html, new Map(), -1, parsed.extractsByHyperlinkId);
+          const rewritten = rewriteJwpubLinks(block.html, new Map(), chapter.documentId, parsed.extracts);
           entries.push({
             bookOrder: block.bookOrder,
             chapter: block.chapter,
@@ -137,15 +128,22 @@ export function ResearchGuideUploadCard() {
             contentHtml: sanitizeChapterHtml(rewritten),
           });
 
-          for (const id of [...rewritten.matchAll(/data-jwpub-extract="(\d+)"/g)].map((m) => Number(m[1]))) {
+          // One citation link can name several excerpts, comma-joined — see
+          // rewriteJwpubLinks.
+          const citedIds = [...rewritten.matchAll(/data-jwpub-extract="([\d,]+)"/g)].flatMap((m) =>
+            m[1].split(",").map(Number)
+          );
+          for (const id of citedIds) {
             if (extractsById.has(id)) continue;
-            const extract = extractsByExtractId.get(id);
+            const extract = parsed.extracts.byExtractId.get(id);
             if (extract) {
               extractsById.set(id, {
                 extractId: id,
                 contentHtml: sanitizeChapterHtml(rewriteJwpubLinks(extract.html)),
+                caption: extract.caption === null ? null : sanitizeChapterHtml(extract.caption),
                 refTitle: extract.refTitle,
                 refSymbol: extract.refSymbol,
+                refMepsDocumentId: extract.refMepsDocumentId,
               });
             }
           }

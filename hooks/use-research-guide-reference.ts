@@ -24,7 +24,8 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
   const [referenceHtml, setReferenceHtml] = useState<string | null>(null);
   const [isLoadingReference, setIsLoadingReference] = useState(false);
   const [unresolvedPubRef, setUnresolvedPubRef] = useState<number | null>(null);
-  const [openExtractId, setOpenExtractId] = useState<number | null>(null);
+  // A citation link names a LIST of excerpt ids (see rewriteJwpubLinks) — `null` means the panel is closed.
+  const [openExtractIds, setOpenExtractIds] = useState<number[] | null>(null);
 
   // Resolves every citation currently on screen against this user's own
   // library in one batched call, the moment the Guia tab's content arrives —
@@ -58,7 +59,7 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
       // independent state, so without this a citation with an embedded
       // extract left its panel open when the next citation clicked was a bare
       // pointer instead — two "Referência"-ish sidebars open side by side.
-      setOpenExtractId(null);
+      setOpenExtractIds(null);
       const resolved = resolvedPubRefs.get(mepsDocumentId);
       if (!resolved) {
         setReferenceOpen(true);
@@ -91,9 +92,9 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
     [resolvedPubRefs]
   );
 
-  const openExtract = useCallback((extractId: number) => {
+  const openExtract = useCallback((extractIds: number[]) => {
     setReferenceOpen(false);
-    setOpenExtractId(extractId);
+    setOpenExtractIds(extractIds);
   }, []);
 
   const handlePublicationRefResolved = useCallback((mepsDocumentId: number) => {
@@ -125,8 +126,8 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
     closeReference: () => setReferenceOpen(false),
     openPublicationRef,
     handlePublicationRefResolved,
-    openExtractId,
+    openExtractIds,
     openExtract,
-    closeExtract: () => setOpenExtractId(null),
+    closeExtract: () => setOpenExtractIds(null),
   };
 }

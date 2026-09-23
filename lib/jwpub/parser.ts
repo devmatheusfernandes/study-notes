@@ -1,11 +1,13 @@
 "use client";
 
 import { deriveJwpubKeys, decodeJwpubContent } from "./crypto";
+import { extractCitationKey } from "./types";
 import type {
   JwpubChapter,
   JwpubFootnote,
   JwpubBibleCitation,
   JwpubExtract,
+  JwpubExtractIndex,
   ParsedJwpub,
   JwpubPublicationMeta,
 } from "./types";
@@ -104,12 +106,12 @@ export async function parseJwpub(file: Blob, onProgress?: ParseProgress): Promis
     const chapters = await readChapters(db, keys, inflate, onProgress);
     const footnotes = await readFootnotes(db, keys, inflate);
     const bibleCitations = readBibleCitations(db);
-    const extractsByHyperlinkId = await readExtracts(db, keys, inflate);
+    const extracts = await readExtracts(db, keys, inflate);
 
     onProgress?.("Extraindo imagens");
     const media = await extractMedia(entries, chapters);
 
-    return { ...meta, chapters, footnotes, media, bibleCitations, extractsByHyperlinkId };
+    return { ...meta, chapters, footnotes, media, bibleCitations, extracts };
   } finally {
     db.close();
   }
@@ -250,56 +252,55 @@ function readBibleCitations(db: import("sql.js").Database): Map<string, JwpubBib
 }
 
 /**
- * "Quadros de destaque" — a citation whose `<a data-xtid="…">` (the source
- * HTML's own name for a `HyperlinkId`, verified against a real archive) has
- * a matching `DocumentExtract` row carries its own embedded excerpt,
- * decoded here exactly like a chapter's `Content`, so a caller never has to
- * fetch or resolve another publication just to show it.
+ * Reads the archive's embedded excerpts ("quadros de destaque").
  *
- * Was previously left unextracted everywhere in this app (see the "ficou de
- * fora" note this superseded in data/nwt_st_structure.md, written before this
- * was implemented) — the join is `DocumentExtract.HyperlinkId` →
- * `data-xtid`, `DocumentExtract.ExtractId` → `Extract`, `Extract.Content` the
- * excerpt itself, `Extract.RefPublicationId` → `RefPublication` for a title
- * to label it with. Optional in the archive, like BibleCitation — most
- * publications carry no Extract table at all.
+ * The join is `data-xtid` → `Extract.ExtractId` directly — the citing link
+ * carries the excerpt's OWN id, not the hyperlink's. See JwpubExtract in
+ * types.ts for how that was verified (and for what the earlier HyperlinkId
+ * reading got wrong).
+ *
+ * `DocumentExtract` is what groups several excerpts under one citation link
+ * (same `HyperlinkId`, same paragraph) and what scopes them to a document +
+ * paragraph; `Extract.Content` is the excerpt itself, decoded exactly like a
+ * chapter's; `Extract.RefPublicationId` → `RefPublication` labels it.
+ * Optional in the archive, like BibleCitation.
  */
 async function readExtracts(
   db: import("sql.js").Database,
   keys: Awaited<ReturnType<typeof deriveJwpubKeys>>,
   inflate: (input: Uint8Array) => Uint8Array
-): Promise<Map<number, JwpubExtract>> {
-  const extracts = new Map<number, JwpubExtract>();
+): Promise<JwpubExtractIndex> {
+  const byExtractId = new Map<number, JwpubExtract>();
+  const citationGroups = new Map<string, number[]>();
 
   let res;
   try {
     res = db.exec(`
-      SELECT de.HyperlinkId, e.ExtractId, e.Content, rp.Title, rp.Symbol
+      SELECT de.DocumentId, de.BeginParagraphOrdinal, de.HyperlinkId, de.ExtractId,
+             e.Content, e.Caption, e.RefMepsDocumentId, rp.Title, rp.Symbol
       FROM DocumentExtract de
       JOIN Extract e ON e.ExtractId = de.ExtractId
       LEFT JOIN RefPublication rp ON rp.RefPublicationId = e.RefPublicationId
+      ORDER BY de.DocumentId, de.BeginParagraphOrdinal, de.SortPosition, de.DocumentExtractId
     `);
   } catch {
-    return extracts; // No Extract/DocumentExtract/RefPublication tables in this archive.
+    return { byExtractId, citationGroups }; // No Extract/DocumentExtract/RefPublication tables in this archive.
   }
-  if (res.length === 0) return extracts;
+  if (res.length === 0) return { byExtractId, citationGroups };
 
-  // The same ExtractId is routinely cited from many different verses (a
-  // Bible story or "What Does the Bible Say" box referenced repeatedly) —
-  // each such citation gets its own HyperlinkId (a distinct data-xtid, one
-  // per place it's cited from), but decoding the same encrypted Content
-  // more than once would be pure waste at this archive's scale (tens of
-  // thousands of citations sharing far fewer distinct excerpts).
-  const decodedByExtractId = new Map<number, JwpubExtract>();
+  /** `"{documentId}:{paragraphOrdinal}:{hyperlinkId}"` → the ExtractIds on that one citation link, in source order. */
+  const groups = new Map<string, number[]>();
 
-  for (const [hyperlinkId, extractIdRaw, content, refTitle, refSymbol] of res[0].values) {
-    if (hyperlinkId === null || extractIdRaw === null) continue;
-    const hyperlinkKey = Number(hyperlinkId);
+  for (const [documentId, paragraph, hyperlinkId, extractIdRaw, content, caption, refDocId, refTitle, refSymbol] of res[0]
+    .values) {
+    if (extractIdRaw === null) continue;
     const extractId = Number(extractIdRaw);
-    if (extracts.has(hyperlinkKey)) continue; // A citation itself is never duplicated in this query's own rows.
 
-    let extract = decodedByExtractId.get(extractId);
-    if (!extract) {
+    // The same ExtractId is routinely cited from many places (a Bible story
+    // referenced from several verses); decoding its encrypted Content more
+    // than once would be pure waste at this archive's scale (52k citation
+    // rows over 38k distinct excerpts in the Research Guide alone).
+    if (!byExtractId.has(extractId)) {
       const html =
         content instanceof Uint8Array
           ? await decodeJwpubContent(content, keys, inflate)
@@ -307,19 +308,37 @@ async function readExtracts(
             ? ""
             : String(content);
       if (!html) continue;
-      extract = {
+      byExtractId.set(extractId, {
         extractId,
         html,
+        caption: caption === null ? null : String(caption),
         refTitle: refTitle === null ? null : String(refTitle),
         refSymbol: refSymbol === null ? null : String(refSymbol),
-      };
-      decodedByExtractId.set(extractId, extract);
+        refMepsDocumentId: refDocId === null ? null : Number(refDocId),
+      });
     }
 
-    extracts.set(hyperlinkKey, extract);
+    if (documentId === null || paragraph === null || hyperlinkId === null) continue;
+    const groupKey = `${Number(documentId)}:${Number(paragraph)}:${Number(hyperlinkId)}`;
+    const group = groups.get(groupKey);
+    if (group) {
+      if (!group.includes(extractId)) group.push(extractId);
+    } else {
+      groups.set(groupKey, [extractId]);
+    }
   }
 
-  return extracts;
+  // Re-key each group by every member's own id, since the citing link only
+  // ever names one of them (usually the first) and that's all the renderer
+  // has to look up with.
+  for (const [groupKey, ids] of groups) {
+    const [documentId, paragraph] = groupKey.split(":");
+    for (const id of ids) {
+      citationGroups.set(extractCitationKey(Number(documentId), Number(paragraph), id), ids);
+    }
+  }
+
+  return { byExtractId, citationGroups };
 }
 
 /** Only pulls out images the chapters actually reference — an archive carries plenty that nothing links to. */

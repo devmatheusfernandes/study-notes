@@ -188,6 +188,84 @@ export async function saveFootnotes(
   return error ? { error: "Não foi possível salvar as notas de rodapé." } : {};
 }
 
+/** One embedded excerpt, as the reader renders it. See JwpubExtract in lib/jwpub/types.ts. */
+export interface JwpubExtractRow {
+  extractId: number;
+  html: string;
+  /** Pre-built markup naming the source article — often the only place its name appears at all. */
+  caption: string | null;
+  refTitle: string | null;
+  refSymbol: string | null;
+  /** The document the excerpt came from, so the panel can offer the full publication (resolve or download). */
+  refMepsDocumentId: number | null;
+}
+
+export async function saveExtracts(
+  publicationId: string,
+  extracts: JwpubExtractRow[]
+): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  if (!(await ownedPublication(supabase, publicationId))) return { error: "Acesso negado." };
+  if (extracts.length === 0) return {};
+
+  const { error } = await supabase.from("jwpub_extracts").upsert(
+    extracts.map((extract) => ({
+      user_id: user.id,
+      publication_id: publicationId,
+      extract_id: extract.extractId,
+      content_html: extract.html,
+      caption: extract.caption,
+      ref_title: extract.refTitle,
+      ref_symbol: extract.refSymbol,
+      ref_meps_document_id: extract.refMepsDocumentId,
+    })),
+    { onConflict: "publication_id,extract_id" }
+  );
+
+  return error ? { error: "Não foi possível salvar os trechos citados." } : {};
+}
+
+/**
+ * The excerpts behind one citation link (`data-jwpub-extract="12,13,14"`).
+ * Fetched on click rather than shipped with the chapter — a chapter's
+ * excerpts together are far larger than the chapter itself, and most are
+ * never opened.
+ */
+export async function getExtracts(
+  publicationId: string,
+  extractIds: number[]
+): Promise<{ extracts?: JwpubExtractRow[]; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  const ids = extractIds.filter((id) => Number.isFinite(id));
+  if (ids.length === 0) return { extracts: [] };
+
+  const { data, error } = await supabase
+    .from("jwpub_extracts")
+    .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
+    .eq("publication_id", publicationId)
+    .in("extract_id", ids);
+
+  if (error) return { error: "Não foi possível carregar o trecho citado." };
+
+  // Returned in the order the citation named them, not the database's.
+  const byId = new Map(
+    (data ?? []).map((row) => [
+      row.extract_id,
+      {
+        extractId: row.extract_id,
+        html: row.content_html,
+        caption: row.caption,
+        refTitle: row.ref_title,
+        refSymbol: row.ref_symbol,
+        refMepsDocumentId: row.ref_meps_document_id,
+      } satisfies JwpubExtractRow,
+    ])
+  );
+  return { extracts: ids.map((id) => byId.get(id)).filter((row): row is JwpubExtractRow => row !== undefined) };
+}
+
 export async function markPublicationFailed(noteId: string): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };

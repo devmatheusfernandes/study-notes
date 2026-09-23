@@ -1,7 +1,8 @@
 "use client";
 
 import DOMPurify from "dompurify";
-import type { JwpubBibleCitation, JwpubExtract } from "./types";
+import { extractCitationKey } from "./types";
+import type { JwpubBibleCitation, JwpubExtractIndex } from "./types";
 
 /**
  * Chapter HTML comes out of a third-party file, so per CLAUDE.md's rule about
@@ -55,26 +56,37 @@ export function sanitizeChapterHtml(html: string): string {
  * must be scoped to it (pass -1, the default, for content with no such
  * scope — e.g. footnotes — which just leaves any bible ref inert).
  *
- * `extracts` resolves a citation carrying `data-xtid="<hyperlinkId>"` (the
- * source archive's own name for the id, confirmed against a real one) to
- * `data-jwpub-extract="<extractId>"` when it has a self-contained excerpt
- * embedded in the archive — the caller is then expected to have persisted
- * that excerpt somewhere addressable by `extractId` (see
- * lib/bible/research-guide-parse.ts for how the Bible reader's Research
- * Guide tab does this; nothing else in the app currently does the
- * equivalent for a normal uploaded publication — see the "known gap" note on
- * ParsedJwpub.extractsByHyperlinkId). Omit `extracts` (the default) to leave
- * every citation exactly as before this existed.
+ * `extracts` resolves a citation carrying `data-xtid="<extractId>"` (the
+ * archive's own `Extract.ExtractId`) to `data-jwpub-extract="<id>[,<id>...]"`
+ * when the archive embeds the excerpt(s) behind that link — the caller is
+ * then expected to have persisted them somewhere addressable by those ids
+ * (see lib/bible/research-guide-parse.ts for the Bible reader's Guia tab and
+ * lib/jwpub/ingest.ts for an ordinary uploaded publication). The value is a
+ * LIST because one citation link routinely stands for several excerpts —
+ * see JwpubExtractIndex in types.ts. Omit `extracts` (the default) to leave
+ * every citation as a plain `data-jwpub-pubref`.
  */
 export function rewriteJwpubLinks(
   html: string,
   citations: Map<string, JwpubBibleCitation> = new Map(),
   documentId: number = -1,
-  extracts: Map<number, JwpubExtract> = new Map()
+  extracts?: JwpubExtractIndex
 ): string {
+  // Tracks the `data-pid` of the paragraph each link sits in, by matching
+  // element open tags in the same pass as the anchors. A citation's excerpt
+  // group is scoped to (document, paragraph) — the same excerpt can be cited
+  // twice in one document under different links, and only the paragraph
+  // tells those apart (see JwpubExtractIndex).
+  let paragraphOrdinal = -1;
+
   return html.replace(
-    /<a\b([^>]*?)href="jwpub:\/\/([^"]+)"([^>]*)>/gi,
-    (_match, before: string, target: string, after: string) => {
+    /<[a-z][a-z0-9]*\b[^>]*?\bdata-pid="(\d+)"[^>]*>|<a\b([^>]*?)href="jwpub:\/\/([^"]+)"([^>]*)>/gi,
+    (match: string, pid: string | undefined, before: string, target: string, after: string) => {
+      if (pid !== undefined) {
+        paragraphOrdinal = Number(pid);
+        return match;
+      }
+
       const footnote = /^f\/(?:[^/]*\/)*?(\d+)/.exec(target);
       if (footnote) {
         return `<a${before}data-jwpub-footnote="${footnote[1]}"${after}>`;
@@ -90,9 +102,16 @@ export function rewriteJwpubLinks(
 
       if (target.startsWith("p/")) {
         const xtid = /data-xtid="(\d+)"/.exec(before + after);
-        const extract = xtid ? extracts.get(Number(xtid[1])) : undefined;
-        if (extract) {
-          return `<a${before}data-jwpub-extract="${extract.extractId}"${after}>`;
+        const extractId = xtid ? Number(xtid[1]) : null;
+        if (extracts && extractId !== null && extracts.byExtractId.has(extractId)) {
+          // Every excerpt on THIS link, not just the one its own data-xtid
+          // names — "Perspicaz, Volume 1," is a single anchor standing for
+          // six different articles. Falls back to the single id when the
+          // group lookup misses (a paragraph this pass couldn't track, or an
+          // archive with no BeginParagraphOrdinal).
+          const group =
+            extracts.citationGroups.get(extractCitationKey(documentId, paragraphOrdinal, extractId)) ?? [extractId];
+          return `<a${before}data-jwpub-extract="${group.join(",")}"${after}>`;
         }
 
         // No trailing `$` anchor — a citation can name SEVERAL targets in one

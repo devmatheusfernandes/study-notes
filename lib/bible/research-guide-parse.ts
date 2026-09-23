@@ -30,8 +30,17 @@ const VERSE_HEADING = /<p\b[^>]*class="se"[^>]*>\s*<a\b[^>]*href="jwpub:\/\/b\/N
  *   2 — embeds Extract content inline (data-jwpub-extract) and stops
  *       silently dropping multi-target citations (a `$`-joined href like
  *       "Seja Feliz para Sempre!, lição 6" used to match nothing at all)
+ *   3 — fixes WHICH excerpt a citation resolves to. Version 2 read
+ *       `data-xtid` as a `HyperlinkId`, but it is the `ExtractId`; the two
+ *       are unrelated id spaces, so essentially every excerpt the Guia tab
+ *       showed was some other publication's article (`data-xtid="5807"`,
+ *       "Perspicaz, Volume 1" at Gênesis 1:1, resolved to a 2004 Watchtower
+ *       piece on humility). Also emits the citation's WHOLE excerpt group,
+ *       not just the first — that Perspicaz link alone stands for six
+ *       different articles — and imports Extract.Caption/RefMepsDocumentId,
+ *       which is where the cited article's name actually lives.
  */
-export const RESEARCH_GUIDE_IMPORT_VERSION = 2;
+export const RESEARCH_GUIDE_IMPORT_VERSION = 3;
 
 export interface ResearchGuideVerseBlock {
   bookOrder: number;

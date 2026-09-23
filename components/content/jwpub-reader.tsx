@@ -12,8 +12,10 @@ import {
   getFootnote,
   getPublication,
   getAnswers,
+  getExtracts,
   resolveJwpubReferences,
   type ResolvedJwpubReference,
+  type JwpubExtractRow,
 } from "@/app/(app)/jwpub-actions";
 import { getBibleVerses, getBibleVersesBatch, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
@@ -32,6 +34,7 @@ import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
 import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
+import { JwpubExtractSurface } from "./jwpub-extract-surface";
 import {
   JwlibraryNoteEditorVault,
   type PrefilledJwlibraryLocation,
@@ -136,23 +139,42 @@ export function JwpubReader({
   );
 
   // Sync activeIndex with URL search parameters on client-side navigation
+  // (a deep link from elsewhere in the app, or the back/forward button).
+  //
+  // Keyed on the params THEMSELVES, not on a comparison against activeIndex:
+  // `activeIndex` used to be a dependency here, so every local chapter change
+  // re-ran this effect while `searchParams` still held the OLD `?doc=` — and
+  // it dutifully forced activeIndex straight back to the chapter the URL
+  // still named. Prev/Next and the chapter list all looked dead because of
+  // it: the index flipped and snapped back before the URL caught up.
+  const appliedParamsRef = useRef<string | null>(null);
   useEffect(() => {
     const docParam = searchParams.get("doc");
     const chapterParam = searchParams.get("chapter");
+    const key = `${docParam ?? ""}|${chapterParam ?? ""}`;
+    if (appliedParamsRef.current === key) return;
+    appliedParamsRef.current = key;
     if (!docParam && !chapterParam) return;
     const targetIdx = resolveChapterIndex(docParam, chapterParam);
-    if (targetIdx !== activeIndex) {
-      queueMicrotask(() => {
-        setActiveIndex(targetIdx);
-      });
-    }
-  }, [searchParams, resolveChapterIndex, activeIndex]);
+    // Deferred out of the effect body itself (react-hooks/set-state-in-effect)
+    // — same shape this effect already had before the dependency fix.
+    queueMicrotask(() => setActiveIndex(targetIdx));
+  }, [searchParams, resolveChapterIndex]);
 
   // Moving between chapters (prev/next, the chapter list) also writes `?doc=`
   // to the URL — otherwise a reload always lands back on the first chapter.
-  // `replace` (not `push`) so flipping through chapters doesn't pile up
-  // browser-history entries; the URL→state effect above is a no-op once this
-  // runs since targetIdx already matches the index we just set.
+  //
+  // `window.history.replaceState`, not `router.replace`: Next.js integrates
+  // the native History API with `usePathname`/`useSearchParams` (see
+  // node_modules/next/dist/docs/01-app/02-guides/single-page-applications.md
+  // — "Shallow routing on the client"), so the URL and the effect above stay
+  // in sync WITHOUT the RSC round trip `router.replace` fires for this
+  // dynamic route on every single chapter turn. That round trip was pure
+  // latency here — the page re-renders from `chapters`/`activeIndex`, which
+  // the server never had to be asked about — and it left the URL stale for
+  // however long it took, which is exactly what the effect above used to
+  // punish. `replaceState` (not `pushState`) so flipping through chapters
+  // doesn't pile up browser-history entries.
   const navigateToIndex = useCallback(
     (index: number) => {
       setActiveIndex(index);
@@ -163,9 +185,10 @@ export function JwpubReader({
       params.delete("chapter");
       params.delete("text");
       params.delete("pid");
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      appliedParamsRef.current = `${chapter.documentId}|`;
+      window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
     },
-    [chapters, pathname, router, searchParams]
+    [chapters, pathname, searchParams]
   );
 
   const [html, setHtml] = useState<string | null>(null);
@@ -205,6 +228,13 @@ export function JwpubReader({
   // The clicked citation's own id, carried whenever it isn't in
   // `resolvedPubRefs` — lets the panel offer "Baixar" instead of a dead end.
   const [unresolvedPubRef, setUnresolvedPubRef] = useState<number | null>(null);
+
+  // A `data-jwpub-extract` citation — the cited text is embedded in THIS
+  // archive (see readExtracts in lib/jwpub/parser.ts), so there's nothing to
+  // resolve against the library or download. `null` means the panel is
+  // closed; a citation can name several excerpts at once.
+  const [openExtracts, setOpenExtracts] = useState<JwpubExtractRow[] | null>(null);
+  const [isLoadingExtracts, setIsLoadingExtracts] = useState(false);
 
   // "Anotar" mode (Fase 2): while true, clicking a paragraph in
   // JwpubChapterView opens the note editor pre-anchored to it instead of the
@@ -443,6 +473,23 @@ export function JwpubReader({
       });
     },
     [resolvedPubRefs]
+  );
+
+  const handleExtract = useCallback(
+    (extractIds: number[]) => {
+      // The reference panel and this one are independent state — without
+      // this, clicking an embedded citation right after a bare pointer left
+      // two sidebars open side by side.
+      setReferenceOpen(false);
+      setOpenExtracts([]);
+      setIsLoadingExtracts(true);
+      void getExtracts(publication.id, extractIds).then((result) => {
+        setOpenExtracts(result.extracts ?? []);
+        setIsLoadingExtracts(false);
+        if (result.error) notify.error("Não foi possível abrir o trecho", result.error);
+      });
+    },
+    [publication.id]
   );
 
   // A download from inside the panel just ingested this MepsDocumentId's
@@ -769,6 +816,7 @@ export function JwpubReader({
                   onFootnote={handleFootnote}
                   onBibleRef={handleBibleRef}
                   onPublicationRef={handlePublicationRef}
+                  onExtract={handleExtract}
                   resolvedPubRefIds={resolvedPubRefIds}
                   pickingParagraph={pickingParagraph}
                   onPickParagraph={handlePickParagraph}
@@ -888,6 +936,14 @@ export function JwpubReader({
         unresolvedMepsDocumentId={unresolvedPubRef}
         onResolved={handlePublicationRefResolved}
         onClose={() => setReferenceOpen(false)}
+      />
+
+      <JwpubExtractSurface
+        open={openExtracts !== null}
+        extracts={openExtracts ?? []}
+        isLoading={isLoadingExtracts}
+        onClose={() => setOpenExtracts(null)}
+        onOpenSource={handlePublicationRef}
       />
 
       <JwlibraryHighlightNotePanel

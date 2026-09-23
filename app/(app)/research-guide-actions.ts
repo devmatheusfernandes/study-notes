@@ -175,8 +175,12 @@ export async function appendResearchGuideEntries(
 export interface ResearchGuideExtractInput {
   extractId: number;
   contentHtml: string;
+  /** `Extract.Caption` markup naming the source article — usually the only place that name appears, since a Perspicaz citation's own link text is just "Perspicaz, Volume 1,". */
+  caption: string | null;
   refTitle: string | null;
   refSymbol: string | null;
+  /** The document the excerpt was taken from, so the panel can offer the full publication. */
+  refMepsDocumentId: number | null;
 }
 
 /**
@@ -205,8 +209,10 @@ export async function appendResearchGuideExtracts(
       extracts.map((e) => ({
         extract_id: e.extractId,
         content_html: e.contentHtml,
+        caption: e.caption,
         ref_title: e.refTitle,
         ref_symbol: e.refSymbol,
+        ref_meps_document_id: e.refMepsDocumentId,
       })),
       { onConflict: "extract_id" }
     );
@@ -242,9 +248,12 @@ export interface ResearchGuideVerseEntry {
 }
 
 export interface ResearchGuideExtract {
+  extractId: number;
   html: string;
+  caption: string | null;
   refTitle: string | null;
   refSymbol: string | null;
+  refMepsDocumentId: number | null;
 }
 
 /**
@@ -282,9 +291,13 @@ export async function getChapterResearchGuide(
 
   const entries = (data ?? []).map((row) => ({ verse: row.verse, contentHtml: row.content_html }));
 
+  // One citation link can name several excerpts, comma-joined — see
+  // rewriteJwpubLinks in lib/jwpub/sanitize.ts.
   const extractIds = [
     ...new Set(
-      entries.flatMap((entry) => [...entry.contentHtml.matchAll(/data-jwpub-extract="(\d+)"/g)]).map((m) => Number(m[1]))
+      entries
+        .flatMap((entry) => [...entry.contentHtml.matchAll(/data-jwpub-extract="([\d,]+)"/g)])
+        .flatMap((m) => m[1].split(",").map(Number))
     ),
   ];
 
@@ -292,10 +305,17 @@ export async function getChapterResearchGuide(
   if (extractIds.length > 0) {
     const { data: extractRows } = await supabase
       .from("bible_research_guide_extracts")
-      .select("extract_id, content_html, ref_title, ref_symbol")
+      .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
       .in("extract_id", extractIds);
     for (const row of extractRows ?? []) {
-      extracts[row.extract_id] = { html: row.content_html, refTitle: row.ref_title, refSymbol: row.ref_symbol };
+      extracts[row.extract_id] = {
+        extractId: row.extract_id,
+        html: row.content_html,
+        caption: row.caption,
+        refTitle: row.ref_title,
+        refSymbol: row.ref_symbol,
+        refMepsDocumentId: row.ref_meps_document_id,
+      };
     }
   }
 

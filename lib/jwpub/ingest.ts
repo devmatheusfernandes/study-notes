@@ -1,7 +1,13 @@
 "use client";
 
 import { notify } from "@/components/ui/toaster";
-import { savePublication, saveChapterContent, saveFootnotes, markPublicationFailed } from "@/app/(app)/jwpub-actions";
+import {
+  savePublication,
+  saveChapterContent,
+  saveFootnotes,
+  saveExtracts,
+  markPublicationFailed,
+} from "@/app/(app)/jwpub-actions";
 import { parseJwpub } from "./parser";
 import { uploadMedia, rewriteMediaUrls } from "./media";
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "./sanitize";
@@ -76,16 +82,49 @@ export async function ingestJwpub(
 
     // Sanitize once here, at write time, so the database only ever holds
     // trusted markup and the reader can be a plain renderer.
+    //
+    // `parsed.extracts` turns a citation into another publication into
+    // `data-jwpub-extract` whenever the archive already embeds the cited
+    // text — which, for the publications this app is actually used to read,
+    // is the common case and not an exotic one: every single citation in a
+    // "Nossa Vida e Ministério Cristão" apostila carries its excerpt. Those
+    // citations then need nothing downloaded at all; the ones with no
+    // excerpt still come out as `data-jwpub-pubref` and keep the
+    // resolve-or-download path.
+    const citedExtractIds = new Set<number>();
     for (const [index, chapter] of parsed.chapters.entries()) {
       onProgress?.(`Salvando capítulos (${index + 1}/${parsed.chapters.length})`);
-      const html = sanitizeChapterHtml(
-        rewriteJwpubLinks(
-          rewriteMediaUrls(chapter.html, mediaUrls),
-          parsed.bibleCitations,
-          chapter.documentId
-        )
+      const rewritten = rewriteJwpubLinks(
+        rewriteMediaUrls(chapter.html, mediaUrls),
+        parsed.bibleCitations,
+        chapter.documentId,
+        parsed.extracts
       );
-      await saveChapterContent(publicationId, chapter.documentId, html);
+      for (const match of rewritten.matchAll(/data-jwpub-extract="([\d,]+)"/g)) {
+        for (const id of match[1].split(",")) citedExtractIds.add(Number(id));
+      }
+      await saveChapterContent(publicationId, chapter.documentId, sanitizeChapterHtml(rewritten));
+    }
+
+    if (citedExtractIds.size > 0) {
+      onProgress?.("Salvando trechos citados");
+      const rows = [...citedExtractIds]
+        .map((id) => parsed.extracts.byExtractId.get(id))
+        .filter((extract): extract is NonNullable<typeof extract> => extract !== undefined)
+        .map((extract) => ({
+          extractId: extract.extractId,
+          // Same treatment the chapters get — the excerpt is third-party
+          // markup from the same archive.
+          html: sanitizeChapterHtml(rewriteJwpubLinks(rewriteMediaUrls(extract.html, mediaUrls))),
+          caption: extract.caption === null ? null : sanitizeChapterHtml(extract.caption),
+          refTitle: extract.refTitle,
+          refSymbol: extract.refSymbol,
+          refMepsDocumentId: extract.refMepsDocumentId,
+        }));
+      // Chunked for the same payload reason as chapters/footnotes.
+      for (let i = 0; i < rows.length; i += 50) {
+        await saveExtracts(publicationId, rows.slice(i, i + 50));
+      }
     }
 
     if (parsed.footnotes.length > 0) {

@@ -18,8 +18,10 @@ interface JwpubChapterViewProps {
   answers: Record<string, string>;
   onFootnote: (footnoteId: number) => void;
   onBibleRef: (firstVerseId: number, lastVerseId: number) => void;
-  /** A `data-jwpub-pubref` cross-reference was clicked — only fires for one whose MepsDocumentId is in `resolvedPubRefIds` (see JwpubReader, which resolves them against the user's own library). */
+  /** A `data-jwpub-pubref` cross-reference was clicked. Fires for an unresolved one too — JwpubReader opens its "Baixar" state for those. */
   onPublicationRef?: (mepsDocumentId: number, pid?: string) => void;
+  /** A `data-jwpub-extract` citation was clicked — the excerpt(s) it names are embedded in this very publication, so nothing has to be resolved or downloaded. One link can name several (see rewriteJwpubLinks). */
+  onExtract?: (extractIds: number[]) => void;
   /** MepsDocumentIds this user currently has an ingested chapter for — drives both which pubrefs look clickable and which actually respond to a click. */
   resolvedPubRefIds?: Set<number>;
   /** "Anotar" mode (Fase 2) — while true, clicking any paragraph/heading (without selecting text) picks the whole thing for a new jwlibrary note instead of the normal footnote/bible-ref handling. Selecting a specific span works independently of this mode — see onPickParagraphSpan. */
@@ -43,6 +45,9 @@ const ANSWER_IDLE_CLASS = "border-border";
 const ANSWER_TYPING_CLASS = "border-accent ring-1 ring-accent/40";
 const ANSWER_SAVED_CLASS = "border-success ring-1 ring-success/40";
 
+/** Roughly half the selection pill's rendered width, used only to keep it inside the viewport. */
+const SELECTION_POPUP_HALF_WIDTH = 110;
+
 export function JwpubChapterView({
   html,
   publicationId,
@@ -51,6 +56,7 @@ export function JwpubChapterView({
   onFootnote,
   onBibleRef,
   onPublicationRef,
+  onExtract,
   resolvedPubRefIds,
   pickingParagraph = false,
   onPickParagraph,
@@ -98,10 +104,30 @@ export function JwpubChapterView({
         return;
       }
 
+      const extractLink = el?.closest<HTMLElement>("[data-jwpub-extract]");
+      if (extractLink) {
+        const ids = (extractLink.dataset.jwpubExtract ?? "")
+          .split(",")
+          .map(Number)
+          .filter((id) => Number.isFinite(id));
+        if (ids.length > 0) {
+          event.preventDefault();
+          onExtract?.(ids);
+        }
+        return;
+      }
+
       const pubRef = el?.closest<HTMLElement>("[data-jwpub-pubref]");
       if (pubRef) {
         const mepsId = Number(pubRef.dataset.jwpubPubref);
-        if (Number.isFinite(mepsId) && resolvedPubRefIds?.has(mepsId)) {
+        // Fires for an UNRESOLVED citation too, deliberately: JwpubReader's
+        // handlePublicationRef opens the reference panel on its "Baixar"
+        // state for one that isn't in the library yet. This used to be
+        // gated on `resolvedPubRefIds.has(mepsId)`, which meant the download
+        // prompt — the whole point of that state — was unreachable from the
+        // publication reader; only the Bible study panel's Guia tab ever got
+        // there.
+        if (Number.isFinite(mepsId)) {
           event.preventDefault();
           onPublicationRef?.(mepsId, pubRef.dataset.jwpubPubrefPid);
         }
@@ -148,6 +174,7 @@ export function JwpubChapterView({
     onFootnote,
     onBibleRef,
     onPublicationRef,
+    onExtract,
     resolvedPubRefIds,
     pickingParagraph,
     onPickParagraph,
@@ -168,11 +195,16 @@ export function JwpubChapterView({
     els.forEach((el) => {
       const id = Number(el.dataset.jwpubPubref);
       const isResolved = Number.isFinite(id) && (resolvedPubRefIds?.has(id) ?? false);
-      el.classList.toggle("cursor-pointer", isResolved);
+      // Both states are clickable now (an unresolved one opens the "Baixar"
+      // prompt), so the styling distinguishes "already in your library"
+      // (solid accent) from "can be fetched" (dashed, muted) rather than
+      // clickable from dead.
+      el.classList.add("cursor-pointer", "underline", "underline-offset-2");
       el.classList.toggle("text-accent", isResolved);
-      el.classList.toggle("underline", isResolved);
-      el.classList.toggle("underline-offset-2", isResolved);
+      el.classList.toggle("decoration-solid", isResolved);
       el.classList.toggle("text-foreground/80", !isResolved);
+      el.classList.toggle("decoration-dashed", !isResolved);
+      el.classList.toggle("decoration-muted-foreground/60", !isResolved);
     });
   }, [html, resolvedPubRefIds]);
 
@@ -189,7 +221,7 @@ export function JwpubChapterView({
   // the selection to hold still for a moment shows it only once the user has
   // actually settled on a span.
   const SELECTION_PROMPT_DELAY_MS = 350;
-  const [selectionPrompt, setSelectionPrompt] = useState<{ x: number; y: number; pid: string; range: Range } | null>(
+  const [selectionPrompt, setSelectionPrompt] = useState<{ x: number; bottom: number; pid: string; range: Range } | null>(
     null
   );
 
@@ -224,7 +256,7 @@ export function JwpubChapterView({
       const pid = paragraphEl.dataset.pid;
       const clonedRange = range.cloneRange();
       delayTimer = setTimeout(() => {
-        setSelectionPrompt({ x: rect.left + rect.width / 2, y: rect.top, pid, range: clonedRange });
+        setSelectionPrompt({ x: rect.left + rect.width / 2, bottom: rect.bottom, pid, range: clonedRange });
       }, SELECTION_PROMPT_DELAY_MS);
     }
 
@@ -476,6 +508,9 @@ export function JwpubChapterView({
           "[&_[data-jwpub-footnote]]:cursor-pointer [&_[data-jwpub-footnote]]:text-accent [&_[data-jwpub-footnote]]:underline [&_[data-jwpub-footnote]]:underline-offset-2",
           "[&_[data-jwpub-bible-first]]:cursor-pointer [&_[data-jwpub-bible-first]]:text-accent [&_[data-jwpub-bible-first]]:underline [&_[data-jwpub-bible-first]]:underline-offset-2",
           "[&_[data-jwpub-ref]]:text-foreground/80",
+          // A citation whose text this publication already carries — always
+          // openable, nothing to resolve or download.
+          "[&_[data-jwpub-extract]]:cursor-pointer [&_[data-jwpub-extract]]:text-accent [&_[data-jwpub-extract]]:underline [&_[data-jwpub-extract]]:underline-offset-2",
           // Starts muted/inert like data-jwpub-ref — the effect above upgrades
           // it to the accent/clickable look once resolution confirms the
           // referenced publication is actually in this user's library.
@@ -504,8 +539,14 @@ export function JwpubChapterView({
         <div
           style={{
             position: "fixed",
-            left: selectionPrompt.x,
-            top: Math.max(8, selectionPrompt.y - 44),
+            // Clamped horizontally so the pill can't hang off either edge.
+            left: Math.min(Math.max(selectionPrompt.x, SELECTION_POPUP_HALF_WIDTH + 8), window.innerWidth - SELECTION_POPUP_HALF_WIDTH - 8),
+            // BELOW the selection, never above it — see the identical
+            // comment in bible-chapter-view.tsx: the mobile OS draws its own
+            // "Copiar / Selecionar tudo / Compartilhar" bar over the top of a
+            // selection and there's no way to suppress it, so anything shown
+            // above gets buried under it.
+            top: Math.min(selectionPrompt.bottom + 10, window.innerHeight - 52),
             transform: "translateX(-50%)",
           }}
           className="z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_rgba(0,0,0,0.4)]"
