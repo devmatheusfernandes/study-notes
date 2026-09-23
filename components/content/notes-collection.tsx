@@ -177,11 +177,17 @@ export function NotesCollection({
   }, [query]);
 
   // A search should find a note no matter which folder it's tucked into —
-  // scoping to `activeFolder` only makes sense while just browsing.
+  // scoping to `activeFolder` only makes sense while just browsing. And at
+  // the root (no folder opened) we deliberately DON'T scope to `folderId:
+  // null` either: the root screen is the mixed masonry of every note/file
+  // regardless of which folder (if any) it's filed into, with folders shown
+  // above it as a filter you can drill into — not a "notes with no folder"
+  // view. Scoping the root to folderless notes was hiding every note that
+  // had been filed into a folder from the main screen entirely.
   const { pinned: allPinned, others: allOthers } = selectByStatus(
     notes,
     status,
-    showFolders && !isSearching ? { folderId: activeFolder } : undefined
+    showFolders && !isSearching && activeFolder ? { folderId: activeFolder } : undefined
   );
   const matchesNote = (note: Note) =>
     (matchesSearch(query, note.title, note.body) || jwpubMatches.has(note.id)) &&

@@ -84,6 +84,7 @@ function Body({
   error,
   unresolvedMepsDocumentId,
   onResolved,
+  onClose,
 }: {
   target: JwpubReferenceTarget | null;
   html: string | null;
@@ -91,6 +92,7 @@ function Body({
   error?: string | null;
   unresolvedMepsDocumentId?: number | null;
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
+  onClose: () => void;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -137,7 +139,10 @@ function Body({
           variant="outline"
           size="sm"
           leftIcon={<ExternalLink />}
-          onClick={() => router.push(`/notes/${target.noteId}?doc=${target.documentId}`)}
+          onClick={() => {
+            onClose();
+            router.push(`/notes/${target.noteId}?doc=${target.documentId}`);
+          }}
         >
           Abrir publicação completa
         </Button>
@@ -178,6 +183,7 @@ export function JwpubReferenceSurface({
         error={error}
         unresolvedMepsDocumentId={unresolvedMepsDocumentId}
         onResolved={onResolved}
+        onClose={onClose}
       />
     </JwpubSidePanel>
   );
