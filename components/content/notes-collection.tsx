@@ -177,24 +177,18 @@ export function NotesCollection({
   }, [query]);
 
   // A search should find a note no matter which folder it's tucked into —
-  // scoping to `activeFolder` only makes sense while just browsing. And at
-  // the root (no folder opened) we deliberately DON'T scope to `folderId:
-  // null` either: the root screen is the mixed masonry of every note/file
-  // regardless of which folder (if any) it's filed into, with folders shown
-  // above it as a filter you can drill into — not a "notes with no folder"
-  // view. Scoping the root to folderless notes was hiding every note that
-  // had been filed into a folder from the main screen entirely.
+  // scoping to `activeFolder` only makes sense while just browsing.
   const { pinned: allPinned, others: allOthers } = selectByStatus(
     notes,
     status,
-    showFolders && !isSearching && activeFolder ? { folderId: activeFolder } : undefined
+    showFolders && !isSearching ? { folderId: activeFolder } : undefined
   );
   const matchesNote = (note: Note) =>
     (matchesSearch(query, note.title, note.body) || jwpubMatches.has(note.id)) &&
     (selectedTagIds.length === 0 || selectedTagIds.some((id) => note.tagIds.includes(id)));
   const pinned = allPinned.filter(matchesNote);
   const others = allOthers.filter(matchesNote);
-  const isEmpty = pinned.length === 0 && others.length === 0;
+  const hasNoNotes = pinned.length === 0 && others.length === 0;
 
   // What to show on a card in place of its normal excerpt while searching —
   // the context around where the term actually is, not just whatever the
@@ -220,6 +214,9 @@ export function NotesCollection({
     showFolders ? folders.filter((f) => (f.parentId ?? null) === (activeFolder ?? null)) : []
   ).filter((f) => matchesSearch(query, f.name));
   const foldersVisible = childFolders.length > 0;
+  // A screen showing folders isn't empty, even with no notes beside them —
+  // the "vazio" notice is only for when there's truly nothing to show.
+  const isEmpty = hasNoNotes && !foldersVisible;
 
   // While searching, carries the term (and, for a jwpub chapter match, which
   // chapter) into the note's URL — the same `?doc=` + `?text=` convention
