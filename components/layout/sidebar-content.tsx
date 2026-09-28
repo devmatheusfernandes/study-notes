@@ -110,7 +110,7 @@ export function SidebarContent({ collapsed = false, onNavigate, onToggleCollapse
       <div className="flex h-full flex-col gap-6">
         <div
           className={cn(
-            "flex min-h-14 shrink-0 items-center gap-2.5 px-1",
+            "flex shrink-0 items-center gap-2.5 px-1",
             collapsed && "flex-col justify-center gap-1.5 px-0"
           )}
         >
