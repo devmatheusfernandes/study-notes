@@ -13,6 +13,7 @@ import { RichTextEditor, type RichTextEditorHandle } from "@/components/content/
 import { NoteReferenceSurface } from "@/components/content/note-reference-surface";
 import { DrawingCanvas } from "@/components/content/drawing-canvas";
 import { DrawingToolbar } from "@/components/content/drawing-toolbar";
+import { AudioRecordControl } from "@/components/content/audio-record-control";
 import { NoteAudioPlayer, NoteTranscriptPanel } from "@/components/content/note-audio-player";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
@@ -679,6 +680,23 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                   >
                     <ImagePlus className="size-4" />
                   </button>
+                  {/* Recording a voice note used to only be reachable from the
+                      pen toolbar — it doesn't need the pen at all, so it's
+                      available here too. Hidden once a recording already
+                      exists (one slot per note; the AudioLines button below
+                      plays it back, and recording a replacement means
+                      deleting this one first from the player). */}
+                  {(isRecordingNow || audioSaveState !== "idle" || (audioPath === null && !pendingUpload)) && (
+                    <AudioRecordControl
+                      recorderState={recorder.state}
+                      recordingElapsedMs={recorder.elapsedMs}
+                      audioSaveState={audioSaveState}
+                      onStartRecording={() => void startRecording()}
+                      onPauseRecording={recorder.pause}
+                      onResumeRecording={recorder.resume}
+                      onStopRecording={() => void stopRecording()}
+                    />
+                  )}
                 </>
               )}
               <button

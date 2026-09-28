@@ -41,11 +41,11 @@ export function Sidebar() {
       aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
       title={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
       className={cn(
-        "sticky top-0 hidden h-dvh shrink-0 cursor-pointer flex-col border-r border-border bg-[#161413] pb-5 transition-[width] duration-200 md:flex",
+        "sticky top-0 hidden h-dvh shrink-0 cursor-pointer flex-col border-r border-border bg-[#161413] pb-5 pt-5 transition-[width] duration-200 md:flex",
         desktopCollapsed ? "w-[76px] px-3" : "w-[232px] px-4"
       )}
     >
-      <SidebarContent collapsed={desktopCollapsed} />
+      <SidebarContent collapsed={desktopCollapsed} onToggleCollapse={toggleDesktop} />
     </aside>
   );
 }

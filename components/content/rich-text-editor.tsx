@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { notify } from "@/components/ui/toaster";
 import { uploadNoteImage } from "@/app/(app)/note-images-actions";
 import { NoteReferenceMark, NOTE_REFERENCE_MARK } from "@/lib/tiptap/note-reference-mark";
+import { ParagraphIndent } from "@/lib/tiptap/paragraph-indent";
 import {
   ReferenceSuggestion,
   type ReferenceSuggestionState,
@@ -416,6 +417,13 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         onKeyDown: handleSuggestionKeyDown,
       }),
       /* eslint-enable react-hooks/refs */
+      // Last on purpose: ProseMirror tries each extension's Tab/Shift-Tab
+      // binding in registration order and stops at the first one that
+      // returns true, so list nesting (ListKeymap/TaskItem, via StarterKit
+      // and TaskList/CustomTaskItem above) and the "@" reference suggestion
+      // popup (ReferenceSuggestion above) both get first refusal — this one
+      // only fires once neither of those wants the key.
+      ParagraphIndent,
     ],
     content,
     editorProps: {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Trash2 } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Settings, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SIDEBAR_NAV_ITEMS } from "./sidebar-nav-items";
@@ -15,6 +15,8 @@ import { UpdateNudgeCard } from "./update-nudge-card";
 interface SidebarContentProps {
   collapsed?: boolean;
   onNavigate?: () => void;
+  /** Only passed by the desktop `<aside>` — the mobile drawer has no collapsed state of its own, so it never renders this button. */
+  onToggleCollapse?: () => void;
 }
 
 function NavLink({
@@ -68,17 +70,55 @@ function NavLink({
   );
 }
 
-export function SidebarContent({ collapsed = false, onNavigate }: SidebarContentProps) {
+export function SidebarContent({ collapsed = false, onNavigate, onToggleCollapse }: SidebarContentProps) {
   const pathname = usePathname();
   const pendingCount = usePendingSyncCount();
   const isOnline = useDeviceStore((s) => s.isOnline);
 
+  const toggleButton = onToggleCollapse && (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+            className={cn(
+              "shrink-0 rounded-full text-foreground/70 transition-colors hover:bg-secondary hover:text-foreground",
+              // Matches NavLink's collapsed pill exactly (full-width, same
+              // padding/icon size) so it reads as one more icon in the same
+              // column instead of a smaller, oddly-spaced control of its own.
+              collapsed ? "flex w-full items-center justify-center py-2.5" : "p-1.5"
+            )}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="size-[18px]" />
+            ) : (
+              <PanelLeftClose className="size-4" />
+            )}
+          </button>
+        }
+      />
+      <TooltipContent side={collapsed ? "right" : "bottom"}>
+        {collapsed ? "Expandir menu" : "Recolher menu"}
+      </TooltipContent>
+    </Tooltip>
+  );
+
   return (
     <TooltipProvider delay={200}>
       <div className="flex h-full flex-col gap-6">
-        <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-1", collapsed && "justify-center px-0")}>
+        <div
+          className={cn(
+            "flex min-h-14 shrink-0 items-center gap-2.5 px-1",
+            collapsed && "flex-col justify-center gap-1.5 px-0"
+          )}
+        >
           <div className="size-[22px] shrink-0 rounded-full bg-primary" />
-          {!collapsed && <span className="font-heading text-base tracking-tight">Study Notes</span>}
+          {!collapsed && (
+            <span className="flex-1 truncate font-heading text-base tracking-tight">Study Notes</span>
+          )}
+          {toggleButton}
         </div>
 
         <nav className="flex flex-col gap-1">

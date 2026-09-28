@@ -13,7 +13,7 @@ export function TaskItemNodeView({ node, updateAttributes }: ReactNodeViewProps)
   const checked = !!node.attrs.checked;
 
   return (
-    <NodeViewWrapper as="li" className="flex items-center gap-2.5 py-1" data-checked={checked}>
+    <NodeViewWrapper as="li" className="flex items-center gap-2.5 py-0.5" data-checked={checked}>
       <span
         contentEditable={false}
         // Keeps the checkbox click from also placing a text cursor, without
@@ -29,7 +29,15 @@ export function TaskItemNodeView({ node, updateAttributes }: ReactNodeViewProps)
       </span>
       <NodeViewContent
         className={cn(
-          "min-w-0 flex-1 leading-relaxed [&>p]:my-0",
+          // `!` is required: the editor container's own `[&_p]:my-2` (in
+          // rich-text-editor.tsx) targets every <p> descendant including
+          // this one, and matches it with equal CSS specificity — without
+          // `!` the winner depends on stylesheet order, which was giving
+          // each task item's paragraph 0.5rem of vertical margin on top of
+          // this row's own `py-1`, stacking into the oversized gaps between
+          // rows (and making the checkbox look disproportionately large
+          // next to all that empty space).
+          "min-w-0 flex-1 leading-normal [&>p]:my-0!",
           checked && "text-muted-foreground/60 line-through"
         )}
       />

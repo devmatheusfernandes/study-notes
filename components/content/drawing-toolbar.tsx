@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
   ChevronDown,
@@ -9,11 +8,8 @@ import {
   Hand,
   Highlighter,
   MoreHorizontal,
-  Pause,
   Pen,
-  Play,
   Redo2,
-  Square,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -25,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { AudioRecordControl } from "@/components/content/audio-record-control";
 import {
   HIGHLIGHT_COLORS,
   INK_COLORS,
@@ -66,11 +63,6 @@ const TOOLS: { id: DrawTool; label: string; icon: typeof Pen }[] = [
   { id: "eraser", label: "Borracha", icon: Eraser },
 ];
 
-function formatTime(ms: number) {
-  const total = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
-}
-
 /**
  * Sits inline in the note's header, so it has to stay small: only the choices
  * made constantly (which tool, undo, record) are buttons. Ink colour and
@@ -104,8 +96,6 @@ export function DrawingToolbar({
 }: DrawingToolbarProps) {
   const [inkOpen, setInkOpen] = useState(false);
   const palette = tool === "highlighter" ? HIGHLIGHT_COLORS : INK_COLORS;
-  const isRecording = recorderState === "recording";
-  const isPaused = recorderState === "paused";
 
   return (
     <div
@@ -215,84 +205,15 @@ export function DrawingToolbar({
         </Button>
       </div>
 
-      {/* Recording — the one control that changes shape with its state. */}
-      {isRecording || isPaused ? (
-        <div className="flex shrink-0 items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 pl-1 pr-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={isPaused ? "Retomar gravação" : "Pausar gravação"}
-            onClick={isPaused ? onResumeRecording : onPauseRecording}
-            className="px-2"
-          >
-            {isPaused ? <Play className="size-4" /> : <Pause className="size-4" />}
-          </Button>
-          <span
-            className={cn(
-              "font-mono text-[12px] tabular-nums",
-              isPaused ? "text-muted-foreground" : "text-destructive"
-            )}
-          >
-            {formatTime(recordingElapsedMs)}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Encerrar gravação"
-            onClick={onStopRecording}
-            className="px-2 text-destructive"
-          >
-            <Square className="size-3.5 fill-current" />
-          </Button>
-        </div>
-      ) : audioSaveState !== "idle" ? (
-        <AnimatePresence mode="wait">
-          <motion.span
-            key={audioSaveState}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.18 }}
-            className={cn(
-              "flex shrink-0 items-center gap-2 whitespace-nowrap px-2 text-[12px]",
-              audioSaveState === "saved" ? "text-success" : "text-muted-foreground"
-            )}
-          >
-            {audioSaveState === "saving" ? (
-              <>
-                {/* Bars rising and falling — a recording being written, not a generic spinner. */}
-                <span className="flex h-4 items-end gap-0.5" aria-hidden>
-                  {[0, 0.15, 0.3].map((delay) => (
-                    <motion.span
-                      key={delay}
-                      className="w-0.5 rounded-full bg-accent"
-                      animate={{ height: [4, 14, 4] }}
-                      transition={{ duration: 0.7, repeat: Infinity, delay, ease: "easeInOut" }}
-                    />
-                  ))}
-                </span>
-                Salvando…
-              </>
-            ) : (
-              <>
-                <Check className="size-3.5" />
-                Salva
-              </>
-            )}
-          </motion.span>
-        </AnimatePresence>
-      ) : (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Gravar áudio"
-          onClick={onStartRecording}
-          className="shrink-0 gap-1.5 px-2.5"
-        >
-          <span className="size-2.5 rounded-full bg-destructive" aria-hidden />
-          <span className="max-lg:sr-only">Gravar</span>
-        </Button>
-      )}
+      <AudioRecordControl
+        recorderState={recorderState}
+        recordingElapsedMs={recordingElapsedMs}
+        audioSaveState={audioSaveState}
+        onStartRecording={onStartRecording}
+        onPauseRecording={onPauseRecording}
+        onResumeRecording={onResumeRecording}
+        onStopRecording={onStopRecording}
+      />
 
       {audioSlot && <div className="shrink-0">{audioSlot}</div>}
 
