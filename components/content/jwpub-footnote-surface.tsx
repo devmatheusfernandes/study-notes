@@ -1,8 +1,8 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 interface JwpubFootnoteSurfaceProps {
   open: boolean;
@@ -14,14 +14,7 @@ interface JwpubFootnoteSurfaceProps {
 function Body({ html, isLoading }: { html: string | null; isLoading: boolean }) {
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        <motion.span
-          animate={{ opacity: [1, 0.3, 1] }}
-          transition={{ duration: 1.2, repeat: Infinity }}
-          className="size-1.5 rounded-full bg-accent"
-        />
-        carregando…
-      </div>
+      <ReferenceContentSkeleton paragraphs={2} />
     );
   }
 

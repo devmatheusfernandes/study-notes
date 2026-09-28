@@ -1,8 +1,8 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { VideoSurfaceSkeleton } from "./reference-surface-skeleton";
 
 export interface NoteVideoTarget {
   videoId: string;
@@ -31,14 +31,7 @@ export function NoteVideoSurface({ open, video, isLoading, error, onClose }: Not
   return (
     <JwpubSidePanel open={open} title={video?.title ?? "Vídeo"} onClose={onClose}>
       {isLoading ? (
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <motion.span
-            animate={{ opacity: [1, 0.3, 1] }}
-            transition={{ duration: 1.2, repeat: Infinity }}
-            className="size-1.5 rounded-full bg-accent"
-          />
-          carregando…
-        </div>
+        <VideoSurfaceSkeleton />
       ) : video ? (
         <InlineVideoCard
           videoId={video.videoId}

@@ -1,9 +1,9 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 /** One embedded excerpt, already sanitized at write time. Mirrors JwpubExtract in lib/jwpub/types.ts. */
 export interface JwpubExtractItem {
@@ -55,14 +55,7 @@ export function JwpubExtractSurface({
   return (
     <JwpubSidePanel open={open} title={title} onClose={onClose}>
       {isLoading ? (
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <motion.span
-            animate={{ opacity: [1, 0.3, 1] }}
-            transition={{ duration: 1.2, repeat: Infinity }}
-            className="size-1.5 rounded-full bg-accent"
-          />
-          carregando…
-        </div>
+        <ReferenceContentSkeleton paragraphs={2} withHeading />
       ) : extracts.length === 0 ? (
         <p className="text-[13.5px] text-muted-foreground">Trecho não encontrado.</p>
       ) : (

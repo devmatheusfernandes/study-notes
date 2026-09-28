@@ -13,6 +13,7 @@ import {
   type CrossReference,
   type CrossReferenceSource,
 } from "@/app/(app)/bible-actions";
+import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 interface BibleReferencesListProps {
   refs: CrossReference[];
@@ -150,7 +151,7 @@ export function BibleReferencesList({
                       >
                         <div className="flex flex-col gap-3 px-4 pb-4">
                           {verseState === undefined || verseState === "loading" ? (
-                            <p className="text-[12px] text-muted-foreground">carregando…</p>
+                            <ReferenceContentSkeleton paragraphs={1} />
                           ) : verseState === "error" ? (
                             <p className="text-[12px] text-destructive">Não foi possível carregar o versículo.</p>
                           ) : (

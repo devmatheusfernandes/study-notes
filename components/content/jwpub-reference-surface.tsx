@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import { Download, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 export interface JwpubReferenceTarget {
   /** `null` for a shared global publication (Perspicaz etc.) — there's no per-user note to open, so "abrir publicação completa" is hidden. */
@@ -114,14 +114,7 @@ function Body({
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        <motion.span
-          animate={{ opacity: [1, 0.3, 1] }}
-          transition={{ duration: 1.2, repeat: Infinity }}
-          className="size-1.5 rounded-full bg-accent"
-        />
-        carregando…
-      </div>
+      <ReferenceContentSkeleton paragraphs={4} withHeading />
     );
   }
 

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { motion } from "framer-motion";
 import {
   getBibleVerseRange,
   listBibleBooks,
@@ -37,6 +36,7 @@ import {
   type EditableJwlibraryNote,
   type PrefilledJwlibraryLocation,
 } from "./jwlibrary-note-editor-vault";
+import { BibleVerseSkeleton } from "./reference-surface-skeleton";
 
 // Stable reference for callers (e.g. note-reference-surface.tsx) that don't
 // pass `highlights` at all: an inline `highlights = []` default below would
@@ -52,6 +52,9 @@ import {
 // `Profiler.stop` over CDP couldn't interrupt it), then confirmed this exact
 // line was the cause by bisection.
 const EMPTY_HIGHLIGHTS: BibleVerseHighlight[] = [];
+
+/** The Bible's 66 books never change within a session — see the effect that fills this for why it isn't just component state. */
+let BIBLE_BOOKS_CACHE: BibleBook[] | null = null;
 
 interface JwpubBibleSurfaceProps {
   open: boolean;
@@ -174,14 +177,7 @@ function VerseText({
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        <motion.span
-          animate={{ opacity: [1, 0.3, 1] }}
-          transition={{ duration: 1.2, repeat: Infinity }}
-          className="size-1.5 rounded-full bg-accent"
-        />
-        carregando…
-      </div>
+      <BibleVerseSkeleton />
     );
   }
 
@@ -293,15 +289,52 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     });
   }, [verses, highlights, isLoading, error]);
 
-  const [books, setBooks] = useState<BibleBook[]>([]);
-  useEffect(() => {
-    if (!open || books.length > 0) return;
-    void listBibleBooks().then((result) => setBooks(result.books ?? []));
-  }, [open, books.length]);
-
   const viewBookOrder = displayVerses?.[0]?.bookOrder ?? null;
   const viewChapter = displayVerses?.[0]?.chapter ?? null;
   const viewBookName = displayVerses?.[0]?.book ?? "";
+
+  // The 66 book names, only used to label a cross-reference row.
+  //
+  // Two things matter about *when* this runs. It's cached module-wide
+  // (BIBLE_BOOKS_CACHE) because the list is immutable — a second reference
+  // opened in the same session must not spend a round trip on it. And it's
+  // gated on the verse text having arrived, because child effects run before
+  // parent effects in React: ungated, this fired from *inside* the panel
+  // before note-reference-surface.tsx's own fetch had even been dispatched,
+  // and since Next dispatches Server Actions one at a time per client (see
+  // node_modules/next/dist/docs/01-app/02-guides/server-actions.md), the
+  // verse the user actually asked for sat waiting behind a list of book
+  // names. That alone doubled the perceived open time.
+  const [books, setBooks] = useState<BibleBook[]>(BIBLE_BOOKS_CACHE ?? []);
+  useEffect(() => {
+    // The cache is read by this state's initializer, so reaching here means
+    // it was still empty when the panel mounted.
+    if (!open || viewBookOrder === null || books.length > 0) return;
+    void listBibleBooks().then((result) => {
+      BIBLE_BOOKS_CACHE = result.books ?? [];
+      setBooks(BIBLE_BOOKS_CACHE);
+    });
+  }, [open, viewBookOrder, books.length]);
+
+  /*
+   * Study-tab data is fetched per tab, not all four at once.
+   *
+   * Cross-references, study notes + footnotes, videos and the Research Guide
+   * used to load together the moment the panel had a chapter — five queued
+   * Server Actions (the footnotes hook issues two) for four tabs, of which
+   * exactly one is on screen. Because the dispatcher is sequential, tapping a
+   * verse or switching tabs then had to wait behind all of them.
+   *
+   * `visitedTabs` is what keeps this from becoming a *slower* experience than
+   * before: a tab stays enabled once visited, so coming back to it reads the
+   * state it already has instead of refetching.
+   */
+  const [visitedTabs, setVisitedTabs] = useState<Set<BibleStudyTab>>(() => new Set([studyTab]));
+  // Recorded during render, not from an effect: a passive effect can run
+  // *after* the browser paints, which would show the newly opened tab's
+  // "nothing here" empty state for a frame before its skeleton appeared.
+  if (!visitedTabs.has(studyTab)) setVisitedTabs(new Set(visitedTabs).add(studyTab));
+  const tabEnabled = (tab: BibleStudyTab) => open && viewBookOrder !== null && visitedTabs.has(tab);
 
   const refreshHighlights = useCallback(() => {
     if (viewBookOrder === null || viewChapter === null) return;
@@ -326,11 +359,21 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     });
   }, []);
 
-  const studyParams = { bookOrder: viewBookOrder, chapter: viewChapter, selectedVerse: tabSelectedVerse, enabled: open };
-  const { refs, refsLoading, refsTruncated, refsSource, setRefsSource } = useBibleCrossReferences(studyParams);
-  const { footnotes, studyNotes, studyLoading } = useBibleFootnotesAndStudyNotes(studyParams);
-  const { videos, videosLoading } = useBibleChapterVideos(studyParams);
-  const { researchGuideEntries, researchGuideExtracts, researchGuideLoading } = useBibleResearchGuide(studyParams);
+  const studyParams = { bookOrder: viewBookOrder, chapter: viewChapter, selectedVerse: tabSelectedVerse };
+  const { refs, refsLoading, refsTruncated, refsSource, setRefsSource } = useBibleCrossReferences({
+    ...studyParams,
+    enabled: tabEnabled("referencias"),
+  });
+  // One hook feeds two tabs ("Notas" and "Rodapé"), so either one opening it is enough.
+  const { footnotes, studyNotes, studyLoading } = useBibleFootnotesAndStudyNotes({
+    ...studyParams,
+    enabled: tabEnabled("notas") || tabEnabled("rodape"),
+  });
+  const { videos, videosLoading } = useBibleChapterVideos({ ...studyParams, enabled: tabEnabled("videos") });
+  const { researchGuideEntries, researchGuideExtracts, researchGuideLoading } = useBibleResearchGuide({
+    ...studyParams,
+    enabled: tabEnabled("guia"),
+  });
 
   const {
     referenceOpen,

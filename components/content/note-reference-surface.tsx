@@ -1,18 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  getBibleChapterVerses,
-  getBibleVerseRange,
-  type BibleVerseRow,
-} from "@/app/(app)/bible-actions";
-import { resolvePublicationReference, resolvePublicationChapterById } from "@/app/(app)/jwpub-actions";
-import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
 import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
+import {
+  cachedNoteReference,
+  resolveNoteReference,
+  type ResolvedReference,
+} from "@/lib/notes/reference-resolver";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
-import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
-import { NoteVideoSurface, type NoteVideoTarget } from "./note-video-surface";
+import { JwpubReferenceSurface } from "./jwpub-reference-surface";
+import { NoteVideoSurface } from "./note-video-surface";
 import { NoteLinkSurface } from "./note-link-surface";
 
 interface NoteReferenceSurfaceProps {
@@ -23,6 +21,8 @@ interface NoteReferenceSurfaceProps {
   onOpenNote: (noteId: string) => void;
 }
 
+const EMPTY: ResolvedReference = { verses: null, target: null, html: null, video: null, error: null };
+
 /**
  * Opens whatever reference the user clicked inside a note body, in the same
  * two surfaces the .jwpub reader already uses — `JwpubBibleSurface` for
@@ -30,16 +30,13 @@ interface NoteReferenceSurfaceProps {
  * reference behaves identically whether it was typed into a note or found
  * inside a publication.
  *
- * Fetching lives here rather than in the note editor so the editor keeps
- * exactly one piece of state for this feature (which reference is open).
+ * Resolution itself lives in lib/notes/reference-resolver.ts (cached and
+ * de-duplicated there, and warmed on hover by rich-text-editor.tsx), so this
+ * component only decides *which* panel is open and hands it the result.
  */
 export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteReferenceSurfaceProps) {
+  const [resolved, setResolved] = useState<ResolvedReference>(EMPTY);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [verses, setVerses] = useState<BibleVerseRow[] | null>(null);
-  const [target, setTarget] = useState<JwpubReferenceTarget | null>(null);
-  const [html, setHtml] = useState<string | null>(null);
-  const [video, setVideo] = useState<NoteVideoTarget | null>(null);
 
   // A linked note is already sitting in the offline-first store (see
   // note-editor.tsx's own comment on noteMentionOptions) — no fetch, no
@@ -54,83 +51,47 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
   // refetch, while clicking a different one must.
   const key = reference ? referenceKey(reference) : null;
 
+  // A reference that's already cached (opened before, or warmed by hover) is
+  // applied *during render* rather than from the effect below — React's
+  // documented "adjust state when a prop changes" pattern. That's what makes
+  // a second open paint the text in the same commit that opens the panel,
+  // with no skeleton frame in between.
+  const cached = cachedNoteReference(reference);
+  const [appliedKey, setAppliedKey] = useState<string | null>(null);
+  if (cached && key !== null && appliedKey !== key) {
+    setAppliedKey(key);
+    setResolved(cached);
+    setIsLoading(false);
+  }
+
   useEffect(() => {
     if (!reference || reference.kind === "note") return;
+    if (cachedNoteReference(reference)) return; // applied synchronously above
 
     let cancelled = false;
     // Deferred a tick rather than set synchronously in the effect body —
-    // the same pattern the reader uses for its own load states.
+    // the same pattern the reader uses for its own load states. The previous
+    // reference's content is cleared in the same go, so a slow fetch never
+    // shows the *last* reference's text under the new one's title.
     queueMicrotask(() => {
       if (cancelled) return;
+      setResolved(EMPTY);
       setIsLoading(true);
-      setError(null);
     });
 
-    async function load(ref: NoteReference) {
-      if (ref.kind === "note") return; // handled by the linkedNote selector above, no fetch needed
-
-      if (ref.kind === "bible") {
-        setTarget(null);
-        setHtml(null);
-        setVideo(null);
-        const result =
-          ref.startVerse === null
-            ? await getBibleChapterVerses(ref.bookOrder, ref.chapter)
-            : await getBibleVerseRange(ref.bookOrder, ref.chapter, ref.startVerse, ref.endVerse);
+    resolveNoteReference(reference)
+      .then((next) => {
         if (cancelled) return;
-        setVerses(result.verses ?? null);
-        setError(result.error ?? null);
-        return;
-      }
-
-      if (ref.kind === "video") {
-        setVerses(null);
-        setTarget(null);
-        setHtml(null);
-        const row = await getGlobalVideoById(ref.videoId);
+        setAppliedKey(key);
+        setResolved(next);
+      })
+      .catch(() => {
         if (cancelled) return;
-        if (!row) {
-          setVideo(null);
-          setError("Vídeo não encontrado.");
-          return;
-        }
-        setVideo({
-          videoId: row.id,
-          title: row.title,
-          videoUrl: row.video_url ?? undefined,
-          coverImage: row.cover_image ?? undefined,
-          durationFormatted: row.duration_formatted ?? undefined,
-          subtitlesUrl: row.subtitles_url ?? undefined,
-        });
-        setError(null);
-        return;
-      }
-
-      setVerses(null);
-      setVideo(null);
-      const { reference: resolved, error: resolveError } =
-        ref.documentId !== undefined && ref.publicationId
-          ? await resolvePublicationChapterById(ref.publicationId, ref.documentId, !!ref.isGlobal)
-          : await resolvePublicationReference(ref.symbol, ref.chapter);
-      if (cancelled) return;
-      if (!resolved) {
-        setTarget(null);
-        setHtml(null);
-        setError(resolveError ?? "Referência não encontrada.");
-        return;
-      }
-      setTarget({
-        noteId: resolved.noteId,
-        publicationTitle: resolved.publicationTitle,
-        chapterTitle: resolved.chapterTitle,
-        documentId: resolved.documentId,
+        setResolved({ ...EMPTY, error: "Sem conexão para carregar esta referência." });
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
       });
-      setHtml(resolved.html);
-    }
-
-    void load(reference).finally(() => {
-      if (!cancelled) setIsLoading(false);
-    });
 
     return () => {
       cancelled = true;
@@ -144,23 +105,23 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
     <>
       <JwpubBibleSurface
         open={reference?.kind === "bible"}
-        verses={verses}
-        error={error}
+        verses={resolved.verses}
+        error={resolved.error}
         isLoading={isLoading}
         onClose={onClose}
       />
       <JwpubReferenceSurface
         open={reference?.kind === "publication"}
-        target={target}
-        html={html}
-        error={error}
+        target={resolved.target}
+        html={resolved.html}
+        error={resolved.error}
         isLoading={isLoading}
         onClose={onClose}
       />
       <NoteVideoSurface
         open={reference?.kind === "video"}
-        video={video}
-        error={error}
+        video={resolved.video}
+        error={resolved.error}
         isLoading={isLoading}
         onClose={onClose}
       />

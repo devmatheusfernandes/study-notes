@@ -55,6 +55,7 @@ import {
   NOTE_REFERENCE_TRIGGER,
   type NoteReference,
 } from "@/lib/notes/note-reference";
+import { prefetchNoteReference } from "@/lib/notes/reference-resolver";
 import { ReferenceSuggestionMenu } from "@/components/content/reference-suggestion-menu";
 import { searchNoteReferenceCandidates } from "@/app/(app)/note-reference-search-actions";
 
@@ -450,6 +451,24 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         event.preventDefault();
         referenceClickRef.current?.(reference);
         return false;
+      },
+      handleDOMEvents: {
+        // Warms the reference the pointer is over, so by the time the click
+        // lands its content is already in the resolver's cache and the panel
+        // opens with the text rather than a skeleton. Resolution is a Server
+        // Action, and Next dispatches those one at a time per client — a
+        // head start of even a few hundred milliseconds is the difference
+        // between "instant" and "waiting for a round trip".
+        //
+        // Safe to fire liberally: `prefetchNoteReference` de-duplicates
+        // in-flight requests, caches only successes, and swallows failures.
+        pointerover: (_view, event) => {
+          const element = (event.target as HTMLElement | null)?.closest("[data-note-ref]");
+          if (!element) return false;
+          const reference = referenceFromElement(element);
+          if (reference) prefetchNoteReference(reference);
+          return false; // never handled — hovering must not affect editing
+        },
       },
       handleDrop: (_view, event) => {
         const file = event.dataTransfer?.files?.[0];

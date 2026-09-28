@@ -924,9 +924,16 @@ export async function resolvePublicationReference(
     .maybeSingle();
 
   if (publication) {
+    // `content_html` is deliberately NOT selected here: picking the chapter
+    // only needs its title and position, and a publication's chapters can be
+    // megabytes of HTML in total (a whole Perspicaz volume, a year of a
+    // magazine). Selecting it meant every tapped reference downloaded the
+    // entire publication to render one chapter — the single biggest reason
+    // opening a "(th 2)" chip felt slow. The match's own HTML is fetched by
+    // id below, one row.
     const { data: chapters } = await supabase
       .from("jwpub_chapters")
-      .select("document_id, position, title, content_html")
+      .select("document_id, position, title")
       .eq("publication_id", publication.id)
       .order("position", { ascending: true });
 
@@ -937,6 +944,13 @@ export async function resolvePublicationReference(
       return { error: `A publicação "${publication.title}" não tem um capítulo ${chapter}.` };
     }
 
+    const { data: content } = await supabase
+      .from("jwpub_chapters")
+      .select("content_html")
+      .eq("publication_id", publication.id)
+      .eq("document_id", match.document_id)
+      .maybeSingle();
+
     return {
       reference: {
         noteId: publication.note_id,
@@ -945,7 +959,7 @@ export async function resolvePublicationReference(
         symbol: publication.symbol,
         documentId: match.document_id,
         chapterTitle: match.title,
-        html: match.content_html ?? "",
+        html: content?.content_html ?? "",
       },
     };
   }
@@ -960,9 +974,13 @@ export async function resolvePublicationReference(
     return { error: `Você ainda não tem a publicação "${cleanSymbol.toUpperCase()}" na sua biblioteca.` };
   }
 
+  // Same two-step as the per-user branch above, and it matters even more
+  // here: the shared publications are the big reference works (Perspicaz is
+  // one 354 MB archive), so pulling every chapter's HTML to pick one is
+  // hopeless.
   const { data: globalChapters } = await supabase
     .from("global_publication_chapters")
-    .select("document_id, position, title, content_html")
+    .select("document_id, position, title")
     .eq("publication_id", globalPublication.id)
     .order("position", { ascending: true });
 
@@ -973,6 +991,13 @@ export async function resolvePublicationReference(
     return { error: `A publicação "${globalPublication.title}" não tem um capítulo ${chapter}.` };
   }
 
+  const { data: globalContent } = await supabase
+    .from("global_publication_chapters")
+    .select("content_html")
+    .eq("publication_id", globalPublication.id)
+    .eq("document_id", globalMatch.document_id)
+    .maybeSingle();
+
   return {
     reference: {
       noteId: null,
@@ -981,7 +1006,7 @@ export async function resolvePublicationReference(
       symbol: globalPublication.symbol,
       documentId: globalMatch.document_id,
       chapterTitle: globalMatch.title,
-      html: globalMatch.content_html ?? "",
+      html: globalContent?.content_html ?? "",
     },
   };
 }

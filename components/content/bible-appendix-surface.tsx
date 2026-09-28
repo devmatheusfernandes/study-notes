@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
 import { getBibleAppendix, type BibleAppendix } from "@/app/(app)/bible-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 interface BibleAppendixSurfaceProps {
   /** `null` closes the panel. The header ("Apêndice A") and its articles (A1, A7-A…) are both valid — a header's own content IS the section's index. */
@@ -105,14 +105,7 @@ export function BibleAppendixSurface({
     >
       <div ref={contentRef}>
         {isLoading ? (
-          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-            <motion.span
-              animate={{ opacity: [1, 0.3, 1] }}
-              transition={{ duration: 1.2, repeat: Infinity }}
-              className="size-1.5 rounded-full bg-accent"
-            />
-            carregando…
-          </div>
+          <ReferenceContentSkeleton paragraphs={4} withHeading />
         ) : error || !appendix ? (
           <p className="text-[13.5px] text-muted-foreground">{error ?? "Apêndice não encontrado."}</p>
         ) : (
