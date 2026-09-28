@@ -171,7 +171,28 @@ const VaultContent = React.forwardRef<
                   Visually identical to before for every consumer with no
                   sticky child — this only matters once one is added.
                 */}
-                <div className="overflow-y-auto overscroll-contain no-scrollbar">
+                {/*
+                  `min-h-0` is required here: this div is a flex child of a
+                  `flex-col` container capped by `max-h-[90vh]`, and flex
+                  items default to `min-height: auto` (their content's
+                  intrinsic height), which overrides `max-height` on the
+                  ancestor and lets this div grow past it instead of
+                  clipping/scrolling internally. Without it, `overflow-y-auto`
+                  never actually engages — the div just keeps growing, so
+                  `scrollHeight` never exceeds `clientHeight`. That in turn
+                  breaks vaul's own drag-to-close: vaul walks up from the
+                  touch point and refuses to start a drag if it finds a
+                  scrollable ancestor not scrolled to the top, and on mobile
+                  this div can end up reporting itself as "scrolled" (a
+                  nonzero scrollTop that never resolves back to 0) precisely
+                  because it was never a properly bounded scroll container to
+                  begin with — so every drag gesture starting anywhere except
+                  the handle nub silently gets rejected, and only the
+                  overlay's outside-tap dismissal (a separate code path) still
+                  works. flex-1 makes it actually fill the remaining space so
+                  min-h-0 has something to clamp against.
+                */}
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar">
                     <div className={cn(!noPadding && "px-6 pb-6 pt-2")}>{children}</div>
                 </div>
             </Drawer.Content>
