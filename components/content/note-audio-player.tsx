@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Pause, Play, Trash2, UploadCloud } from "lucide-react";
+import { FileText, Loader2, Pause, Play, Share2, Trash2, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -15,6 +15,9 @@ interface NoteAudioPlayerProps {
   onSeek: (ms: number) => void;
   onRetryUpload: () => void;
   onDelete: () => void;
+  onTranscribe: () => void;
+  onShare: () => void;
+  isTranscribing: boolean;
   /** Drops the pill styling for when this sits inside the drawing toolbar, which already is one. */
   embedded?: boolean;
 }
@@ -38,6 +41,9 @@ export function NoteAudioPlayer({
   onSeek,
   onRetryUpload,
   onDelete,
+  onTranscribe,
+  onShare,
+  isTranscribing,
   embedded = false,
 }: NoteAudioPlayerProps) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -127,6 +133,29 @@ export function NoteAudioPlayer({
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatTime(durationMs)}
       </span>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label="Transcrever gravação"
+        title="Transcrever para a nota"
+        onClick={onTranscribe}
+        disabled={isTranscribing}
+        className="px-2.5 text-muted-foreground"
+      >
+        {isTranscribing ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label="Compartilhar áudio"
+        title="Compartilhar áudio"
+        onClick={onShare}
+        className="px-2.5 text-muted-foreground"
+      >
+        <Share2 className="size-4" />
+      </Button>
 
       <Button
         variant="ghost"

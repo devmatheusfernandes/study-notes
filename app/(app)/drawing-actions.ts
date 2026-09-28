@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptText, decryptText } from "@/lib/encryption";
+import { transcribeAudio, MAX_TRANSCRIPTION_BYTES } from "@/lib/vector/openai";
 import { MAX_AUDIO_SIZE, NOTE_AUDIO_BUCKET } from "@/lib/storage-config";
 
 export interface DrawingRow {
@@ -160,6 +161,57 @@ export async function getAudioUrl(storagePath: string): Promise<{ url?: string; 
     .createSignedUrl(storagePath, 60 * 60 * 4);
 
   return error || !data ? { error: "Não foi possível carregar o áudio." } : { url: data.signedUrl };
+}
+
+/**
+ * Transcribes the note's recording with OpenAI. The audio is read from
+ * Storage server-side (the object path comes from the caller's own RLS-scoped
+ * `note_drawings` row, never from client input), so nothing large travels
+ * through the action.
+ */
+export async function transcribeNoteAudio(noteId: string): Promise<{ text?: string; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada. Entre novamente." };
+
+  const { data: row } = await supabase
+    .from("note_drawings")
+    .select("audio_path, audio_duration_ms")
+    .eq("note_id", noteId)
+    .maybeSingle();
+  if (!row?.audio_path || !row.audio_path.startsWith(`${user.id}/`)) {
+    return { error: "Esta nota não tem gravação." };
+  }
+
+  const admin = createAdminClient();
+  const { data: blob, error: downloadError } = await admin.storage
+    .from(NOTE_AUDIO_BUCKET)
+    .download(row.audio_path);
+  if (downloadError || !blob) return { error: "Não foi possível carregar o áudio." };
+  if (blob.size > MAX_TRANSCRIPTION_BYTES) {
+    return { error: "A gravação é grande demais para transcrever (limite de 25 MB)." };
+  }
+
+  const extension = row.audio_path.endsWith(".mp4") ? "mp4" : "webm";
+  const file = new File([blob], `gravacao.${extension}`, { type: `audio/${extension}` });
+
+  try {
+    const { text, estimatedCostUsd } = await transcribeAudio(file, row.audio_duration_ms ?? 0);
+    if (!text) return { error: "Não foi detectada fala na gravação." };
+
+    await supabase.from("ai_usage_logs").insert({
+      user_id: user.id,
+      note_id: noteId,
+      operation_type: "transcription",
+      model: "whisper-1",
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      estimated_cost_usd: estimatedCostUsd,
+    });
+    return { text };
+  } catch {
+    return { error: "Não foi possível transcrever o áudio." };
+  }
 }
 
 export async function deleteDrawingAudio(noteId: string): Promise<{ error?: string }> {

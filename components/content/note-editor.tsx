@@ -18,7 +18,7 @@ import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { bodyToPlainText } from "@/lib/note-preview";
-import { shareNote } from "@/lib/share";
+import { shareFile, shareNote } from "@/lib/share";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { useAudioRecorder, type Recording } from "@/hooks/use-audio-recorder";
 import { createClient } from "@/lib/supabase/client";
@@ -39,6 +39,7 @@ import {
   finalizeAudioUpload,
   getAudioUrl,
   requestAudioUploadSlot,
+  transcribeNoteAudio,
   type DrawingRow,
 } from "@/app/(app)/drawing-actions";
 import { listPublicationSymbols } from "@/app/(app)/jwpub-actions";
@@ -523,6 +524,39 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     setPositionMs(ms);
   }
 
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  async function transcribeAudioToNote() {
+    if (!createdId || isTranscribing) return;
+    setIsTranscribing(true);
+    const result = await transcribeNoteAudio(createdId);
+    setIsTranscribing(false);
+    if (result.error || !result.text) {
+      notify.error("Não foi possível transcrever", result.error ?? "Tente novamente.");
+      return;
+    }
+    // Ink mode has no text caret on screen, so drop back to typing where the
+    // transcript is about to land.
+    setPenMode(false);
+    editorRef.current?.appendText(result.text);
+    notify.success("Transcrição adicionada", "O texto foi inserido no fim da nota.");
+  }
+
+  async function shareAudio() {
+    if (!audioUrl) return;
+    try {
+      const blob = await (await fetch(audioUrl)).blob();
+      const extension = audioPath?.endsWith(".mp4") ? "mp4" : "webm";
+      const file = new File([blob], `${title.trim() || "gravacao"}.${extension}`, {
+        type: blob.type || `audio/${extension}`,
+      });
+      const result = await shareFile(file, title.trim() || "Gravação");
+      if (result === "downloaded") notify.success("Áudio baixado", "O arquivo foi salvo no dispositivo.");
+    } catch {
+      notify.error("Não foi possível compartilhar", "Falha ao carregar o áudio.");
+    }
+  }
+
   async function removeAudio() {
     if (!createdId) return;
     const result = await deleteDrawingAudio(createdId);
@@ -597,6 +631,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                       onSeek={seek}
                       onRetryUpload={retryAudioUpload}
                       onDelete={() => void removeAudio()}
+                      onTranscribe={() => void transcribeAudioToNote()}
+                      onShare={() => void shareAudio()}
+                      isTranscribing={isTranscribing}
                     />
                   ) : undefined
                 }
@@ -703,6 +740,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 onSeek={seek}
                 onRetryUpload={retryAudioUpload}
                 onDelete={() => void removeAudio()}
+                onTranscribe={() => void transcribeAudioToNote()}
+                onShare={() => void shareAudio()}
+                isTranscribing={isTranscribing}
               />
             </div>
           )}

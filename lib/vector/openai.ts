@@ -40,6 +40,23 @@ export async function generateEmbeddings(inputs: string[]): Promise<EmbeddingsRe
   };
 }
 
+// whisper-1 = $0.006 / minute of audio
+const TRANSCRIPTION_COST_PER_MINUTE = 0.006;
+/** OpenAI's hard cap on an uploaded audio file. */
+export const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
+
+export async function transcribeAudio(
+  file: File,
+  durationMs: number
+): Promise<{ text: string; estimatedCostUsd: number }> {
+  const openai = getOpenAiClient();
+  const response = await openai.audio.transcriptions.create({ model: "whisper-1", file });
+  return {
+    text: response.text.trim(),
+    estimatedCostUsd: (durationMs / 60000) * TRANSCRIPTION_COST_PER_MINUTE,
+  };
+}
+
 export async function generateSingleEmbedding(input: string): Promise<{ embedding: number[]; tokens: number; cost: number }> {
   const result = await generateEmbeddings([input]);
   return {

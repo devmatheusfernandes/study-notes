@@ -124,6 +124,8 @@ function ToolbarButton({
 export interface RichTextEditorHandle {
   /** Opens the native file picker to insert an image — for a trigger button that lives outside this component (see note-editor.tsx's header). */
   openImagePicker: () => void;
+  /** Appends plain text (one paragraph per line) at the end of the note — e.g. an audio transcript. */
+  appendText: (text: string) => void;
   /**
    * Selects the first case-insensitive occurrence of `text` and scrolls it
    * into view — used to jump straight to the match when a note is opened
@@ -465,6 +467,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   useImperativeHandle(ref, () => ({
     openImagePicker: () => fileInputRef.current?.click(),
+    appendText: (text: string) => {
+      if (!editor) return;
+      const paragraphs = text
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => ({ type: "paragraph", content: [{ type: "text", text: line }] }));
+      if (paragraphs.length === 0) return;
+      editor.chain().focus("end").insertContent(paragraphs).run();
+    },
     scrollToText: (text: string) => {
       const target = text.trim().toLowerCase();
       if (!editor || !target) return false;
