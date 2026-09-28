@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { AssistantSurface } from "@/components/assistant/assistant-surface";
+import { SidePanelStackProvider } from "@/components/content/side-panel-stack";
 import { StoreHydration } from "@/components/providers/store-hydration";
 import { ChatHydration } from "@/components/chat/chat-hydration";
 import { listUserContent } from "./notes-actions";
@@ -24,17 +25,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }));
 
   return (
-    <div className="flex min-h-dvh w-full">
-      <StoreHydration
-        initialNotes={notes}
-        initialFolders={folders}
-        initialTags={tags}
-        initialPreferences={initialPreferences}
-      />
-      <ChatHydration conversations={conversations} />
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
-      <AssistantSurface />
-    </div>
+    // SidePanelStackProvider renders no DOM of its own — it only lets every
+    // JwpubSidePanel under it share one desktop sidebar slot (stacking with a
+    // back button) instead of opening side by side.
+    <SidePanelStackProvider>
+      <div className="flex min-h-dvh w-full">
+        <StoreHydration
+          initialNotes={notes}
+          initialFolders={folders}
+          initialTags={tags}
+          initialPreferences={initialPreferences}
+        />
+        <ChatHydration conversations={conversations} />
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <AssistantSurface />
+      </div>
+    </SidePanelStackProvider>
   );
 }

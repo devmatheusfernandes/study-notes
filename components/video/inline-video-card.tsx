@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,6 +19,9 @@ import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
 import { parseVttToSegments } from "@/lib/video/video-utils";
 import type { TranscriptSegment } from "@/lib/video/video-types";
 import { useNotesStore } from "@/lib/store/notes-store";
+
+/** How long the transcript stops auto-following after the person scrolls it by hand. */
+const MANUAL_SCROLL_PAUSE_MS = 6000;
 
 export interface InlineVideoCardProps {
   videoId: string;
@@ -149,6 +152,77 @@ export function InlineVideoCard({
     }
   };
 
+  // The line the video is on right now: the last one that has already started,
+  // not "within 2.5s of its start" — a segment can run much longer than that,
+  // and a gap between segments used to leave nothing highlighted at all.
+  const activeIndex = useMemo(() => {
+    if (segments.length === 0) return -1;
+    // Before the first play, `currentTime` may still be 0 even though the card
+    // was opened for a specific excerpt (the seek only lands once the video
+    // has metadata) — aim at that excerpt instead of the top of the video.
+    const time = currentTime > 0 ? currentTime : (relevantStartTime ?? 0);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (segments[i].startTime <= time + 0.25) return i;
+    }
+    return 0;
+  }, [segments, currentTime, relevantStartTime]);
+
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  const activeSegmentRef = useRef<HTMLButtonElement>(null);
+  // Our own scrolling fires `scroll` events too, so it has to be told apart
+  // from the person dragging the list — otherwise auto-follow would read its
+  // own scroll as manual input and immediately switch itself off.
+  const programmaticScrollRef = useRef(false);
+  const programmaticScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastManualScrollAt = useRef(0);
+
+  const scrollActiveSegmentIntoView = useCallback((behavior: ScrollBehavior) => {
+    const container = transcriptScrollRef.current;
+    const element = activeSegmentRef.current;
+    if (!container || !element) return;
+
+    // Deliberately NOT `scrollIntoView`: that scrolls every scrollable
+    // ancestor, so it would also yank the side panel and the chapter text
+    // behind it. Setting this one container's scrollTop keeps the movement
+    // where it belongs.
+    const top = element.offsetTop - container.clientHeight / 2 + element.clientHeight / 2;
+
+    programmaticScrollRef.current = true;
+    if (programmaticScrollTimer.current) clearTimeout(programmaticScrollTimer.current);
+    programmaticScrollTimer.current = setTimeout(
+      () => {
+        programmaticScrollRef.current = false;
+      },
+      behavior === "smooth" ? 600 : 80
+    );
+
+    container.scrollTo({ top: Math.max(0, top), behavior });
+  }, []);
+
+  useEffect(() => () => {
+    if (programmaticScrollTimer.current) clearTimeout(programmaticScrollTimer.current);
+  }, []);
+
+  // Opening the transcript lands on the highlighted line rather than at 00:00.
+  // Instant, not smooth: the list is expanding at the same time, and animating
+  // both at once reads as a stutter.
+  useEffect(() => {
+    if (!showTranscript || activeIndex < 0) return;
+    scrollActiveSegmentIntoView("auto");
+    // `segments.length` covers the transcript finishing its fetch while the
+    // list is already open; `activeIndex` is intentionally left out so this
+    // doesn't re-fire on every tick of playback (that's the effect below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showTranscript, segments.length, scrollActiveSegmentIntoView]);
+
+  // Keeps the highlighted line in view while the video plays, unless the
+  // person has just scrolled the list themselves.
+  useEffect(() => {
+    if (!showTranscript || !isPlaying || activeIndex < 0) return;
+    if (Date.now() - lastManualScrollAt.current < MANUAL_SCROLL_PAUSE_MS) return;
+    scrollActiveSegmentIntoView("smooth");
+  }, [activeIndex, showTranscript, isPlaying, scrollActiveSegmentIntoView]);
+
   const handleConvertToNote = async () => {
     setIsConverting(true);
     try {
@@ -261,18 +335,28 @@ export function InlineVideoCard({
               transition={{ duration: 0.2 }}
               className="overflow-hidden border-t border-border/40 bg-background/50"
             >
-              <div className="max-h-60 overflow-y-auto p-2 scrollbar-none">
+              {/* `relative` makes this the offsetParent the auto-scroll above
+                  measures each line against. */}
+              <div
+                ref={transcriptScrollRef}
+                onScroll={() => {
+                  if (programmaticScrollRef.current) return;
+                  lastManualScrollAt.current = Date.now();
+                }}
+                className="relative max-h-60 overflow-y-auto p-2 scrollbar-none"
+              >
                 {isLoadingTranscript ? (
                   <p className="p-3 text-center text-[11.5px] text-muted-foreground">
                     Carregando transcrição...
                   </p>
                 ) : segments.length > 0 ? (
                   <div className="flex flex-col gap-1">
-                    {segments.map((segment) => {
-                      const isActive = Math.abs(segment.startTime - currentTime) < 2.5;
+                    {segments.map((segment, index) => {
+                      const isActive = index === activeIndex;
                       return (
                         <button
                           key={`${segment.startTime}-${segment.text.slice(0, 15)}`}
+                          ref={isActive ? activeSegmentRef : undefined}
                           type="button"
                           onClick={() => handleSeekTo(segment.startTime)}
                           className={cn(

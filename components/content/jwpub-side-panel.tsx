@@ -1,9 +1,11 @@
 "use client";
 
+import { useId } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
 import { useDevice } from "@/hooks/ui/use-device";
 import { Vault, VaultContent, VaultTitle } from "@/components/ui/vault";
+import { useSidePanelSlot } from "./side-panel-stack";
 
 interface JwpubSidePanelProps {
   open: boolean;
@@ -27,9 +29,23 @@ interface JwpubSidePanelProps {
  * scroll container of its own (the page itself scrolls, see JwpubReader's
  * `min-h-dvh`), so without this the panel would scroll away with the chapter
  * text instead of staying in view.
+ *
+ * On desktop every panel shares ONE slot (see `SidePanelStackProvider`):
+ * opening a second one collapses the first to zero width rather than putting
+ * two sidebars side by side, and the visible panel grows a back button that
+ * pops the stack. Panels underneath stay mounted at width 0, so going back
+ * restores them with their scroll position and loaded content intact.
  */
 export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
+  const id = useId();
+  const { isTop, previousTitle, closeAll } = useSidePanelSlot({
+    id,
+    title,
+    open,
+    onClose,
+    enabled: !isMobile,
+  });
 
   if (isMobile) {
     return (
@@ -47,19 +63,35 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: 
       {open && (
         <motion.aside
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width, opacity: 1 }}
+          animate={{ width: isTop ? width : 0, opacity: isTop ? 1 : 0 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: "spring", stiffness: 320, damping: 34 }}
+          // A collapsed panel is still in the DOM (that's what preserves its
+          // scroll position), so it has to be taken out of the tab order and
+          // the accessibility tree too — otherwise Tab lands on controls
+          // nobody can see.
+          inert={!isTop}
           className="sticky top-0 hidden h-dvh shrink-0 overflow-hidden border-l border-border bg-[#161413] md:block"
         >
           <div className="flex h-full flex-col" style={{ width }}>
             <header className="flex items-center gap-2.5 border-b border-border px-5 py-4">
-              <span className="mr-auto font-heading text-base">{title}</span>
+              {previousTitle && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={`Voltar para ${previousTitle}`}
+                  title={`Voltar para ${previousTitle}`}
+                  className="-ml-2 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+              )}
+              <span className="mr-auto truncate font-heading text-base">{title}</span>
               <button
                 type="button"
-                onClick={onClose}
-                aria-label={`Fechar ${title.toLowerCase()}`}
-                className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={closeAll}
+                aria-label={previousTitle ? "Fechar painel" : `Fechar ${title.toLowerCase()}`}
+                className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 <X className="size-4" />
               </button>
