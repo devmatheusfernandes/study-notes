@@ -13,7 +13,7 @@ import { RichTextEditor, type RichTextEditorHandle } from "@/components/content/
 import { NoteReferenceSurface } from "@/components/content/note-reference-surface";
 import { DrawingCanvas } from "@/components/content/drawing-canvas";
 import { DrawingToolbar } from "@/components/content/drawing-toolbar";
-import { NoteAudioPlayer } from "@/components/content/note-audio-player";
+import { NoteAudioPlayer, NoteTranscriptPanel } from "@/components/content/note-audio-player";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
@@ -525,6 +525,8 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   }
 
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcript, setTranscript] = useState<string | null>(initialDrawing?.audioTranscript ?? null);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
 
   async function transcribeAudioToNote() {
     if (!createdId || isTranscribing) return;
@@ -535,11 +537,8 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
       notify.error("Não foi possível transcrever", result.error ?? "Tente novamente.");
       return;
     }
-    // Ink mode has no text caret on screen, so drop back to typing where the
-    // transcript is about to land.
-    setPenMode(false);
-    editorRef.current?.appendText(result.text);
-    notify.success("Transcrição adicionada", "O texto foi inserido no fim da nota.");
+    setTranscript(result.text);
+    setTranscriptOpen(true);
   }
 
   async function shareAudio() {
@@ -570,6 +569,8 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     setAudioPath(null);
     setAudioUrl(null);
     setAudioDurationMs(0);
+    setTranscript(null);
+    setTranscriptOpen(false);
   }
 
   // Playback rewinds the handwriting along with the audio; any other time the
@@ -634,6 +635,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                       onTranscribe={() => void transcribeAudioToNote()}
                       onShare={() => void shareAudio()}
                       isTranscribing={isTranscribing}
+                      hasTranscript={transcript !== null}
+                      transcriptOpen={transcriptOpen}
+                      onToggleTranscript={() => setTranscriptOpen((open) => !open)}
                     />
                   ) : undefined
                 }
@@ -743,7 +747,16 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 onTranscribe={() => void transcribeAudioToNote()}
                 onShare={() => void shareAudio()}
                 isTranscribing={isTranscribing}
+                hasTranscript={transcript !== null}
+                transcriptOpen={transcriptOpen}
+                onToggleTranscript={() => setTranscriptOpen((open) => !open)}
               />
+            </div>
+          )}
+
+          {transcript !== null && transcriptOpen && (audioPath !== null || pendingUpload) && (
+            <div className="flex justify-center px-3 pb-2">
+              <NoteTranscriptPanel transcript={transcript} />
             </div>
           )}
         </div>

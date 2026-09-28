@@ -11,6 +11,7 @@ export interface DrawingRow {
   strokes: string;
   audioPath: string | null;
   audioDurationMs: number | null;
+  audioTranscript: string | null;
 }
 
 async function requireUser() {
@@ -27,7 +28,7 @@ export async function getDrawing(noteId: string): Promise<DrawingRow | null> {
 
   const { data } = await supabase
     .from("note_drawings")
-    .select("strokes, audio_path, audio_duration_ms")
+    .select("strokes, audio_path, audio_duration_ms, audio_transcript")
     .eq("note_id", noteId)
     .maybeSingle();
 
@@ -36,6 +37,7 @@ export async function getDrawing(noteId: string): Promise<DrawingRow | null> {
     strokes: decryptText(data.strokes) ?? "",
     audioPath: data.audio_path,
     audioDurationMs: data.audio_duration_ms,
+    audioTranscript: data.audio_transcript ? decryptText(data.audio_transcript) : null,
   };
 }
 
@@ -133,6 +135,8 @@ export async function finalizeAudioUpload(
       user_id: user.id,
       audio_path: storagePath,
       audio_duration_ms: Math.round(durationMs),
+      // A new recording makes any earlier transcript stale.
+      audio_transcript: null,
     },
     { onConflict: "note_id" }
   );
@@ -198,6 +202,12 @@ export async function transcribeNoteAudio(noteId: string): Promise<{ text?: stri
     const { text, estimatedCostUsd } = await transcribeAudio(file, row.audio_duration_ms ?? 0);
     if (!text) return { error: "Não foi detectada fala na gravação." };
 
+    const { error: saveError } = await supabase
+      .from("note_drawings")
+      .update({ audio_transcript: encryptText(text) })
+      .eq("note_id", noteId);
+    if (saveError) return { error: "Não foi possível salvar a transcrição." };
+
     await supabase.from("ai_usage_logs").insert({
       user_id: user.id,
       note_id: noteId,
@@ -231,7 +241,7 @@ export async function deleteDrawingAudio(noteId: string): Promise<{ error?: stri
 
   const { error } = await supabase
     .from("note_drawings")
-    .update({ audio_path: null, audio_duration_ms: null })
+    .update({ audio_path: null, audio_duration_ms: null, audio_transcript: null })
     .eq("note_id", noteId);
 
   return error ? { error: "Não foi possível remover a gravação." } : {};

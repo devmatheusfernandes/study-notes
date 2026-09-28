@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useRef } from "react";
-import { FileText, Loader2, Pause, Play, Share2, Trash2, UploadCloud } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { Check, ChevronDown, Copy, FileText, Loader2, Pause, Play, Share2, Trash2, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +18,10 @@ interface NoteAudioPlayerProps {
   onTranscribe: () => void;
   onShare: () => void;
   isTranscribing: boolean;
+  /** Set once a transcript exists — swaps the transcribe button for the expand arrow. */
+  hasTranscript: boolean;
+  transcriptOpen: boolean;
+  onToggleTranscript: () => void;
   /** Drops the pill styling for when this sits inside the drawing toolbar, which already is one. */
   embedded?: boolean;
 }
@@ -44,6 +48,9 @@ export function NoteAudioPlayer({
   onTranscribe,
   onShare,
   isTranscribing,
+  hasTranscript,
+  transcriptOpen,
+  onToggleTranscript,
   embedded = false,
 }: NoteAudioPlayerProps) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -134,17 +141,19 @@ export function NoteAudioPlayer({
         {formatTime(durationMs)}
       </span>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-label="Transcrever gravação"
-        title="Transcrever para a nota"
-        onClick={onTranscribe}
-        disabled={isTranscribing}
-        className="px-2.5 text-muted-foreground"
-      >
-        {isTranscribing ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
-      </Button>
+      {!hasTranscript && (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Transcrever gravação"
+          title="Transcrever para a nota"
+          onClick={onTranscribe}
+          disabled={isTranscribing}
+          className="px-2.5 text-muted-foreground"
+        >
+          {isTranscribing ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+        </Button>
+      )}
 
       <Button
         variant="ghost"
@@ -166,6 +175,51 @@ export function NoteAudioPlayer({
       >
         <Trash2 className="size-4" />
       </Button>
+
+      {hasTranscript && (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={transcriptOpen ? "Ocultar transcrição" : "Mostrar transcrição"}
+          aria-expanded={transcriptOpen}
+          onClick={onToggleTranscript}
+          className="px-2.5 text-muted-foreground"
+        >
+          <ChevronDown className={cn("size-4 transition-transform", transcriptOpen && "rotate-180")} />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** The expanded half of the audio component: the transcript and a copy button. */
+export function NoteTranscriptPanel({ transcript, className }: { transcript: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(transcript);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked (insecure context / permissions); nothing to fall back to.
+    }
+  }
+
+  return (
+    <div className={cn("w-full max-w-md rounded-2xl border border-border bg-card/80 p-3", className)}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">Transcrição</span>
+        <Button
+          variant="ghost"
+          size="xs"
+          leftIcon={copied ? <Check /> : <Copy />}
+          onClick={() => void copy()}
+        >
+          {copied ? "Copiado" : "Copiar"}
+        </Button>
+      </div>
+      <p className="max-h-[40svh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">{transcript}</p>
     </div>
   );
 }
