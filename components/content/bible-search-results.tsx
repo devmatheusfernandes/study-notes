@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, BookMarked, BookOpen, Film, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { notify } from "@/components/ui/toaster";
@@ -16,9 +17,12 @@ import {
   searchBibleVerses,
   searchVideoTranscripts,
   searchInsightChapters,
+  searchResearchGuideExtracts,
+  getResearchGuideExtractHtml,
   type BibleVerseHit,
   type VideoHit,
   type InsightHit,
+  type GuideHit,
 } from "@/app/(app)/bible-search-actions";
 import { getGlobalPublicationChapterContent } from "@/app/(app)/global-publications-actions";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
@@ -65,17 +69,23 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
   const [verses, setVerses] = useState<BibleVerseHit[]>([]);
   const [videos, setVideos] = useState<VideoHit[]>([]);
   const [articles, setArticles] = useState<InsightHit[]>([]);
+  const [guide, setGuide] = useState<GuideHit[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMoreVerses, setIsLoadingMoreVerses] = useState(false);
   const [isLoadingMoreVideos, setIsLoadingMoreVideos] = useState(false);
   const [isLoadingMoreArticles, setIsLoadingMoreArticles] = useState(false);
+  const [isLoadingMoreGuide, setIsLoadingMoreGuide] = useState(false);
   const [versesExhausted, setVersesExhausted] = useState(false);
   const [videosExhausted, setVideosExhausted] = useState(false);
   const [articlesExhausted, setArticlesExhausted] = useState(false);
+  const [guideExhausted, setGuideExhausted] = useState(false);
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
   const [openArticleId, setOpenArticleId] = useState<string | null>(null);
   const [articleHtml, setArticleHtml] = useState<string | null>(null);
   const [isLoadingArticle, setIsLoadingArticle] = useState(false);
+  const [openGuideId, setOpenGuideId] = useState<number | null>(null);
+  const [guideHtml, setGuideHtml] = useState<string | null>(null);
+  const [isLoadingGuideHtml, setIsLoadingGuideHtml] = useState(false);
 
   // A query that IS a reference ("João 3:16", "sl 23") gets a direct jump
   // offered above the results. Resolved in the browser against the static
@@ -112,12 +122,16 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       setVerses(result.verses);
       setVideos(result.videos);
       setArticles(result.articles);
+      setGuide(result.guide);
       setVersesExhausted(result.verses.length < BIBLE_SEARCH_PAGE_SIZE);
       setVideosExhausted(result.videos.length < BIBLE_SEARCH_PAGE_SIZE);
       setArticlesExhausted(result.articles.length < BIBLE_SEARCH_PAGE_SIZE);
+      setGuideExhausted(result.guide.length < BIBLE_SEARCH_PAGE_SIZE);
       setOpenVideoId(null);
       setOpenArticleId(null);
       setArticleHtml(null);
+      setOpenGuideId(null);
+      setGuideHtml(null);
       setIsLoading(false);
       // Uma nova busca substitui as listas, então qualquer "carregar mais"
       // ainda em voo foi abandonado — sem zerar estes, o botão ficaria
@@ -125,11 +139,12 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       setIsLoadingMoreVerses(false);
       setIsLoadingMoreVideos(false);
       setIsLoadingMoreArticles(false);
+      setIsLoadingMoreGuide(false);
       if (result.error) notify.error("Não foi possível buscar", result.error);
       // Land on whichever list actually has something, so a query that only
       // matches videos/Perspicaz doesn't open on an empty "Versículos" tab.
       if (result.verses.length === 0 && result.videos.length > 0) setTab("videos");
-      else if (result.verses.length === 0 && result.videos.length === 0 && result.articles.length > 0) setTab("perspicaz");
+      else if (result.verses.length === 0 && result.videos.length === 0 && (result.articles.length > 0 || result.guide.length > 0)) setTab("perspicaz");
       else setTab("versiculos");
     });
 
@@ -177,6 +192,36 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
     });
   }, [query, articles.length]);
 
+  const loadMoreGuide = useCallback(() => {
+    const requested = query.trim();
+    setIsLoadingMoreGuide(true);
+    void searchResearchGuideExtracts(requested, guide.length).then((result) => {
+      if (activeQueryRef.current.trim() !== requested) return;
+      const page = result.guide ?? [];
+      setGuide((prev) => [...prev, ...page]);
+      setGuideExhausted(page.length < BIBLE_SEARCH_PAGE_SIZE);
+      setIsLoadingMoreGuide(false);
+    });
+  }, [query, guide.length]);
+
+  const toggleGuide = useCallback(
+    (hit: GuideHit) => {
+      if (openGuideId === hit.extractId) {
+        setOpenGuideId(null);
+        setGuideHtml(null);
+        return;
+      }
+      setOpenGuideId(hit.extractId);
+      setGuideHtml(null);
+      setIsLoadingGuideHtml(true);
+      void getResearchGuideExtractHtml(hit.extractId).then((result) => {
+        setGuideHtml(result.html ?? null);
+        setIsLoadingGuideHtml(false);
+      });
+    },
+    [openGuideId]
+  );
+
   const toggleArticle = useCallback(
     (article: InsightHit) => {
       if (openArticleId === article.id) {
@@ -195,13 +240,31 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
     [openArticleId]
   );
 
+  // The two sources are paged independently and their ts_rank scores aren't
+  // comparable across corpora, so the merged list simply alternates between
+  // them — each keeps its own relevance order, and neither buries the other.
+  const insightItems = useMemo(() => {
+    const items: Array<{ kind: "article"; hit: InsightHit } | { kind: "guide"; hit: GuideHit }> = [];
+    for (let i = 0; i < Math.max(articles.length, guide.length); i++) {
+      if (i < articles.length) items.push({ kind: "article", hit: articles[i] });
+      if (i < guide.length) items.push({ kind: "guide", hit: guide[i] });
+    }
+    return items;
+  }, [articles, guide]);
+
+  const insightExhausted = articlesExhausted && guideExhausted;
+  const loadMoreInsight = useCallback(() => {
+    if (!articlesExhausted) loadMoreArticles();
+    if (!guideExhausted) loadMoreGuide();
+  }, [articlesExhausted, guideExhausted, loadMoreArticles, loadMoreGuide]);
+
   if (query.trim().length < BIBLE_SEARCH_MIN_LENGTH) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-16 text-center">
         <BookOpen className="size-6 text-muted-foreground/60" />
         <p className="text-[13.5px] text-muted-foreground">
           Digite ao menos {BIBLE_SEARCH_MIN_LENGTH} letras para buscar na Bíblia e nas
-          transcrições dos vídeos.
+          transcrições dos vídeos, no Perspicaz e no Guia de Pesquisa.
         </p>
       </div>
     );
@@ -257,10 +320,10 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
           <TabsTrigger value="perspicaz">
             <BookMarked className="size-3.5" />
             Perspicaz
-            {articles.length > 0 && (
+            {articles.length + guide.length > 0 && (
               <span className="ml-1 font-mono text-[10px] text-accent">
-                {articles.length}
-                {!articlesExhausted && "+"}
+                {articles.length + guide.length}
+                {(!articlesExhausted || !guideExhausted) && "+"}
               </span>
             )}
           </TabsTrigger>
@@ -391,51 +454,75 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
         <TabsContent value="perspicaz" className="flex flex-col gap-2">
           {isLoading ? (
             <BibleInsightSearchSkeleton />
-          ) : articles.length === 0 ? (
-            <EmptyHint>Nenhum artigo do Perspicaz encontrado para “{query.trim()}”.</EmptyHint>
+          ) : insightItems.length === 0 ? (
+            <EmptyHint>Nenhum resultado no Perspicaz ou no Guia de Pesquisa para “{query.trim()}”.</EmptyHint>
           ) : (
             <>
-              {articles.map((article) => {
-                const isOpen = openArticleId === article.id;
+              {insightItems.map((item) => {
+                const isArticle = item.kind === "article";
+                const key = isArticle ? `a-${item.hit.id}` : `g-${item.hit.extractId}`;
+                const isOpen = isArticle ? openArticleId === item.hit.id : openGuideId === item.hit.extractId;
+                const title = isArticle ? item.hit.title : (item.hit.caption ?? item.hit.refTitle);
+                const source = isArticle ? "Perspicaz" : "Guia de Pesquisa";
+                const verse = isArticle ? null : item.hit.verse;
+                const loading = isArticle ? isLoadingArticle : isLoadingGuideHtml;
+                const html = isArticle ? articleHtml : guideHtml;
                 return (
-                  <div key={article.id} className="flex flex-col gap-2">
+                  <div key={key} className="flex flex-col gap-2">
                     <button
                       type="button"
-                      onClick={() => toggleArticle(article)}
+                      onClick={() => (isArticle ? toggleArticle(item.hit) : toggleGuide(item.hit))}
                       aria-expanded={isOpen}
                       className={cn(
                         "flex flex-col gap-1 rounded-2xl px-4 py-3 text-left transition-colors",
                         isOpen ? "bg-surface-elevated" : "bg-secondary hover:bg-surface-elevated"
                       )}
                     >
-                      <span className="font-mono text-[10.5px] tracking-[0.04em] text-accent">
-                        {article.title}
+                      <span className="flex items-center gap-2">
+                        <Badge variant="outline" className="shrink-0">
+                          {source}
+                        </Badge>
+                        {title && (
+                          <span className="min-w-0 truncate font-mono text-[10.5px] tracking-[0.04em] text-accent">
+                            {title}
+                          </span>
+                        )}
                       </span>
                       <Highlighted
-                        html={article.headline}
+                        html={item.hit.headline}
                         className="whitespace-pre-line text-[13.5px] leading-relaxed text-foreground/90"
                       />
                     </button>
 
                     {isOpen && (
                       <div className="rounded-2xl bg-secondary/60 px-4 py-3 text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl">
-                        {isLoadingArticle ? (
+                        {loading ? (
                           <span className="text-[12px] text-muted-foreground">carregando…</span>
                         ) : (
-                          <div dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(articleHtml ?? "") }} />
+                          <div dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(html ?? "") }} />
+                        )}
+                        {verse && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectVerse(verse.bookOrder, verse.chapter, verse.verse)}
+                            className="mt-2 flex items-center gap-1.5 text-[12px] text-accent hover:underline"
+                          >
+                            Ir para {verse.book} {verse.chapter}:{verse.verse}
+                            <ArrowRight className="size-3.5" />
+                          </button>
                         )}
                       </div>
                     )}
                   </div>
                 );
               })}
-              {!articlesExhausted && (
+              {!insightExhausted && (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="self-center"
-                  isLoading={isLoadingMoreArticles}
-                  onClick={loadMoreArticles}
+                  isLoading={isLoadingMoreArticles || isLoadingMoreGuide}
+                  onClick={loadMoreInsight}
                 >
                   Carregar mais
                 </Button>

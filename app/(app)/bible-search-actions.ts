@@ -230,25 +230,113 @@ export async function searchInsightChapters(
   };
 }
 
+export interface GuideHit {
+  extractId: number;
+  /** The excerpt's own citation label ("it-1 “Criação” par. 4 Criação"), when the archive carried one. */
+  caption: string | null;
+  refTitle: string | null;
+  /** Already-escaped HTML with `<mark>` — see toHighlightedHtml. */
+  headline: string;
+  /** First verse whose guide entry cites this excerpt — `null` when none was found. */
+  verse: { book: string; bookOrder: number; chapter: number; verse: number } | null;
+}
+
+interface GuideRpcRow {
+  extract_id: number;
+  caption: string | null;
+  ref_title: string | null;
+  headline: string | null;
+  book: string | null;
+  book_order: number | null;
+  chapter: number | null;
+  verse: number | null;
+}
+
 /**
- * All three lists' first page in one round trip — what the results screen
+ * "Guia de Pesquisa" excerpts (migration 0044), listed beside Perspicaz in the
+ * results. Searches the excerpts' own text — the guide's per-verse entries are
+ * mostly bare citation labels, so there is nothing worth matching in them.
+ */
+export async function searchResearchGuideExtracts(
+  query: string,
+  offset = 0
+): Promise<{ guide?: GuideHit[]; error?: string }> {
+  const trimmed = query.trim();
+  if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { guide: [] };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase.rpc("search_research_guide_extracts", {
+    query_text: trimmed,
+    max_results: BIBLE_SEARCH_PAGE_SIZE,
+    result_offset: Math.max(0, offset),
+  });
+
+  if (error) return { error: "Não foi possível buscar no Guia de Pesquisa." };
+
+  return {
+    guide: ((data ?? []) as GuideRpcRow[]).map((row) => ({
+      extractId: row.extract_id,
+      caption: row.caption || null,
+      refTitle: row.ref_title,
+      headline: toHighlightedHtml(row.headline),
+      verse:
+        row.book !== null && row.book_order !== null && row.chapter !== null && row.verse !== null
+          ? { book: row.book, bookOrder: row.book_order, chapter: row.chapter, verse: row.verse }
+          : null,
+    })),
+  };
+}
+
+/** One excerpt's full HTML, fetched when a result is expanded (the search itself returns only a headline). */
+export async function getResearchGuideExtractHtml(extractId: number): Promise<{ html?: string; error?: string }> {
+  if (!Number.isInteger(extractId)) return { error: "Trecho inválido." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data, error } = await supabase
+    .from("bible_research_guide_extracts")
+    .select("content_html")
+    .eq("extract_id", extractId)
+    .maybeSingle();
+
+  if (error || !data) return { error: "Não foi possível carregar o trecho." };
+  return { html: data.content_html };
+}
+
+/**
+ * All four lists' first page in one round trip — what the results screen
  * asks for on a fresh search. "Carregar mais" then pages each list on its
  * own through the actions above.
  */
-export async function searchBibleAndVideos(
-  query: string
-): Promise<{ verses: BibleVerseHit[]; videos: VideoHit[]; articles: InsightHit[]; error?: string }> {
-  const [verseResult, videoResult, insightResult] = await Promise.all([
+export async function searchBibleAndVideos(query: string): Promise<{
+  verses: BibleVerseHit[];
+  videos: VideoHit[];
+  articles: InsightHit[];
+  guide: GuideHit[];
+  error?: string;
+}> {
+  const [verseResult, videoResult, insightResult, guideResult] = await Promise.all([
     searchBibleVerses(query),
     searchVideoTranscripts(query),
     searchInsightChapters(query),
+    searchResearchGuideExtracts(query),
   ]);
 
   return {
     verses: verseResult.verses ?? [],
     videos: videoResult.videos ?? [],
     articles: insightResult.articles ?? [],
-    error: verseResult.error ?? videoResult.error ?? insightResult.error,
+    guide: guideResult.guide ?? [],
+    error: verseResult.error ?? videoResult.error ?? insightResult.error ?? guideResult.error,
   };
 }
 
