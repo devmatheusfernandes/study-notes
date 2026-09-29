@@ -43,6 +43,7 @@ import { BibleChapterGrid } from "./bible-chapter-grid";
 import { BibleChapterView } from "./bible-chapter-view";
 import { BibleSearchInput } from "./bible-search-input";
 import { BibleSearchResults } from "./bible-search-results";
+import { BibleSearchDetailPanel, type BibleSearchDetail } from "./bible-search-detail-panel";
 import { BibleStudyPanel, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
@@ -206,10 +207,14 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   // --- Busca (header) ---
   //
   // `query` é o que está digitado; `submittedQuery` é o que a tela de
-  // resultados realmente consulta, atrasado em 350 ms para não disparar uma
-  // ida ao servidor por tecla. Enter pula a espera.
+  // resultados realmente consulta, e só muda quando a pessoa pede a busca
+  // (Enter ou o botão de pesquisar). Antes era um debounce de 350 ms por tecla,
+  // que consultava palavras pela metade.
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
+  // O que um resultado da busca abriu na lateral (vídeo, artigo, trecho do Guia
+  // ou documento do WOL). Some junto com a busca.
+  const [searchDetail, setSearchDetail] = useState<BibleSearchDetail | null>(null);
 
   // Para onde voltar quando a busca é limpa — a tela em que a pessoa estava
   // antes de digitar, não sempre a grade de livros. Um ref, e não estado,
@@ -219,30 +224,16 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     if (screen !== "search") screenBeforeSearchRef.current = screen;
   }, [screen]);
 
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) {
-      // Adiado um tique, como os outros efeitos deste arquivo: apagar a
-      // consulta aqui dentro, de forma síncrona, é exatamente a cascata de
-      // renderizações que a regra react-hooks/set-state-in-effect proíbe.
-      queueMicrotask(() => setSubmittedQuery(""));
-      return;
-    }
-    const timer = setTimeout(() => {
-      setSubmittedQuery(trimmed);
-      setScreen("search");
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [query]);
-
   const submitSearch = useCallback(() => {
     const trimmed = query.trim();
     if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return;
+    setSearchDetail(null);
     setSubmittedQuery(trimmed);
     setScreen("search");
   }, [query]);
 
   const exitSearch = useCallback(() => {
+    setSearchDetail(null);
     setSubmittedQuery("");
     setScreen(screenBeforeSearchRef.current);
   }, []);
@@ -708,19 +699,33 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
 
   if (screen === "search") {
     return (
-      <div className="flex min-h-dvh w-full flex-1 flex-col">
-        <BibleTopHeader
-          title="Busca"
-          onBack={exitSearch}
-          backLabel="Sair da busca"
-          userEmail={userEmail}
-          {...searchHeaderProps}
-        />
-        <BibleSearchResults
-          query={submittedQuery}
-          onSelectVerse={(refBookOrder, refChapter, refVerse) =>
-            enterReading(refBookOrder, refChapter, refVerse)
-          }
+      // Row, not column: BibleSearchDetailPanel is a flex sibling that
+      // animates its own width to push the results aside.
+      <div className="flex min-h-dvh w-full flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <BibleTopHeader
+            title="Busca"
+            onBack={exitSearch}
+            backLabel="Sair da busca"
+            userEmail={userEmail}
+            {...searchHeaderProps}
+          />
+          <BibleSearchResults
+            query={submittedQuery}
+            onSelectVerse={(refBookOrder, refChapter, refVerse) => {
+              setSearchDetail(null);
+              enterReading(refBookOrder, refChapter, refVerse);
+            }}
+            onOpenDetail={setSearchDetail}
+          />
+        </div>
+        <BibleSearchDetailPanel
+          detail={searchDetail}
+          onClose={() => setSearchDetail(null)}
+          onSelectVerse={(refBookOrder, refChapter, refVerse) => {
+            setSearchDetail(null);
+            enterReading(refBookOrder, refChapter, refVerse);
+          }}
         />
       </div>
     );

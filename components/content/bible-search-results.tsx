@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, BookMarked, BookOpen, Film, Play } from "lucide-react";
+import { ArrowRight, BookMarked, BookOpen, Film, Globe, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { notify } from "@/components/ui/toaster";
-import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { parseBibleReference, formatBibleReference } from "@/lib/bible/parse-reference";
+import { WolSearchPanel } from "./wol-search-panel";
 import { BibleVerseSearchSkeleton, BibleVideoSearchSkeleton, BibleInsightSearchSkeleton } from "./bible-search-skeleton";
 import { BIBLE_SEARCH_PAGE_SIZE, BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 import {
@@ -18,22 +18,22 @@ import {
   searchVideoTranscripts,
   searchInsightChapters,
   searchResearchGuideExtracts,
-  getResearchGuideExtractHtml,
   type BibleVerseHit,
   type VideoHit,
   type InsightHit,
   type GuideHit,
 } from "@/app/(app)/bible-search-actions";
-import { getGlobalPublicationChapterContent } from "@/app/(app)/global-publications-actions";
-import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
+import type { BibleSearchDetail } from "./bible-search-detail-panel";
 
 interface BibleSearchResultsProps {
   query: string;
   /** Opens a verse in the reading screen — the same `enterReading` the rest of the reader uses. */
   onSelectVerse: (bookOrder: number, chapter: number, verse: number | null) => void;
+  /** A video, Perspicaz article, Guia excerpt or WOL document was clicked — the reader shows it in the side panel (BibleSearchDetailPanel). */
+  onOpenDetail: (detail: BibleSearchDetail) => void;
 }
 
-type ResultsTab = "versiculos" | "videos" | "perspicaz";
+type ResultsTab = "versiculos" | "videos" | "perspicaz" | "biblioteca";
 
 /**
  * `headline` arrives already escaped from the server, with `<mark>` as the only
@@ -64,7 +64,7 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
  * migration 0025), because neither corpus can live in the browser: 31.194
  * verses and 16 MB of transcripts.
  */
-export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsProps) {
+export function BibleSearchResults({ query, onSelectVerse, onOpenDetail }: BibleSearchResultsProps) {
   const [tab, setTab] = useState<ResultsTab>("versiculos");
   const [verses, setVerses] = useState<BibleVerseHit[]>([]);
   const [videos, setVideos] = useState<VideoHit[]>([]);
@@ -79,13 +79,6 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
   const [videosExhausted, setVideosExhausted] = useState(false);
   const [articlesExhausted, setArticlesExhausted] = useState(false);
   const [guideExhausted, setGuideExhausted] = useState(false);
-  const [openVideoId, setOpenVideoId] = useState<string | null>(null);
-  const [openArticleId, setOpenArticleId] = useState<string | null>(null);
-  const [articleHtml, setArticleHtml] = useState<string | null>(null);
-  const [isLoadingArticle, setIsLoadingArticle] = useState(false);
-  const [openGuideId, setOpenGuideId] = useState<number | null>(null);
-  const [guideHtml, setGuideHtml] = useState<string | null>(null);
-  const [isLoadingGuideHtml, setIsLoadingGuideHtml] = useState(false);
 
   // A query that IS a reference ("João 3:16", "sl 23") gets a direct jump
   // offered above the results. Resolved in the browser against the static
@@ -127,11 +120,6 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       setVideosExhausted(result.videos.length < BIBLE_SEARCH_PAGE_SIZE);
       setArticlesExhausted(result.articles.length < BIBLE_SEARCH_PAGE_SIZE);
       setGuideExhausted(result.guide.length < BIBLE_SEARCH_PAGE_SIZE);
-      setOpenVideoId(null);
-      setOpenArticleId(null);
-      setArticleHtml(null);
-      setOpenGuideId(null);
-      setGuideHtml(null);
       setIsLoading(false);
       // Uma nova busca substitui as listas, então qualquer "carregar mais"
       // ainda em voo foi abandonado — sem zerar estes, o botão ficaria
@@ -204,42 +192,6 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
     });
   }, [query, guide.length]);
 
-  const toggleGuide = useCallback(
-    (hit: GuideHit) => {
-      if (openGuideId === hit.extractId) {
-        setOpenGuideId(null);
-        setGuideHtml(null);
-        return;
-      }
-      setOpenGuideId(hit.extractId);
-      setGuideHtml(null);
-      setIsLoadingGuideHtml(true);
-      void getResearchGuideExtractHtml(hit.extractId).then((result) => {
-        setGuideHtml(result.html ?? null);
-        setIsLoadingGuideHtml(false);
-      });
-    },
-    [openGuideId]
-  );
-
-  const toggleArticle = useCallback(
-    (article: InsightHit) => {
-      if (openArticleId === article.id) {
-        setOpenArticleId(null);
-        setArticleHtml(null);
-        return;
-      }
-      setOpenArticleId(article.id);
-      setArticleHtml(null);
-      setIsLoadingArticle(true);
-      void getGlobalPublicationChapterContent(article.publicationId, article.documentId).then((result) => {
-        setArticleHtml(result.html ?? null);
-        setIsLoadingArticle(false);
-      });
-    },
-    [openArticleId]
-  );
-
   // The two sources are paged independently and their ts_rank scores aren't
   // comparable across corpora, so the merged list simply alternates between
   // them — each keeps its own relevance order, and neither buries the other.
@@ -263,8 +215,8 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-16 text-center">
         <BookOpen className="size-6 text-muted-foreground/60" />
         <p className="text-[13.5px] text-muted-foreground">
-          Digite ao menos {BIBLE_SEARCH_MIN_LENGTH} letras para buscar na Bíblia e nas
-          transcrições dos vídeos, no Perspicaz e no Guia de Pesquisa.
+          Digite ao menos {BIBLE_SEARCH_MIN_LENGTH} letras e pressione Enter para buscar na Bíblia, nas
+          transcrições dos vídeos, no Perspicaz, no Guia de Pesquisa e na Biblioteca On-line.
         </p>
       </div>
     );
@@ -296,6 +248,12 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
       )}
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as ResultsTab)}>
+        {/* Sticky just under the reader's own sticky header (min-h-14 + the
+            notch's safe-area inset), so switching source never needs a scroll
+            back to the top. The wrapper carries the background — the list
+            itself is a pill, and results would show around it — and bleeds
+            into the container's side padding. */}
+        <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-10 -mx-4 bg-background/95 px-4 py-2 backdrop-blur-md sm:-mx-6 sm:px-6">
         <TabsList className="w-full">
           <TabsTrigger value="versiculos">
             <BookOpen className="size-3.5" />
@@ -327,7 +285,13 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
               </span>
             )}
           </TabsTrigger>
+          {/* "WOL", not "Biblioteca On-line": four tabs already fill a phone's width. */}
+          <TabsTrigger value="biblioteca">
+            <Globe className="size-3.5" />
+            WOL
+          </TabsTrigger>
         </TabsList>
+        </div>
 
         <TabsContent value="versiculos" className="flex flex-col gap-2">
           {isLoading ? (
@@ -375,67 +339,41 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
             <EmptyHint>Nenhum vídeo encontrado para “{query.trim()}”.</EmptyHint>
           ) : (
             <>
-              {videos.map((video) => {
-                const isOpen = openVideoId === video.videoId;
-                return (
-                  <div key={video.videoId} className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setOpenVideoId(isOpen ? null : video.videoId)}
-                      aria-expanded={isOpen}
-                      className={cn(
-                        "flex items-start gap-3 rounded-2xl px-3 py-3 text-left transition-colors",
-                        isOpen ? "bg-surface-elevated" : "bg-secondary hover:bg-surface-elevated"
-                      )}
-                    >
-                      <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-xl bg-black/50 sm:w-32">
-                        {video.coverImage && (
-                          // eslint-disable-next-line @next/next/no-img-element -- JW.org CDN host, not in next.config's image domains
-                          <img
-                            src={video.coverImage}
-                            alt=""
-                            loading="lazy"
-                            className="h-full w-full object-cover"
-                          />
-                        )}
-                        <span className="absolute inset-0 flex items-center justify-center">
-                          <Play className="size-4 text-white/90 drop-shadow" />
-                        </span>
-                        {video.durationFormatted && (
-                          <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 font-mono text-[9px] text-white">
-                            {video.durationFormatted}
-                          </span>
-                        )}
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="line-clamp-2 text-[13.5px] font-medium text-foreground/90">
-                          {video.title}
-                        </span>
-                        <Highlighted
-                          html={video.headline}
-                          className="line-clamp-3 text-[12.5px] leading-snug text-muted-foreground"
-                        />
-                      </span>
-                    </button>
-
-                    {isOpen && (
-                      <InlineVideoCard
-                        videoId={video.videoId}
-                        title={video.title}
-                        videoUrl={video.videoUrl ?? undefined}
-                        coverImage={video.coverImage ?? undefined}
-                        durationFormatted={video.durationFormatted ?? undefined}
-                        subtitlesUrl={video.subtitlesUrl ?? undefined}
-                        // Hands the matched excerpt to the player, which finds
-                        // the subtitle line it came from and starts there
-                        // instead of at 00:00 — the whole point of searching a
-                        // transcript rather than a title.
-                        snippet={video.snippet}
+              {videos.map((video) => (
+                <button
+                  key={video.videoId}
+                  type="button"
+                  onClick={() => onOpenDetail({ kind: "video", hit: video })}
+                  className="flex items-start gap-3 rounded-2xl bg-secondary px-3 py-3 text-left transition-colors hover:bg-surface-elevated"
+                >
+                  <span className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-xl bg-black/50 sm:w-32">
+                    {video.coverImage && (
+                      // eslint-disable-next-line @next/next/no-img-element -- JW.org CDN host, not in next.config's image domains
+                      <img
+                        src={video.coverImage}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover"
                       />
                     )}
-                  </div>
-                );
-              })}
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <Play className="size-4 text-white/90 drop-shadow" />
+                    </span>
+                    {video.durationFormatted && (
+                      <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 font-mono text-[9px] text-white">
+                        {video.durationFormatted}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="line-clamp-2 text-[13.5px] font-medium text-foreground/90">{video.title}</span>
+                    <Highlighted
+                      html={video.headline}
+                      className="line-clamp-3 text-[12.5px] leading-snug text-muted-foreground"
+                    />
+                  </span>
+                </button>
+              ))}
               {!videosExhausted && (
                 <Button
                   variant="ghost"
@@ -461,59 +399,36 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
               {insightItems.map((item) => {
                 const isArticle = item.kind === "article";
                 const key = isArticle ? `a-${item.hit.id}` : `g-${item.hit.extractId}`;
-                const isOpen = isArticle ? openArticleId === item.hit.id : openGuideId === item.hit.extractId;
                 const title = isArticle ? item.hit.title : (item.hit.caption ?? item.hit.refTitle);
                 const source = isArticle ? "Perspicaz" : "Guia de Pesquisa";
-                const verse = isArticle ? null : item.hit.verse;
-                const loading = isArticle ? isLoadingArticle : isLoadingGuideHtml;
-                const html = isArticle ? articleHtml : guideHtml;
                 return (
-                  <div key={key} className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => (isArticle ? toggleArticle(item.hit) : toggleGuide(item.hit))}
-                      aria-expanded={isOpen}
-                      className={cn(
-                        "flex flex-col gap-1 rounded-2xl px-4 py-3 text-left transition-colors",
-                        isOpen ? "bg-surface-elevated" : "bg-secondary hover:bg-surface-elevated"
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() =>
+                      onOpenDetail(
+                        item.kind === "article"
+                          ? { kind: "article", hit: item.hit }
+                          : { kind: "guide", hit: item.hit }
+                      )
+                    }
+                    className="flex flex-col gap-1 rounded-2xl bg-secondary px-4 py-3 text-left transition-colors hover:bg-surface-elevated"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Badge variant="outline" className="shrink-0">
+                        {source}
+                      </Badge>
+                      {title && (
+                        <span className="min-w-0 truncate font-mono text-[10.5px] tracking-[0.04em] text-accent">
+                          {title}
+                        </span>
                       )}
-                    >
-                      <span className="flex items-center gap-2">
-                        <Badge variant="outline" className="shrink-0">
-                          {source}
-                        </Badge>
-                        {title && (
-                          <span className="min-w-0 truncate font-mono text-[10.5px] tracking-[0.04em] text-accent">
-                            {title}
-                          </span>
-                        )}
-                      </span>
-                      <Highlighted
-                        html={item.hit.headline}
-                        className="whitespace-pre-line text-[13.5px] leading-relaxed text-foreground/90"
-                      />
-                    </button>
-
-                    {isOpen && (
-                      <div className="rounded-2xl bg-secondary/60 px-4 py-3 text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl">
-                        {loading ? (
-                          <span className="text-[12px] text-muted-foreground">carregando…</span>
-                        ) : (
-                          <div dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(html ?? "") }} />
-                        )}
-                        {verse && (
-                          <button
-                            type="button"
-                            onClick={() => onSelectVerse(verse.bookOrder, verse.chapter, verse.verse)}
-                            className="mt-2 flex items-center gap-1.5 text-[12px] text-accent hover:underline"
-                          >
-                            Ir para {verse.book} {verse.chapter}:{verse.verse}
-                            <ArrowRight className="size-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                    </span>
+                    <Highlighted
+                      html={item.hit.headline}
+                      className="whitespace-pre-line text-[13.5px] leading-relaxed text-foreground/90"
+                    />
+                  </button>
                 );
               })}
               {!insightExhausted && (
@@ -529,6 +444,15 @@ export function BibleSearchResults({ query, onSelectVerse }: BibleSearchResultsP
               )}
             </>
           )}
+        </TabsContent>
+
+        {/* keepMounted: the list and its loaded pages survive a look at another tab. */}
+        <TabsContent value="biblioteca" keepMounted>
+          <WolSearchPanel
+            query={query.trim()}
+            active={tab === "biblioteca"}
+            onOpen={(docId, title) => onOpenDetail({ kind: "wol", docId, title })}
+          />
         </TabsContent>
       </Tabs>
     </motion.div>

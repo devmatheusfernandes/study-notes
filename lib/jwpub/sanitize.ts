@@ -20,6 +20,7 @@ export function sanitizeChapterHtml(html: string): string {
       "data-jwpub-footnote", "data-jwpub-ref", "data-pid", "data-key",
       "data-jwpub-bible-first", "data-jwpub-bible-last",
       "data-jwpub-pubref", "data-jwpub-pubref-pid", "data-jwpub-extract",
+      "data-wol-path", "data-wol-verse",
     ],
     FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
     FORBID_ATTR: ["onerror", "onload", "onclick", "srcset"],
