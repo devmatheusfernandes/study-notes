@@ -91,6 +91,8 @@ interface BibleStudyTabsProps {
   onEditPersonalNote: (note: BiblePersonalNote) => void;
   /** "Excluir" on an expanded personal note, after the inline confirm below. */
   onDeletePersonalNote: (note: BiblePersonalNote) => void;
+  /** A note to open already expanded (the reader sets it when a highlight with a note is clicked). A fresh object per click, so tapping the same highlight again re-expands a note the user had collapsed. */
+  focusNote?: { id: string } | null;
 
   /** The highlight just tapped in the reader, when it has no note yet — shown as a dismissible recolor/add-note/delete card at the top of the Pessoal tab instead of its own sidebar. `null` when nothing was just tapped. */
   activeHighlight?: (BibleVerseHighlight & { text?: string }) | null;
@@ -338,6 +340,7 @@ export function BibleStudyTabs({
   onOpenExtract,
   personalNotes,
   onEditPersonalNote,
+  focusNote,
   onDeletePersonalNote,
   activeHighlight = null,
   onCloseActiveHighlight,
@@ -354,6 +357,13 @@ export function BibleStudyTabs({
   // exactly the content already listed here; expanding in place instead
   // means this tab is the one place to view/edit/delete a personal note.
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  // Adjusted during render (not in an effect) so the note is already open on
+  // the first paint of the click, rather than flashing collapsed first.
+  const [seenFocusNote, setSeenFocusNote] = useState(focusNote);
+  if (focusNote !== seenFocusNote) {
+    setSeenFocusNote(focusNote);
+    if (focusNote) setExpandedNoteId(focusNote.id);
+  }
   const [confirmDeleteNote, setConfirmDeleteNote] = useState<BiblePersonalNote | null>(null);
   const [confirmDeleteHighlight, setConfirmDeleteHighlight] = useState(false);
   // Which video is expanded into a real player. One at a time — the panel is

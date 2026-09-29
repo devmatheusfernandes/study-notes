@@ -665,8 +665,10 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   // tab listing exactly this note, so that extra panel was redundant.
   // Instead, just scope the Estudo panel to this note's verse and switch it
   // to that tab; the note itself is expandable there (see BibleStudyPanel).
-  const handleViewHighlightNote = useCallback((note: { verse: number }) => {
+  const [focusNote, setFocusNote] = useState<{ id: string } | null>(null);
+  const handleViewHighlightNote = useCallback((note: { id: string; verse: number }) => {
     setHighlightMark(null);
+    setFocusNote({ id: note.id });
     setSelectedVerse(note.verse);
     setStudyTab("pessoal");
     setStudyOpen(true);
@@ -867,6 +869,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         personalNotes={panelPersonalNotes}
         onEditPersonalNote={handleEditPersonalNote}
         onDeletePersonalNote={handleDeletePersonalNote}
+        focusNote={focusNote}
         activeHighlight={highlightMark}
         onCloseActiveHighlight={() => setHighlightMark(null)}
         onAddNoteToActiveHighlight={handleAddNoteToHighlight}
