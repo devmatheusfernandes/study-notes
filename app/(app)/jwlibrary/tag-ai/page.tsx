@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 export default function JwlibraryTagAiPage() {
   return (
     <>
-      <Header variant="title" title="Organizar tags com IA" />
+      <Header variant="title" title="Organizar tags com IA" showSidebarToggle={false} />
       <main className="flex flex-1 flex-col px-4 py-6 sm:px-6">
         <JwlibraryTagAiView />
       </main>

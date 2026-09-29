@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 export default function JwlibraryTagsPage() {
   return (
     <>
-      <Header variant="title" title="Gerenciar tags" />
+      <Header variant="title" title="Gerenciar tags" showSidebarToggle={false} />
       <main className="flex flex-1 flex-col px-4 py-6 sm:px-6">
         <JwlibraryTagsPageView />
       </main>

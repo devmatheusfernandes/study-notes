@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export default function DocsPage() {
   return (
     <>
-      <Header variant="title" title="Documentação" />
+      <Header variant="title" title="Documentação" showSidebarToggle={false} />
       <main className="flex flex-1 flex-col px-4 py-6 sm:px-6">
         <DocsView />
       </main>

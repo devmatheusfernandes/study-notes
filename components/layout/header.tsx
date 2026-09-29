@@ -9,13 +9,21 @@ interface HeaderProps {
   variant: "search" | "title";
   title?: string;
   searchPlaceholder?: string;
+  /** Mobile-only button that opens the sidebar drawer. Sub-pages turn it off. */
+  showSidebarToggle?: boolean;
   /** Content screens get the create-folder / upload actions; chat & settings don't. */
   //showActions?: boolean;
 }
 
-export function Header({ variant, title, searchPlaceholder }: HeaderProps) {
+export function Header({
+  variant,
+  title,
+  searchPlaceholder,
+  showSidebarToggle = true,
+}: HeaderProps) {
   return (
     <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-border bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur-md sm:gap-3 px-2">
+      {showSidebarToggle && <SidebarToggleButton />}
 
       {variant === "search" ? (
         <HeaderSearchInput placeholder={searchPlaceholder} />

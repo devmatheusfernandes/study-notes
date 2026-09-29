@@ -157,7 +157,17 @@ const VaultContent = React.forwardRef<
                     <Drawer.Title>{props["aria-label"] ?? "Vault"}</Drawer.Title>
                 </VisuallyHidden>
                 {showHandle && (
-                    <div className="mx-auto mt-4 mb-2 h-1.5 w-14 shrink-0 rounded-full bg-primary/50" />
+                    /*
+                      Big touch-none grab area, not just the 6px nub. The body
+                      below is a native scroller, so a touch that starts there
+                      is claimed by the browser (pointercancel) a few px in and
+                      vaul never gets its drag. `touch-action: none` keeps the
+                      pointer stream alive, so dragging from here always works
+                      — notably in the installed PWA.
+                    */
+                    <div className="flex h-9 w-full shrink-0 touch-none items-center justify-center">
+                        <div className="h-1.5 w-14 rounded-full bg-primary/50" />
+                    </div>
                 )}
 
                 {/*
