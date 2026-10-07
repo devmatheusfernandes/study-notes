@@ -20,6 +20,8 @@ export interface MatchResult {
     subtitlesUrl?: string;
     /** Set on a video pulled in by fetchExactMetadataMatches' title-keyword fallback — see buildRagSystemPrompt, which treats a batch of these as a "find by name" listing request rather than a factual question one transcript answers. */
     matchedByTitleKeyword?: boolean;
+    /** ISO publication date of a video, filled by applyPublishPeriod so the model can judge "recente"/"este mês" instead of guessing. */
+    publishedAt?: string;
   };
   similarity: number;
 }
@@ -364,12 +366,15 @@ function isKeywordListing(matchRows: MatchResult[]): boolean {
  * styles below (nothing found / listing / content) stay in sync instead of
  * risking the two copies drifting apart.
  */
-export function buildRagSystemPrompt(matchRows: MatchResult[], sourcesLabel: string): string {
+export function buildRagSystemPrompt(matchRows: MatchResult[], sourcesLabel: string, notice?: string | null): string {
   return (
     `Data de hoje: ${formatTodayPt()}. Use-a para qualquer julgamento de tempo ("recente", "último", "este mês"): ` +
     `compare sempre com esta data e com as datas de publicação indicadas nas fontes, nunca com a sua própria noção de data.
 
 ` +
+    (notice ? `AVISO DO SISTEMA DE BUSCA (fato verificado): ${notice}
+
+` : "") +
     buildRagSystemPromptBody(matchRows, sourcesLabel)
   );
 }
@@ -397,7 +402,16 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
     );
   }
 
-  const contextText = matchRows
+  // A broad question ("quais boletins saíram em 2026?") can match dozens of
+  // whole transcripts; sent in full that overflowed the model's context window
+  // (144k tokens against a 128k limit) and the answer simply failed. Share a
+  // fixed budget across the sources instead: a single exact match still gets
+  // its transcript nearly whole, a long list gets a leading excerpt of each.
+  const CONTEXT_CHAR_BUDGET = 48_000;
+  const MAX_CONTEXT_SOURCES = 15;
+  const contextRows = matchRows.slice(0, MAX_CONTEXT_SOURCES);
+  const perSourceCap = Math.max(1_200, Math.floor(CONTEXT_CHAR_BUDGET / contextRows.length));
+  const contextText = contextRows
     .map((m, idx) => {
       const label = m.metadata?.chapterTitle
         ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
@@ -570,14 +584,114 @@ function extractTitleKeywords(query: string): string[] {
   return result;
 }
 
+export interface PublishPeriod {
+  /** Inclusive YYYY-MM-DD bounds. */
+  from: string;
+  to: string;
+}
+
+/** The day after an inclusive YYYY-MM-DD bound, so `< dayAfter(to)` includes the whole last day. */
+function dayAfter(isoDay: string): string {
+  const d = new Date(`${isoDay}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatPeriodPt(period: PublishPeriod): string {
+  const fmt = (iso: string) =>
+    new Date(`${iso}T12:00:00Z`).toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  const [fy, fm, fd] = period.from.split("-");
+  const [ty, tm, td] = period.to.split("-");
+  const lastDay = new Date(Date.UTC(Number(fy), Number(fm), 0)).getUTCDate();
+  if (fy === ty && fm === tm && fd === "01" && Number(td) === lastDay) {
+    return new Date(`${period.from}T12:00:00Z`).toLocaleDateString("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  if (fy === ty && fm === "01" && fd === "01" && tm === "12" && td === "31") return `o ano de ${fy}`;
+  return period.from === period.to ? fmt(period.from) : `${fmt(period.from)} a ${fmt(period.to)}`;
+}
+
+/**
+ * Stamps every video with its publication date (so the model can judge
+ * "recente"/"este mês" against today) and enforces the publication window
+ * on what retrieval returned. The exact-match
+ * path already filters by it, but the semantic search knows nothing about
+ * dates — it happily returned "Novembro de 2021" for "julho de 2021", and the
+ * model then summarised the wrong video as if it were the one asked for.
+ *
+ * Videos published outside the window are dropped. When that leaves no video
+ * at all, `notice` tells the model plainly that nothing exists for the period
+ * and names the closest alternatives, so it answers "não existe" instead of
+ * improvising.
+ */
+export async function applyPublishPeriod(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  matches: MatchResult[],
+  period: PublishPeriod | undefined,
+  /** The search query — a named category in it ("broadcasting") decides which videos count as "closest". */
+  query?: string
+): Promise<{ matches: MatchResult[]; notice: string | null }> {
+  const videoIds = [...new Set(matches.filter((m) => m.video_id).map((m) => m.video_id as string))];
+  if (videoIds.length === 0) return { matches, notice: null };
+
+  const { data } = await supabase.from("global_videos").select("id, title, first_published").in("id", videoIds);
+  const info = new Map((data ?? []).map((v) => [v.id, v]));
+  for (const m of matches) {
+    const published = m.video_id ? info.get(m.video_id)?.first_published : undefined;
+    if (published) m.metadata = { ...m.metadata, publishedAt: published };
+  }
+  if (!period) return { matches, notice: null };
+  const from = Date.parse(`${period.from}T00:00:00Z`);
+  const to = Date.parse(`${dayAfter(period.to)}T00:00:00Z`);
+  const inPeriod = (id: string) => {
+    const t = Date.parse(info.get(id)?.first_published ?? "");
+    return !Number.isNaN(t) && t >= from && t < to;
+  };
+
+  const kept = matches.filter((m) => !m.video_id || inPeriod(m.video_id));
+  if (kept.some((m) => m.video_id)) return { matches: kept, notice: null };
+
+  // Closest real alternatives: the nearest videos before and after the window
+  // within the category the semantic hits point to (monthly broadcasts for a
+  // "julho de 2021" question), not whatever happened to rank highest.
+  const { data: candidates } = await supabase
+    .from("global_videos")
+    .select("id, category_key")
+    .in("id", videoIds);
+  const tally = new Map<string, number>();
+  for (const c of candidates ?? []) if (c.category_key) tally.set(c.category_key, (tally.get(c.category_key) ?? 0) + 1);
+  const topCategory =
+    (query ? detectCategoryKey(stripAccentsLower(query))?.categoryKey : undefined) ??
+    [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  const nearest: string[] = [];
+  if (topCategory) {
+    const base = () => supabase.from("global_videos").select("title, first_published").eq("category_key", topCategory);
+    const [before, after] = await Promise.all([
+      base().lt("first_published", period.from).order("first_published", { ascending: false }).limit(1),
+      base().gte("first_published", dayAfter(period.to)).order("first_published", { ascending: true }).limit(1),
+    ]);
+    for (const v of [...(before.data ?? []), ...(after.data ?? [])]) {
+      nearest.push(`${v.title} (publicado em ${new Date(v.first_published).toLocaleDateString("pt-BR", { timeZone: "UTC" })})`);
+    }
+  }
+
+  return {
+    matches: kept,
+    notice:
+      `O usuário pediu um vídeo publicado em ${formatPeriodPt(period)}, e NENHUM vídeo desse período existe no banco. ` +
+      `Diga isso claramente. NÃO resuma, descreva nem atribua conteúdo de outro vídeo como se fosse o pedido.` +
+      (nearest.length ? ` Se ajudar, mencione os mais próximos: ${nearest.join("; ")}.` : ""),
+  };
+}
+
 export async function fetchExactMetadataMatches(
   supabase: Awaited<ReturnType<typeof createClient>>,
   query: string,
   allowedTypes: string[],
-  /** Keywords chosen by the query planner; when given they replace the stopword-based extraction. */
-  plannedKeywords?: string[]
+  /** From the query planner: its keywords replace the stopword-based extraction, and its period narrows videos by publication date. */
+  plan?: { keywords?: string[]; period?: PublishPeriod }
 ): Promise<MatchResult[]> {
-  const { targetYear, targetNum, targetNumExplicit } = parseQueryConstraints(query);
+  const { targetYear, targetNum, targetNumExplicit, ordinal } = parseQueryConstraints(query);
   // "boletin"/"boletins" typos (missing "m") are common on a phone keyboard
   // and would otherwise skip the bulletin path entirely.
   const norm = query.toLowerCase().replace(/\bboletin(s?)\b/g, (_m, pl) => (pl ? "boletins" : "boletim"));
@@ -585,7 +699,8 @@ export async function fetchExactMetadataMatches(
   const isBoletimSearch = norm.includes("boletim");
   const categoryMatch = detectCategoryKey(normStripped);
   const categoryKey = categoryMatch?.categoryKey ?? null;
-  const titleKeywords = plannedKeywords ?? extractTitleKeywords(norm);
+  const period = plan?.period;
+  const titleKeywords = plan?.keywords ?? extractTitleKeywords(norm);
   // When a category phrase matched ("adorações matinais" -> category_key
   // filter below), its own words describe the PROGRAM, not the talk -- a
   // Morning Worship talk's transcript essentially never repeats "adorações
@@ -633,7 +748,8 @@ export async function fetchExactMetadataMatches(
   // caller) already ranks by actual content relevance for that case. A named
   // category match doesn't have that ambiguity, so it's allowed through on
   // its own below — as is a specific enough title-keyword match.
-  if (targetYear === null && targetNum === null && !categoryKey && !hasNoteKeywordSignal) {
+  // "o penúltimo boletim": an explicit position is specific enough on its own.
+  if (targetYear === null && targetNum === null && !categoryKey && !period && !hasNoteKeywordSignal && !(isBoletimSearch && ordinal)) {
     return [];
   }
 
@@ -641,10 +757,12 @@ export async function fetchExactMetadataMatches(
 
   if (allowedTypes.includes("video") && inlineBibleRef) {
     const refPattern = `%${escapeLikePattern(inlineBibleRef.book.toLowerCase())} ${inlineBibleRef.chapter}%`;
-    const { data: refVids } = await supabase
+    let refQuery = supabase
       .from("global_videos")
       .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url")
-      .eq("category_key", categoryKey)
+      .eq("category_key", categoryKey);
+    if (period) refQuery = refQuery.gte("first_published", period.from).lt("first_published", dayAfter(period.to));
+    const { data: refVids } = await refQuery
       .or(`title.ilike.${refPattern},content_text.ilike.${refPattern}`)
       .order("first_published", { ascending: false, nullsFirst: false })
       .limit(10);
@@ -669,14 +787,21 @@ export async function fetchExactMetadataMatches(
         },
       });
     }
-  } else if (allowedTypes.includes("video") && (categoryKey || isBoletimSearch || targetYear !== null || hasVideoKeywordSignal)) {
+  } else if (allowedTypes.includes("video") && (categoryKey || isBoletimSearch || targetYear !== null || period || hasVideoKeywordSignal)) {
     function baseVideoQuery() {
       let q = supabase
         .from("global_videos")
         .select("id, title, content_text, video_url, cover_image, duration_formatted, subtitles_url");
       if (categoryKey) q = q.eq("category_key", categoryKey);
       if (isBoletimSearch) q = q.ilike("title", "%Boletim%");
-      if (targetYear !== null) q = q.ilike("title", `%${targetYear}%`);
+      if (period) {
+        // The planner resolved a publication window ("julho de 2021", "este
+        // mês"): filter on the real date, which also covers videos whose
+        // title doesn't spell the month/year out.
+        q = q.gte("first_published", period.from).lt("first_published", dayAfter(period.to));
+      } else if (targetYear !== null) {
+        q = q.ilike("title", `%${targetYear}%`);
+      }
       return q;
     }
 

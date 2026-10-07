@@ -4,6 +4,7 @@ import {
   buildRagSystemPrompt,
   fetchExactMetadataMatches,
   formatAllowedSourcesLabel,
+  applyPublishPeriod,
   rerankMatches,
   type MatchResult,
 } from "@/lib/vector/rag-query";
@@ -85,11 +86,15 @@ export async function POST(request: Request) {
           allowed_types: allowedSourceTypes,
         });
 
-        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes, plan.keywords);
+        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes, { keywords: plan.keywords, period: plan.period });
         const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
-        const matchRows = (await rerankMatches(supabase, searchQuery, rawMatches))
+        const reranked = (await rerankMatches(supabase, searchQuery, rawMatches))
           .filter((m) => allowedSourceTypes.includes(m.source_type))
           .filter((m) => m.similarity >= RAG_THRESHOLD);
+
+        // Enforce the publication window the user asked for ("julho de 2021",
+        // "este mês"): semantic hits know nothing about dates.
+        const { matches: matchRows, notice: periodNotice } = await applyPublishPeriod(supabase, reranked, plan.period, searchQuery);
 
         // Extract unique sources with noteId, videoId & chapter info
         interface SourceItem {
@@ -181,7 +186,7 @@ export async function POST(request: Request) {
         // chats/[id]/stream/route.ts so the "nothing found" / "list of
         // named matches" / "answer from content" styles stay in sync.
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
-        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel);
+        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel, periodNotice);
 
         // 4. Stream from OpenAI
         const completion = await openai.chat.completions.create({

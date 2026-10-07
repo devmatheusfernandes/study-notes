@@ -15,6 +15,12 @@ export interface PlannedQuery {
    * empty the match and drop the real latest video.
    */
   keywords?: string[];
+  /**
+   * The publication window the user is asking about, already resolved against
+   * today's date ("este mês", "julho de 2021", "ano passado"), as inclusive
+   * YYYY-MM-DD bounds. Absent when the question names no time window.
+   */
+  period?: { from: string; to: string };
   promptTokens: number;
   completionTokens: number;
 }
@@ -44,9 +50,42 @@ Passo 3 — liste em "keywords" SÓ as palavras que NOMEIAM o que deve ser encon
 - NÃO inclua verbos/pedidos ("resuma", "fale", "procure", "mostre"), formato ou tamanho ("em algumas frases", "resumo", "lista"), palavras de tempo ou ordem ("último", "mais recente", "lançado", "novo", "primeiro"), números/anos, nem palavras genéricas ("vídeo", "boletim", "assunto").
 - Exemplos: "resuma em algumas frases o último broadcasting lançado" -> ["broadcasting"]; "vídeos do Mark Sanderson sobre o tempo" -> ["mark","sanderson","tempo"]; "boletim número 6 de 2026" -> [].
 
+Passo 4 — "period": se o usuário pede algo de um período em que foi LANÇADO/PUBLICADO ("de julho de 2021", "deste mês", "do mês passado", "de 2024", "da semana passada", "lançados em setembro"), resolva-o para datas reais e devolva {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} (limites inclusivos; um mês inteiro vai do dia 1 ao último dia; um ano do 01/01 ao 31/12). Se NÃO há período ("o último", "o mais recente" sem data), ou se a data faz parte do NOME de um evento ("Reunião Anual de 2021", "turma 150 de Gileade"), devolva null. "O último de 2024" -> o ano 2024 inteiro.
+
 Hoje é {{HOJE}}. Use isso para entender "este mês", "este ano", "ano passado" (escreva o ano explícito na consulta quando fizer sentido), mas NÃO transforme "o último"/"o mais recente" em uma data.
 
-Responda somente com JSON: {"followUp": true|false, "query": "...", "keywords": ["..."]}`;
+Responda somente com JSON: {"followUp": true|false, "query": "...", "keywords": ["..."], "period": {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} | null}`;
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function parsePeriod(raw: unknown): { from: string; to: string } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { from, to } = raw as { from?: unknown; to?: unknown };
+  if (typeof from !== "string" || typeof to !== "string") return undefined;
+  if (!ISO_DAY.test(from) || !ISO_DAY.test(to) || from > to) return undefined;
+  if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to))) return undefined;
+  return { from, to };
+}
+
+const MONTHS_PT = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+const MONTH_YEAR =
+  /\b(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(?:de\s+)?((?:19|20)\d{2})\b/;
+
+/** "julho de 2021" -> that whole month. Only the explicit month+year shape — a bare year is often part of an event's name. */
+function inferMonthPeriod(...texts: string[]): { from: string; to: string } | undefined {
+  for (const text of texts) {
+    const norm = text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const m = norm.match(MONTH_YEAR);
+    if (!m) continue;
+    const month = MONTHS_PT.indexOf(m[1]) + 1;
+    const year = Number(m[2]);
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const mm = String(month).padStart(2, "0");
+    return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${String(last).padStart(2, "0")}` };
+  }
+  return undefined;
+}
 
 /**
  * Turns the user's latest message into a standalone search query using the
@@ -91,7 +130,7 @@ export async function planSearchQuery(
       { timeout: PLANNER_TIMEOUT_MS }
     );
 
-    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown; keywords?: unknown };
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown; keywords?: unknown; period?: unknown };
     const keywords = Array.isArray(parsed.keywords)
       ? parsed.keywords
           .filter((k): k is string => typeof k === "string")
@@ -100,9 +139,13 @@ export async function planSearchQuery(
           .slice(0, 5)
       : undefined;
     const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
+    // The model occasionally forgets the period on an explicit "mês de ano"
+    // (non-deterministic), so spelled-out months are also read by rule.
+    const period = parsePeriod(parsed.period) ?? inferMonthPeriod(message, query);
     return {
       searchQuery: query && query.length <= 500 ? query : message,
       keywords,
+      period,
       promptTokens: res.usage?.prompt_tokens ?? 0,
       completionTokens: res.usage?.completion_tokens ?? 0,
     };
