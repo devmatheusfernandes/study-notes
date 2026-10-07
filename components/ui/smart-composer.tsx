@@ -146,6 +146,12 @@ export function SmartComposer(props: SmartComposerProps) {
     if (!isChat) return;
     const el = textareaRef.current;
     if (!el) return;
+    // An empty field is always one line: scrollHeight also counts a placeholder
+    // that wraps on a narrow phone, which used to inflate the whole capsule.
+    if (!el.value) {
+      el.style.height = "";
+      return;
+    }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 175)}px`;
   }, [value, isChat]);
@@ -742,7 +748,7 @@ export function SmartComposer(props: SmartComposerProps) {
             placeholder={placeholder ?? "Pergunte aqui…"}
             disabled={props.variant === "chat" ? props.disabled : false}
             rows={1}
-            className="min-h-[26px] max-h-44 flex-1 resize-none bg-transparent text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"
+            className="h-[26px] min-h-[26px] max-h-44 flex-1 resize-none bg-transparent text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 placeholder:overflow-hidden placeholder:whitespace-nowrap placeholder:text-ellipsis disabled:cursor-not-allowed"
           />
         ) : (
           <input
