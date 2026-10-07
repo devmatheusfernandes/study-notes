@@ -513,6 +513,14 @@ const TITLE_SEARCH_STOPWORDS = new Set([
   "fala", "falava", "falou", "falam", "falando", "disse", "dizia",
   "aborda", "abordou", "abordando", "trata", "tratou", "tratando", "mencionou",
   "virar", "tornar", "sem", "ter", "sendo", "todo", "toda", "todos", "todas",
+  // "E o boletim número 6 de 2026? Ele existe no banco?" -- the bulletin
+  // itself is matched by the title filter (isBoletimSearch) and the number by
+  // targetNum, so these must not ALSO be required as literal title/transcript
+  // words, which no talk contains ("banco", "número") and silently emptied
+  // the whole AND-match.
+  "boletim", "boletins", "numero", "numeros", "banco", "base", "dados",
+  "existem", "existir", "existia", "ele", "ela", "eles", "elas", "de", "ja", "agora",
+  "vez", "mesmo", "pelo", "pela",
 ]);
 
 /**
@@ -557,12 +565,14 @@ export async function fetchExactMetadataMatches(
   allowedTypes: string[]
 ): Promise<MatchResult[]> {
   const { targetYear, targetNum, targetNumExplicit } = parseQueryConstraints(query);
-  const norm = query.toLowerCase();
+  // "boletin"/"boletins" typos (missing "m") are common on a phone keyboard
+  // and would otherwise skip the bulletin path entirely.
+  const norm = query.toLowerCase().replace(/\bboletin(s?)\b/g, (_m, pl) => (pl ? "boletins" : "boletim"));
   const normStripped = norm.normalize("NFD").replace(/[̀-ͯ]/g, "");
   const isBoletimSearch = norm.includes("boletim");
   const categoryMatch = detectCategoryKey(normStripped);
   const categoryKey = categoryMatch?.categoryKey ?? null;
-  const titleKeywords = extractTitleKeywords(query);
+  const titleKeywords = extractTitleKeywords(norm);
   // When a category phrase matched ("adorações matinais" -> category_key
   // filter below), its own words describe the PROGRAM, not the talk -- a
   // Morning Worship talk's transcript essentially never repeats "adorações
