@@ -20,6 +20,8 @@ export interface MatchResult {
     subtitlesUrl?: string;
     /** Set on a video pulled in by fetchExactMetadataMatches' title-keyword fallback — see buildRagSystemPrompt, which treats a batch of these as a "find by name" listing request rather than a factual question one transcript answers. */
     matchedByTitleKeyword?: boolean;
+    /** Title of the larger program a talk is also contained in ("JW Broadcasting — Junho de 2026"). */
+    partOf?: string;
     /** ISO publication date of a video, filled by applyPublishPeriod so the model can judge "recente"/"este mês" instead of guessing. */
     publishedAt?: string;
   };
@@ -416,9 +418,10 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
       const label = m.metadata?.chapterTitle
         ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
         : m.metadata?.title || "Conteúdo";
-      const published = m.metadata?.publishedAt
-        ? ` — publicado em ${new Date(m.metadata.publishedAt).toLocaleDateString("pt-BR", { timeZone: "UTC" })}`
-        : "";
+      const published =
+        (m.metadata?.publishedAt
+          ? ` — publicado em ${new Date(m.metadata.publishedAt).toLocaleDateString("pt-BR", { timeZone: "UTC" })}`
+          : "") + (m.metadata?.partOf ? ` — trecho de «${m.metadata.partOf}»` : "");
       const body = m.content.length > perSourceCap ? `${m.content.slice(0, perSourceCap)}…` : m.content;
       return `[Fonte ${idx + 1}: ${label}${published}]\n${body}`;
     })
@@ -654,11 +657,44 @@ export async function applyPublishPeriod(
   const videoIds = [...new Set(matches.filter((m) => m.video_id).map((m) => m.video_id as string))];
   if (videoIds.length === 0) return { matches, notice: null };
 
-  const { data } = await supabase.from("global_videos").select("id, title, first_published").in("id", videoIds);
+  const { data } = await supabase.from("global_videos").select("id, title, first_published, duration_seconds").in("id", videoIds);
   const info = new Map((data ?? []).map((v) => [v.id, v]));
+
+  // Talks live twice in the catalog: inside a bigger program (track 1 of a
+  // `pub-jwb-138_T_<n>_VIDEO` family, e.g. the monthly JW Broadcasting) and as
+  // their own video (tracks 2..n). Name the program a part belongs to, so the
+  // model can say "este discurso faz parte do JW Broadcasting de junho de 2026".
+  const parentOf = (id: string): string | null => {
+    const m = id.match(/^(.*_)(\d+)(_VIDEO)$/);
+    return m && m[2] !== "1" ? `${m[1]}1${m[3]}` : null;
+  };
+  const parentIds = [...new Set(videoIds.map(parentOf).filter((id): id is string => !!id))];
+  const { data: parentRows } = parentIds.length
+    ? await supabase.from("global_videos").select("id, title, duration_seconds").in("id", parentIds)
+    : { data: [] as { id: string; title: string; duration_seconds: number | null }[] };
+  const parents = new Map((parentRows ?? []).map((v) => [v.id, v]));
+  const partOf = new Map<string, { id: string; title: string }>();
+  for (const id of videoIds) {
+    const parent = parents.get(parentOf(id) ?? "");
+    // Only a genuinely larger program counts as a parent.
+    if (parent && (parent.duration_seconds ?? 0) > (info.get(id)?.duration_seconds ?? 0)) {
+      partOf.set(id, { id: parent.id, title: parent.title });
+    }
+  }
   for (const m of matches) {
     const published = m.video_id ? info.get(m.video_id)?.first_published : undefined;
-    if (published) m.metadata = { ...m.metadata, publishedAt: published };
+    const parent = m.video_id ? partOf.get(m.video_id) : undefined;
+    if (published || parent) {
+      m.metadata = { ...m.metadata, ...(published ? { publishedAt: published } : {}), ...(parent ? { partOf: parent.title } : {}) };
+    }
+  }
+  // Asking about a specific talk, the program that merely contains it is noise
+  // next to the talk itself (it ranked equal and its transcript is 90 minutes).
+  // Keep the program when the user is actually asking for the program.
+  if (!/broadcasting|programa|transmiss/i.test(query ?? "")) {
+    const presentParents = new Set([...partOf.values()].map((p) => p.id));
+    const withoutContainers = matches.filter((m) => !(m.video_id && presentParents.has(m.video_id)));
+    if (withoutContainers.length > 0) matches = withoutContainers;
   }
   if (!period) return { matches, notice: null };
   const from = Date.parse(`${period.from}T00:00:00Z`);
@@ -866,6 +902,15 @@ export async function fetchExactMetadataMatches(
       ({ data: vids } = await retryQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30));
     }
 
+    // A video whose TITLE holds every keyword is the one the user named; a
+    // transcript that merely uses the same words ("quatro lições ... homens"
+    // inside a 90-minute broadcast) matches too, and used to tie with it at
+    // 0.99. When a title match exists, transcript-only ones rank clearly below.
+    const titleLower = (v: { title: string }) => stripAccentsLower(v.title);
+    const keywordsInTitle = (v: { title: string }) =>
+      videoContentKeywords.length > 0 && videoContentKeywords.every((w) => titleLower(v).includes(stripAccentsLower(w)));
+    const anyTitleMatch = (vids ?? []).some(keywordsInTitle);
+
     if (vids && vids.length > 0) {
       for (const v of vids) {
         const titleLower = v.title.toLowerCase();
@@ -893,7 +938,7 @@ export async function fetchExactMetadataMatches(
             video_id: v.id,
             source_type: "video",
             content: v.content_text || `Vídeo: ${v.title}`,
-            similarity: 0.99,
+            similarity: anyTitleMatch && !keywordsInTitle(v) ? 0.75 : 0.99,
             metadata: {
               title: v.title,
               type: "video",
