@@ -44,6 +44,11 @@ import { BibleChapterView } from "./bible-chapter-view";
 import { BibleSearchInput } from "./bible-search-input";
 import { BibleSearchResults } from "./bible-search-results";
 import { BibleSearchDetailPanel, type BibleSearchDetail } from "./bible-search-detail-panel";
+import {
+  getNoteScriptureMentions,
+  backfillNoteScriptureRefs,
+  type NoteScriptureMention,
+} from "@/app/(app)/note-scripture-actions";
 import { BibleStudyPanel, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
@@ -399,6 +404,16 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   }, [screen, bookOrder, chapter, chapterCount]);
 
   const [highlights, setHighlights] = useState<BibleVerseHighlight[]>([]);
+  // Drop the previous chapter's highlights the moment the chapter changes —
+  // they're keyed by verse number, so they'd otherwise paint onto the new
+  // chapter's verses until its own fetch resolves. Adjusted during render
+  // (not in the effect below) so there's no frame showing the stale marks.
+  const highlightsChapterKey = `${bookOrder}:${chapter}`;
+  const [seenHighlightsChapterKey, setSeenHighlightsChapterKey] = useState(highlightsChapterKey);
+  if (seenHighlightsChapterKey !== highlightsChapterKey) {
+    setSeenHighlightsChapterKey(highlightsChapterKey);
+    setHighlights([]);
+  }
   const refreshHighlights = useCallback(() => {
     void getBibleChapterHighlights(bookOrder, chapter).then((result) => setHighlights(result.highlights ?? []));
   }, [bookOrder, chapter]);
@@ -406,10 +421,6 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   useEffect(() => {
     if (screen !== "reading") return;
     let cancelled = false;
-    // Drop the previous chapter's highlights right away — they're keyed by
-    // verse number, so they'd otherwise paint onto this chapter's verses
-    // until the fetch below resolves.
-    setHighlights([]);
     void getBibleChapterHighlights(bookOrder, chapter).then((result) => {
       if (!cancelled) setHighlights(result.highlights ?? []);
     });
@@ -471,9 +482,48 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   // (the same gesture that opens the highlight-color popup) re-scopes it to
   // that verse. While closed, no cross-reference/video/guide request is made.
   const [studyOpen, setStudyOpen] = useState(false);
-  const [studyTab, setStudyTab] = useState<BibleStudyTab>("referencias");
+  const [studyTab, setStudyTab] = useState<BibleStudyTab>("notas");
 
   const handleVerseSelected = useCallback((verse: number) => setSelectedVerse(verse), []);
+
+  // The user's own notes that cite this chapter (the Pessoal tab). Keyed by
+  // chapter so a slow response for the previous one can't show up under the
+  // new one while its own fetch is still in flight.
+  const mentionsKey = `${bookOrder}:${chapter}`;
+  const [mentionsState, setMentionsState] = useState<{ key: string; list: NoteScriptureMention[] } | null>(null);
+  const noteMentions = mentionsState?.key === mentionsKey ? mentionsState.list : [];
+  const noteMentionsLoading = studyOpen && mentionsState?.key !== mentionsKey;
+  const [mentionsVersion, setMentionsVersion] = useState(0);
+
+  // Notes saved before the citation index existed get parsed here, a batch at
+  // a time, the first time the Bible is opened — nothing for the user to run.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      let previous = Infinity;
+      for (;;) {
+        const { remaining } = await backfillNoteScriptureRefs();
+        if (cancelled) return;
+        if (remaining === 0 || remaining >= previous) break;
+        previous = remaining;
+      }
+      if (!cancelled && previous !== Infinity) setMentionsVersion((v) => v + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (screen !== "reading" || !studyOpen) return;
+    let cancelled = false;
+    void getNoteScriptureMentions(bookOrder, chapter).then((result) => {
+      if (!cancelled) setMentionsState({ key: mentionsKey, list: result.mentions ?? [] });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, studyOpen, bookOrder, chapter, mentionsKey, mentionsVersion]);
 
   const studyParams = { bookOrder, chapter, selectedVerse, enabled: studyOpen };
   const { refs, refsLoading: isLoadingRefs, refsTruncated, refsSource, setRefsSource } =
@@ -528,7 +578,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     setHighlightEditMode(false);
     if (mark) {
       setSelectedVerse(mark.verse);
-      setStudyTab("pessoal");
+      setStudyTab("highlights");
       setStudyOpen(true);
     }
   }, []);
@@ -665,7 +715,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     setHighlightMark(null);
     setFocusNote({ id: note.id });
     setSelectedVerse(note.verse);
-    setStudyTab("pessoal");
+    setStudyTab("highlights");
     setStudyOpen(true);
   }, []);
 
@@ -876,6 +926,8 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         researchGuideExtracts={researchGuideExtracts}
         researchGuideLoading={isLoadingResearchGuide}
         personalNotes={panelPersonalNotes}
+        noteMentions={noteMentions}
+        noteMentionsLoading={noteMentionsLoading}
         onEditPersonalNote={handleEditPersonalNote}
         onDeletePersonalNote={handleDeletePersonalNote}
         focusNote={focusNote}

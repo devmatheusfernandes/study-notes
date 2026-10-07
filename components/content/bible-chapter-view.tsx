@@ -41,7 +41,7 @@ interface BibleChapterViewProps {
   /** Verse numbers that have a study note. */
   studyNoteVerses?: Set<number>;
   /** A footnote/study-note marker was clicked — opens the study panel on that tab. */
-  onOpenStudy?: (verse: number, tab: "notas" | "rodape") => void;
+  onOpenStudy?: (verse: number, tab: "notas") => void;
 }
 
 /** Roughly half the selection pill's rendered width (6 swatches + divider + note button), used only to keep it inside the viewport. */
@@ -426,7 +426,7 @@ export function BibleChapterView({
                   {footnoteCountByVerse?.get(v.verse) ? (
                     <button
                       type="button"
-                      onClick={() => onOpenStudy?.(v.verse!, "rodape")}
+                      onClick={() => onOpenStudy?.(v.verse!, "notas")}
                       aria-label={`Notas de rodapé do versículo ${v.verse}`}
                       className="font-mono text-[11px] text-muted-foreground transition-colors hover:text-accent"
                     >

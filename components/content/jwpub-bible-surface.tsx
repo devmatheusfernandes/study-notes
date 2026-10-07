@@ -266,7 +266,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
   const [displayLoading, setDisplayLoading] = useState(isLoading);
   const [displayError, setDisplayError] = useState<string | null>(error);
   const [tabSelectedVerse, setTabSelectedVerse] = useState<number | null>(soleVerse(verses));
-  const [studyTab, setStudyTab] = useState<BibleStudyTab>("referencias");
+  const [studyTab, setStudyTab] = useState<BibleStudyTab>("notas");
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [openAppendixId, setOpenAppendixId] = useState<number | null>(null);
   const [editingNote, setEditingNote] = useState<EditableJwlibraryNote | null>(null);
@@ -362,12 +362,12 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
   const studyParams = { bookOrder: viewBookOrder, chapter: viewChapter, selectedVerse: tabSelectedVerse };
   const { refs, refsLoading, refsTruncated, refsSource, setRefsSource } = useBibleCrossReferences({
     ...studyParams,
-    enabled: tabEnabled("referencias"),
+    enabled: tabEnabled("notas"),
   });
-  // One hook feeds two tabs ("Notas" and "Rodapé"), so either one opening it is enough.
+  // Notas is one tab now (study notes, footnotes and cross references), so it alone enables both hooks.
   const { footnotes, studyNotes, studyLoading } = useBibleFootnotesAndStudyNotes({
     ...studyParams,
-    enabled: tabEnabled("notas") || tabEnabled("rodape"),
+    enabled: tabEnabled("notas"),
   });
   const { videos, videosLoading } = useBibleChapterVideos({ ...studyParams, enabled: tabEnabled("videos") });
   const { researchGuideEntries, researchGuideExtracts, researchGuideLoading } = useBibleResearchGuide({

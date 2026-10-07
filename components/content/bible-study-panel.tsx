@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { BookMarked, Film, Gem, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { BookMarked, ChevronDown, Film, Gem, NotebookPen, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
@@ -14,6 +14,8 @@ import type { ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
 import { JwpubExtractSurface } from "./jwpub-extract-surface";
+import { NoteMentionPanel } from "./note-mention-panel";
+import type { NoteScriptureMention } from "@/app/(app)/note-scripture-actions";
 import { BibleStudyRowsSkeleton, BibleStudyVideosSkeleton } from "./bible-study-panel-skeleton";
 import type {
   BibleBook,
@@ -26,7 +28,15 @@ import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleReferencesList, CROSS_REFERENCE_SOURCE_LABELS } from "./bible-references-panel";
 
-export type BibleStudyTab = "referencias" | "notas" | "rodape" | "videos" | "guia" | "pessoal";
+/**
+ * "notas" is study notes + footnotes + cross references in one tab (they used
+ * to be three, which pushed the strip past the panel's width); "highlights" is
+ * what the Bible's own marks and the notes anchored to them; "pessoal" is the
+ * user's OWN notes that merely cite this text.
+ */
+export type BibleStudyTab = "notas" | "videos" | "guia" | "highlights" | "pessoal";
+
+type NotasFilter = "todos" | "estudo" | "rodape" | "refs";
 
 /** A personal annotation (typed here or imported from a .jwlibrary backup), as opposed to `BibleStudyNote`'s official JW.org commentary. */
 export interface BiblePersonalNote {
@@ -101,6 +111,12 @@ interface BibleStudyTabsProps {
   onColorChangeActiveHighlight?: (colorIndex: number) => void;
   onDeleteActiveHighlight?: () => void;
 
+  /** The user's own notes citing this chapter. `undefined` hides the Pessoal tab (a surface that doesn't load them). */
+  noteMentions?: NoteScriptureMention[];
+  noteMentionsLoading?: boolean;
+  /** A mention was tapped — the caller owns the side panel that shows the note, same reasoning as onOpenExtract. */
+  onOpenNote?: (mention: NoteScriptureMention) => void;
+
   tab: BibleStudyTab;
   onTabChange: (tab: BibleStudyTab) => void;
 }
@@ -112,7 +128,7 @@ interface BibleStudyTabsProps {
  * `researchGuideExtracts`, the raw data this wrapper's own extract panel
  * needs to look up an excerpt's content.
  */
-interface BibleStudyPanelProps extends Omit<BibleStudyTabsProps, "onOpenPublicationRef" | "onOpenExtract"> {
+interface BibleStudyPanelProps extends Omit<BibleStudyTabsProps, "onOpenPublicationRef" | "onOpenExtract" | "onOpenNote"> {
   open: boolean;
   onClose: () => void;
   /** Excerpts embedded in the guide itself, keyed by extractId — a `data-jwpub-extract` link resolves here, with nothing to fetch or download. */
@@ -347,6 +363,9 @@ export function BibleStudyTabs({
   onAddNoteToActiveHighlight,
   onColorChangeActiveHighlight,
   onDeleteActiveHighlight,
+  noteMentions,
+  noteMentionsLoading = false,
+  onOpenNote,
   tab,
   onTabChange,
 }: BibleStudyTabsProps) {
@@ -370,6 +389,10 @@ export function BibleStudyTabs({
   // 420px wide and two <video> elements side by side would both be tiny and
   // both be downloading.
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
+  const [notasFilter, setNotasFilter] = useState<NotasFilter>("todos");
+  // Verses whose "Referências" are expanded. They're collapsed by default —
+  // a verse can carry dozens, and they were what buried the study note.
+  const [openRefVerses, setOpenRefVerses] = useState<Set<string>>(() => new Set());
 
   // Delegated click for the `data-bible-ref="book:chapter:verse"`,
   // `data-bible-appendix-ref` and (Guia tab only) `data-jwpub-pubref` links
@@ -438,6 +461,31 @@ export function BibleStudyTabs({
   const refGroups = useMemo(() => groupByVerse(refs), [refs]);
   const footnoteGroups = useMemo(() => groupByVerse(footnotes), [footnotes]);
   const studyNoteGroups = useMemo(() => groupByVerse(studyNotes), [studyNotes]);
+  const notasByVerse = useMemo(() => {
+    const index = (groups: { verse: number | null; items: unknown[] }[]) =>
+      new Map(groups.map((g) => [g.verse, g.items] as const));
+    const verses = new Set<number | null>();
+    for (const groups of [studyNoteGroups, footnoteGroups, refGroups]) for (const g of groups) verses.add(g.verse);
+    return {
+      verses: [...verses].sort((a, b) => (a ?? -1) - (b ?? -1)),
+      study: index(studyNoteGroups) as Map<number | null, WithVerse<BibleStudyNote>[]>,
+      footnotes: index(footnoteGroups) as Map<number | null, WithVerse<BibleFootnote>[]>,
+      refs: index(refGroups) as Map<number | null, WithVerse<CrossReference>[]>,
+    };
+  }, [studyNoteGroups, footnoteGroups, refGroups]);
+
+  // Mentions scoped to what the panel is showing: the whole chapter, or the
+  // verse tapped — where a mention of the chapter as a whole (no verse) or of
+  // a range covering that verse still counts.
+  const visibleMentions = useMemo(() => {
+    const all = noteMentions ?? [];
+    if (selectedVerse === null) return all;
+    return all.filter(
+      (m) => m.verse === null || (selectedVerse >= m.verse && selectedVerse <= (m.endVerse ?? m.verse))
+    );
+  }, [noteMentions, selectedVerse]);
+  const mentionGroups = useMemo(() => groupByVerse(visibleMentions), [visibleMentions]);
+
   const personalNoteGroups = useMemo(() => groupByVerse(personalNotes), [personalNotes]);
   const researchGuideGroups = useMemo(() => groupByVerse(researchGuideEntries), [researchGuideEntries]);
 
@@ -513,20 +561,12 @@ export function BibleStudyTabs({
               plain swipeable row. */}
           <div className="min-w-0 overflow-x-auto">
             <TabsList className="w-max justify-start gap-1.5 bg-transparent p-0 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:shrink-0 [&_[data-slot=tabs-trigger]]:gap-1.5 [&_[data-slot=tabs-trigger]]:px-3">
-              <TabsTrigger value="referencias" className={tabPillClass("referencias")}>
-                Refs
-                {refs.length > 0 && <span className="ml-1 font-mono text-[10px] text-accent">{refs.length}</span>}
-              </TabsTrigger>
               <TabsTrigger value="notas" className={tabPillClass("notas")}>
                 Notas
-                {studyNotes.length > 0 && (
-                  <span className="ml-1 font-mono text-[10px] text-accent">{studyNotes.length}</span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="rodape" className={tabPillClass("rodape")}>
-                Rodapé
-                {footnotes.length > 0 && (
-                  <span className="ml-1 font-mono text-[10px] text-accent">{footnotes.length}</span>
+                {refs.length + studyNotes.length + footnotes.length > 0 && (
+                  <span className="ml-1 font-mono text-[10px] text-accent">
+                    {refs.length + studyNotes.length + footnotes.length}
+                  </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="videos" className={tabPillClass("videos")}>
@@ -543,121 +583,184 @@ export function BibleStudyTabs({
                   <span className="ml-1 font-mono text-[10px] text-accent">{researchGuideEntries.length}</span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="pessoal" className={tabPillClass("pessoal")}>
+              <TabsTrigger value="highlights" className={tabPillClass("highlights")}>
                 <Gem className="size-3" />
-                Pessoal
+                Highlights
                 {personalNotes.length > 0 && (
                   <span className="ml-1 font-mono text-[10px] text-accent">{personalNotes.length}</span>
                 )}
               </TabsTrigger>
+              {noteMentions !== undefined && (
+                <TabsTrigger value="pessoal" className={tabPillClass("pessoal")}>
+                  <NotebookPen className="size-3" />
+                  Pessoal
+                  {noteMentions.length > 0 && (
+                    <span className="ml-1 font-mono text-[10px] text-accent">{noteMentions.length}</span>
+                  )}
+                </TabsTrigger>
+              )}
             </TabsList>
           </div>
 
-          <TabsContent value="referencias" className="flex flex-col gap-3">
-            <div className="flex items-center gap-0.5 self-start rounded-full bg-secondary p-0.5">
-              {(Object.keys(CROSS_REFERENCE_SOURCE_LABELS) as CrossReferenceSource[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => onChangeRefsSource(option)}
-                  aria-pressed={refsSource === option}
-                  className={cn(
-                    "rounded-full px-2.5 py-1 font-mono text-[10px] tracking-[0.04em] transition-colors",
-                    refsSource === option
-                      ? "bg-primary/[0.18] text-accent"
-                      : "text-muted-foreground hover:text-foreground"
+          <TabsContent value="notas" className="flex flex-col gap-3">
+            {(() => {
+              const total = refs.length + studyNotes.length + footnotes.length;
+              const loading = studyLoading || refsLoading;
+              const counts: Record<NotasFilter, number> = {
+                todos: total,
+                estudo: studyNotes.length,
+                rodape: footnotes.length,
+                refs: refs.length,
+              };
+              const filterLabels: Record<NotasFilter, string> = {
+                todos: "Tudo",
+                estudo: "Estudo",
+                rodape: "Rodapé",
+                refs: "Referências",
+              };
+              // Only offer a filter for kinds that exist here; with one kind
+              // (or none) the chips would be noise.
+              const kinds = (["estudo", "rodape", "refs"] as const).filter((k) => counts[k] > 0);
+              const filter: NotasFilter = notasFilter !== "todos" && counts[notasFilter] === 0 ? "todos" : notasFilter;
+              const show = (kind: Exclude<NotasFilter, "todos">) => filter === "todos" || filter === kind;
+              const showSourceToggle = filter === "todos" || filter === "refs";
+
+              return (
+                <>
+                  {(kinds.length > 1 || showSourceToggle) && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {kinds.length > 1 &&
+                        (["todos", ...kinds] as NotasFilter[]).map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => setNotasFilter(option)}
+                            aria-pressed={filter === option}
+                            className={cn(
+                              "rounded-full px-2.5 py-1 font-mono text-[10px] tracking-[0.04em] transition-colors",
+                              filter === option
+                                ? "bg-primary/[0.18] text-accent"
+                                : "bg-secondary text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            {filterLabels[option]}
+                            <span className="ml-1 opacity-70">{counts[option]}</span>
+                          </button>
+                        ))}
+                      {showSourceToggle && (
+                        <div className="ml-auto flex items-center gap-0.5 rounded-full bg-secondary p-0.5">
+                          {(Object.keys(CROSS_REFERENCE_SOURCE_LABELS) as CrossReferenceSource[]).map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => onChangeRefsSource(option)}
+                              aria-pressed={refsSource === option}
+                              className={cn(
+                                "rounded-full px-2 py-0.5 font-mono text-[10px] tracking-[0.04em] transition-colors",
+                                refsSource === option
+                                  ? "bg-primary/[0.18] text-accent"
+                                  : "text-muted-foreground hover:text-foreground"
+                              )}
+                            >
+                              {CROSS_REFERENCE_SOURCE_LABELS[option]}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
-                >
-                  {CROSS_REFERENCE_SOURCE_LABELS[option]}
-                </button>
-              ))}
-            </div>
 
-            {refsTruncated && (
-              <p className="text-[11.5px] leading-snug text-muted-foreground">
-                Capítulo com muitas referências — mostrando as primeiras {refs.length}. Toque num versículo
-                para ver todas as dele.
-              </p>
-            )}
+                  {refsTruncated && show("refs") && (
+                    <p className="text-[11.5px] leading-snug text-muted-foreground">
+                      Capítulo com muitas referências — mostrando as primeiras {refs.length}. Toque num
+                      versículo para ver todas as dele.
+                    </p>
+                  )}
 
-            {refsLoading ? (
-              <BibleStudyRowsSkeleton />
-            ) : refs.length === 0 ? (
-              <EmptyHint>
-                {whole ? "Este capítulo não tem referências." : "Este versículo não tem referências."}
-              </EmptyHint>
-            ) : whole ? (
-              <div className="flex flex-col gap-3">
-                {refGroups.map((group) => (
-                  <div key={group.verse ?? "sup"} className="flex flex-col gap-1.5">
-                    <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />
-                    <BibleReferencesList
-                      refs={group.items}
-                      books={books}
-                      onSelectReference={onSelectReference}
-                      cacheKeyPrefix={`v${group.verse}-`}
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <BibleReferencesList refs={refs} books={books} onSelectReference={onSelectReference} />
-            )}
-          </TabsContent>
+                  {total === 0 ? (
+                    loading ? (
+                      <BibleStudyRowsSkeleton />
+                    ) : (
+                      <EmptyHint>
+                        {whole
+                          ? "Este capítulo não tem notas, rodapés nem referências."
+                          : "Este versículo não tem notas, rodapés nem referências."}
+                      </EmptyHint>
+                    )
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {notasByVerse.verses.map((verse) => {
+                        const key = verse === null ? "sup" : String(verse);
+                        const study = show("estudo") ? (notasByVerse.study.get(verse) ?? []) : [];
+                        const notes = show("rodape") ? (notasByVerse.footnotes.get(verse) ?? []) : [];
+                        const verseRefs = show("refs") ? (notasByVerse.refs.get(verse) ?? []) : [];
+                        if (study.length + notes.length + verseRefs.length === 0) return null;
+                        const refsOpen = filter === "refs" || openRefVerses.has(key);
 
-          <TabsContent value="notas">
-            {studyLoading ? (
-              <BibleStudyRowsSkeleton />
-            ) : studyNotes.length === 0 ? (
-              <EmptyHint>
-                {whole
-                  ? "Este capítulo não tem notas de estudo."
-                  : "Este versículo não tem notas de estudo."}
-              </EmptyHint>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {studyNoteGroups.map((group) => (
-                  <div key={group.verse ?? "sup"} className="flex flex-col gap-1.5">
-                    {whole && <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />}
-                    {group.items.map((note) => (
-                      <div key={note.id} className="rounded-2xl bg-secondary px-4 py-3">
-                        <StudyHtml html={note.contentHtml} />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
+                        return (
+                          <div key={key} className="flex flex-col gap-1.5">
+                            {whole && <VerseHeading verse={verse} onClick={narrow(verse)} />}
 
-          <TabsContent value="rodape">
-            {studyLoading ? (
-              <BibleStudyRowsSkeleton withIndex />
-            ) : footnotes.length === 0 ? (
-              <EmptyHint>
-                {whole ? "Este capítulo não tem notas de rodapé." : "Este versículo não tem notas de rodapé."}
-              </EmptyHint>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {footnoteGroups.map((group) => (
-                  <div key={group.verse ?? "sup"} className="flex flex-col gap-1.5">
-                    {whole && <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />}
-                    <ul className="flex flex-col gap-1.5">
-                      {group.items.map((footnote, index) => (
-                        <li key={footnote.id} className="flex gap-2.5 rounded-2xl bg-secondary px-4 py-3">
-                          {/* Numbered by position within the verse — the stored
-                              `index` is sequential per BOOK (it mirrors the
-                              source's data-fnid), so showing it raw would print
-                              "389" next to the last footnote of Genesis. */}
-                          <span className="mt-0.5 font-mono text-[10px] text-accent">{index + 1}</span>
-                          <StudyHtml html={footnote.contentHtml} />
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            )}
+                            {study.map((note) => (
+                              <div key={note.id} className="rounded-2xl bg-secondary px-4 py-3">
+                                <StudyHtml html={note.contentHtml} />
+                              </div>
+                            ))}
+
+                            {notes.length > 0 && (
+                              <ul className="flex flex-col gap-1.5">
+                                {notes.map((footnote, index) => (
+                                  <li key={footnote.id} className="flex gap-2.5 rounded-2xl bg-secondary px-4 py-3">
+                                    {/* Numbered by position within the verse — the stored
+                                        `index` is sequential per BOOK (it mirrors the
+                                        source's data-fnid), so showing it raw would print
+                                        "389" next to the last footnote of Genesis. */}
+                                    <span className="mt-0.5 font-mono text-[10px] text-accent">{index + 1}</span>
+                                    <StudyHtml html={footnote.contentHtml} />
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+
+                            {verseRefs.length > 0 && (
+                              <div className="flex flex-col gap-1.5">
+                                {filter !== "refs" && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOpenRefVerses((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(key)) next.delete(key);
+                                        else next.add(key);
+                                        return next;
+                                      })
+                                    }
+                                    aria-expanded={refsOpen}
+                                    className="flex items-center gap-1.5 self-start rounded-full bg-secondary px-3 py-1.5 font-mono text-[10.5px] tracking-[0.04em] text-muted-foreground transition-colors hover:text-foreground"
+                                  >
+                                    Referências
+                                    <span className="text-accent">{verseRefs.length}</span>
+                                    <ChevronDown className={cn("size-3 transition-transform", refsOpen && "rotate-180")} />
+                                  </button>
+                                )}
+                                {refsOpen && (
+                                  <BibleReferencesList
+                                    refs={verseRefs}
+                                    books={books}
+                                    onSelectReference={onSelectReference}
+                                    cacheKeyPrefix={`v${key}-`}
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="videos" className="flex flex-col gap-4">
@@ -733,7 +836,7 @@ export function BibleStudyTabs({
             )}
           </TabsContent>
 
-          <TabsContent value="pessoal" className="flex flex-col gap-3">
+          <TabsContent value="highlights" className="flex flex-col gap-3">
             {activeHighlight && (
               <div className="flex flex-col gap-3 rounded-2xl bg-secondary px-4 py-3">
                 <div className="flex items-center justify-between">
@@ -795,8 +898,8 @@ export function BibleStudyTabs({
             {personalNotes.length === 0 ? (
               <EmptyHint>
                 {whole
-                  ? "Este capítulo não tem notas pessoais."
-                  : "Este versículo não tem notas pessoais."}
+                  ? "Este capítulo não tem highlights com notas."
+                  : "Este versículo não tem highlights com notas."}
               </EmptyHint>
             ) : (
               <div className="flex flex-col gap-3">
@@ -865,6 +968,51 @@ export function BibleStudyTabs({
               </div>
             )}
           </TabsContent>
+
+          <TabsContent value="pessoal" className="flex flex-col gap-3">
+            {noteMentionsLoading && visibleMentions.length === 0 ? (
+              <BibleStudyRowsSkeleton />
+            ) : visibleMentions.length === 0 ? (
+              <EmptyHint>
+                {whole
+                  ? "Nenhuma das suas notas cita este capítulo."
+                  : "Nenhuma das suas notas cita este versículo."}
+              </EmptyHint>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {mentionGroups.map((group) => (
+                  <div key={group.verse ?? "chapter"} className="flex flex-col gap-1.5">
+                    {whole &&
+                      (group.verse === null ? (
+                        <span className="font-mono text-[11px] tracking-[0.04em] text-accent">capítulo inteiro</span>
+                      ) : (
+                        <VerseHeading verse={group.verse} onClick={narrow(group.verse)} />
+                      ))}
+                    {group.items.map((mention, index) => (
+                      <button
+                        key={`${mention.noteId}-${group.verse ?? "c"}-${index}`}
+                        type="button"
+                        onClick={() => onOpenNote?.(mention)}
+                        className="flex w-full flex-col gap-1 rounded-2xl bg-secondary px-4 py-3 text-left transition-colors hover:bg-surface"
+                      >
+                        <span className="text-[13px] font-medium text-foreground/90">
+                          {mention.title || "Sem título"}
+                        </span>
+                        {mention.snippet && (
+                          <span className="line-clamp-3 text-[13px] leading-relaxed text-muted-foreground">
+                            {mention.snippet}
+                          </span>
+                        )}
+                        {!whole && mention.verse === null && (
+                          <span className="font-mono text-[10px] text-accent">cita o capítulo todo</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -912,6 +1060,8 @@ export function BibleStudyPanel({
   researchGuideExtracts,
   ...tabsProps
 }: BibleStudyPanelProps) {
+  const [openMention, setOpenMention] = useState<NoteScriptureMention | null>(null);
+
   const {
     referenceOpen,
     referenceTarget,
@@ -940,8 +1090,11 @@ export function BibleStudyPanel({
           researchGuideEntries={researchGuideEntries}
           onOpenPublicationRef={openPublicationRef}
           onOpenExtract={onOpenExtract}
+          onOpenNote={setOpenMention}
         />
       </JwpubSidePanel>
+
+      <NoteMentionPanel mention={openMention} onClose={() => setOpenMention(null)} />
 
       <JwpubReferenceSurface
         open={referenceOpen}

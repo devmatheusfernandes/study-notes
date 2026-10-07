@@ -475,3 +475,75 @@ export function extractBibleReferencesFromTitle(title: string): TitleBibleRefere
 
   return found;
 }
+
+// --- Personal-note reference extraction ---
+
+export interface NoteBibleReference {
+  bookOrder: number;
+  chapter: number;
+  startVerse: number | null;
+  endVerse: number | null;
+  /** Collapsed-whitespace excerpt of the note centered on the mention. */
+  snippet: string;
+}
+
+function snippetAround(text: string, start: number, end: number): string {
+  return text
+    .slice(Math.max(0, start - SNIPPET_RADIUS), Math.min(text.length, end + SNIPPET_RADIUS))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Every scripture a personal note cites, with an excerpt around each.
+ *
+ * People write notes the way they write video titles, not the way a speaker
+ * reads aloud: "Mt 5:3", "Sal. 37:11-13", "(1 Cor. 13:4)". So this uses the
+ * title pass's rule — an abbreviation is accepted only when an explicit
+ * `chapter:verse` colon follows, which ordinary prose almost never produces —
+ * plus the full-name scan for "Mateus 5" or "Mateus capítulo 5", where a bare
+ * short alias would be far too easy to confuse with a word ("Os", "De", "Jo").
+ * Duplicates of the same book/chapter/verse collapse to the first mention.
+ */
+export function findBibleReferencesInNote(text: string): NoteBibleReference[] {
+  const found: NoteBibleReference[] = [];
+  const seen = new Set<string>();
+
+  function push(ref: NoteBibleReference) {
+    const key = `${ref.bookOrder}:${ref.chapter}:${ref.startVerse ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push(ref);
+  }
+
+  for (const match of text.matchAll(TITLE_REFERENCE_PATTERN)) {
+    const bookOrder = bookOrderFromName(`${match[1] ?? ""}${match[2]}`);
+    if (bookOrder === null) continue;
+
+    const chapter = Number(match[3]);
+    if (chapter < 1 || chapter > BIBLE_BOOK_CHAPTER_COUNTS[bookOrder]) continue;
+
+    const startVerse = Number(match[4]);
+    const endVerse = match[5] ? Number(match[5]) : null;
+    const from = match.index ?? 0;
+    push({
+      bookOrder,
+      chapter,
+      startVerse,
+      endVerse: endVerse !== null && endVerse > startVerse ? endVerse : null,
+      snippet: snippetAround(text, from, from + match[0].length),
+    });
+  }
+
+  for (const ref of findAllBibleReferenceSnippets(text)) {
+    push({
+      bookOrder: ref.bookOrder,
+      chapter: ref.chapter,
+      startVerse: ref.startVerse,
+      endVerse: null,
+      snippet: ref.snippet,
+    });
+  }
+
+  return found;
+}

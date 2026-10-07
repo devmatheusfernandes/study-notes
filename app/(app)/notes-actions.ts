@@ -9,6 +9,7 @@ import { extractNoteImagePaths } from "@/lib/note-images";
 import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
 import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
+import { syncNoteScriptureRefs } from "@/lib/bible/note-scripture-sync";
 
 export interface NoteRow {
   id: string;
@@ -166,6 +167,7 @@ export async function createNoteRow(input: {
 
   if (!error) {
     void enqueueNoteForVectorization(input.id);
+    if (input.body) await syncNoteScriptureRefs(supabase, user.id, input.id, input.body);
   }
 
   return error ? { error: "Não foi possível salvar a nota." } : {};
@@ -185,6 +187,7 @@ export async function updateNoteRow(
   const { error } = await supabase.from("notes").update(encryptedPatch).eq("id", id);
   if (!error) {
     void enqueueNoteForVectorization(id);
+    if (patch.body !== undefined) await syncNoteScriptureRefs(supabase, user.id, id, patch.body);
   }
   return error ? { error: "Não foi possível salvar." } : {};
 }
