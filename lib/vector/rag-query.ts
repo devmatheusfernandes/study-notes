@@ -368,7 +368,12 @@ function isKeywordListing(matchRows: MatchResult[]): boolean {
  * styles below (nothing found / listing / content) stay in sync instead of
  * risking the two copies drifting apart.
  */
-export function buildRagSystemPrompt(matchRows: MatchResult[], sourcesLabel: string, notice?: string | null): string {
+export function buildRagSystemPrompt(
+  matchRows: MatchResult[],
+  sourcesLabel: string,
+  notice?: string | null,
+  options?: { citeSources?: boolean }
+): string {
   return (
     `Data de hoje: ${formatTodayPt()}. Use-a para qualquer julgamento de tempo ("recente", "último", "este mês"): ` +
     `compare sempre com esta data e com as datas de publicação indicadas nas fontes, nunca com a sua própria noção de data.
@@ -377,11 +382,11 @@ export function buildRagSystemPrompt(matchRows: MatchResult[], sourcesLabel: str
     (notice ? `AVISO DO SISTEMA DE BUSCA (fato verificado): ${notice}
 
 ` : "") +
-    buildRagSystemPromptBody(matchRows, sourcesLabel)
+    buildRagSystemPromptBody(matchRows, sourcesLabel, options?.citeSources ?? false)
   );
 }
 
-function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string): string {
+function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string, citeSources: boolean): string {
   if (matchRows.length === 0) {
     return (
       `Você é o assistente inteligente do Study Notes. O usuário pesquisou especificamente em ${sourcesLabel}, ` +
@@ -460,7 +465,19 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
   // semantic match can legitimately be a poor fit worth declining.
   const hasHighConfidenceMatch = matchRows.some((m) => m.similarity >= 0.95);
 
-  return hasHighConfidenceMatch
+  // The search over-fetches (a dozen transcripts for one question), and the
+  // UI lists every one as a source. Asking the model which it actually drew
+  // on lets the route show only those — see SOURCES_MARKER_RE's consumer in
+  // chats/[id]/stream/route.ts.
+  const citeInstruction = citeSources
+    ? `
+
+AO FINAL da resposta, em uma última linha separada, escreva exatamente <<FONTES: N, N>> com os números das [Fonte N] ` +
+      `que você realmente usou (somente as que sustentam a resposta; normalmente poucas). Se não usou nenhuma, escreva <<FONTES: nenhuma>>. ` +
+      `Nunca mencione essa linha no texto da resposta.`
+    : "";
+
+  return (hasHighConfidenceMatch
     ? `Você é o assistente inteligente do Study Notes. Você recebeu abaixo o trecho de contexto exato que responde à pergunta do usuário — ` +
         `o sistema de busca já confirmou que esse é o conteúdo certo, incluindo quando um trecho começa com uma anotação entre colchetes ` +
         `(como "[Este é o vídeo mais recente sobre o tema pedido, publicado em ...]"): isso é um FATO já verificado, não uma suposição sua. ` +
@@ -471,7 +488,7 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
         `extraídos de ${sourcesLabel}. NÃO invente informações que não estejam nos trechos. ` +
         `Se os trechos não contiverem a resposta exata para a pergunta, diga especificamente que a informação não foi encontrada em ${sourcesLabel}. ` +
         `Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado.\n\n` +
-        `${sourceIndex}CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`;
+        `${sourceIndex}CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`) + citeInstruction;
 }
 
 /**

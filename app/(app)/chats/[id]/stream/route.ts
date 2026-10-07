@@ -172,6 +172,9 @@ export async function POST(
         }
 
         const sourcesMap = new Map<string, SourceItem>();
+        // sourcesMap key of each matchRow, in order — the prompt numbers its
+        // "[Fonte N]" by matchRow index, and the model cites those numbers back.
+        const rowKeys: string[] = [];
         if (matchRows.length > 0) {
           for (const match of matchRows) {
             let meta: Record<string, unknown> = {};
@@ -214,6 +217,7 @@ export async function POST(
                 : bookOrder !== undefined && chapter !== undefined
                   ? `biblia:${bookOrder}:${chapter}`
                   : `${noteId}:${chapterTitle ?? ""}`;
+            rowKeys.push(key);
             if (!sourcesMap.has(key)) {
               sourcesMap.set(key, {
                 ...(noteId ? { noteId } : {}),
@@ -235,17 +239,17 @@ export async function POST(
             }
           }
         }
-        const sources = Array.from(sourcesMap.values());
+        const allSources = Array.from(sourcesMap.values());
         sendEvent({
           type: "status",
-          text: sources.length > 0 ? `Analisando ${sources.length} ${sources.length === 1 ? "fonte" : "fontes"}…` : "Preparando a resposta…",
+          text: allSources.length > 0 ? `Analisando ${allSources.length} ${allSources.length === 1 ? "fonte" : "fontes"}…` : "Preparando a resposta…",
         });
 
         // 4. Build system prompt — shared with assistant/stream/route.ts so
         // the "nothing found" / "list of named matches" / "answer from
         // content" styles stay in sync.
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
-        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel, periodNotice);
+        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel, periodNotice, { citeSources: true });
 
         // 5. Build messages with history
         const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
@@ -298,11 +302,29 @@ export async function POST(
         let promptTokens = 0;
         let completionTokens = 0;
 
+        // The model ends its answer with "<<FONTES: 1, 3>>" (see citeSources in
+        // rag-query.ts). Hold that tail back from the stream: emit only the
+        // text before the marker, plus nothing that could still turn into one.
+        const MARKER = "<<FONTES";
+        let emitted = 0;
+        const safeEnd = (text: string) => {
+          const at = text.indexOf(MARKER);
+          if (at >= 0) return at;
+          for (let n = Math.min(MARKER.length - 1, text.length); n > 0; n--) {
+            if (MARKER.startsWith(text.slice(text.length - n))) return text.length - n;
+          }
+          return text.length;
+        };
+
         for await (const chunk of completion) {
           const delta = chunk.choices[0]?.delta?.content;
           if (delta) {
             fullContent += delta;
-            sendEvent({ type: "delta", content: delta });
+            const end = safeEnd(fullContent);
+            if (end > emitted) {
+              sendEvent({ type: "delta", content: fullContent.slice(emitted, end) });
+              emitted = end;
+            }
           }
           if (chunk.usage) {
             promptTokens = chunk.usage.prompt_tokens;
@@ -317,6 +339,26 @@ export async function POST(
         // *model* actually confirmed one of them answers the question —
         // the two can disagree, and the UI needs to show that distinction
         // instead of presenting merely-similar chunks as if they were it.
+        // Flush anything held back that turned out not to be the marker.
+        const markerAt = fullContent.indexOf(MARKER);
+        if (markerAt < 0 && emitted < fullContent.length) {
+          sendEvent({ type: "delta", content: fullContent.slice(emitted) });
+        }
+        const citedMatch = fullContent.match(/<<FONTES:\s*([^>]*)>>?/i);
+        fullContent = (markerAt >= 0 ? fullContent.slice(0, markerAt) : fullContent).trimEnd();
+        // Only what the model says it used. No/garbled marker, "nenhuma" or
+        // numbers that match nothing → keep the full list rather than hide it.
+        const cited = citedMatch
+          ? new Set(
+              (citedMatch[1].match(/\d+/g) ?? [])
+                .map((n) => rowKeys[Number(n) - 1])
+                .filter((k): k is string => Boolean(k))
+            )
+          : null;
+        const sources =
+          cited && cited.size > 0
+            ? Array.from(sourcesMap.entries()).filter(([key]) => cited.has(key)).map(([, item]) => item)
+            : allSources;
         const uncertain = sources.length > 0 && /n[ãa]o\s+(foi|foram)\s+encontrad/i.test(fullContent);
         if (sources.length > 0) {
           sendEvent({ type: "sources", sources, uncertain });
