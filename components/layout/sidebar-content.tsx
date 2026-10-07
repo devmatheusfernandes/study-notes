@@ -107,7 +107,7 @@ export function SidebarContent({ collapsed = false, onNavigate, onToggleCollapse
 
   return (
     <TooltipProvider delay={200}>
-      <div className="flex h-full flex-col gap-6">
+      <div className="flex min-h-full flex-col gap-6">
         <div
           className={cn(
             "flex shrink-0 items-center gap-2.5 px-1",

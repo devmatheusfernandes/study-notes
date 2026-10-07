@@ -17,7 +17,7 @@ export function Sidebar() {
           <Drawer.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
           <Drawer.Content
             aria-describedby={undefined}
-            className="fixed inset-y-0 left-0 z-50 flex h-full w-[260px] max-w-[82vw] flex-col bg-[#161413] p-5 pt-[max(1.25rem,env(safe-area-inset-top))] outline-none"
+            className="fixed inset-y-0 left-0 z-50 flex h-full w-[260px] max-w-[82vw] flex-col overflow-y-auto bg-[#161413] p-5 pt-[max(1.25rem,env(safe-area-inset-top))] outline-none"
           >
             <Drawer.Title className="sr-only">Menu</Drawer.Title>
             <SidebarContent onNavigate={closeMobile} />
@@ -41,7 +41,7 @@ export function Sidebar() {
       aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
       title={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
       className={cn(
-        "sticky top-0 hidden h-dvh shrink-0 cursor-pointer flex-col border-r border-border bg-[#161413] pb-5 pt-5 transition-[width] duration-200 md:flex",
+        "sticky top-0 hidden h-dvh shrink-0 cursor-pointer flex-col overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-r border-border bg-[#161413] pb-5 pt-5 transition-[width] duration-200 md:flex",
         desktopCollapsed ? "w-[76px] px-3" : "w-[232px] px-4"
       )}
     >
