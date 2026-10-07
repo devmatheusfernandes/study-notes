@@ -66,6 +66,12 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
  */
 export function BibleSearchResults({ query, onSelectVerse, onOpenDetail }: BibleSearchResultsProps) {
   const [tab, setTab] = useState<ResultsTab>("versiculos");
+  const tabsListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tabsListRef.current
+      ?.querySelector<HTMLElement>("[data-slot=tabs-trigger][data-active]")
+      ?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [tab]);
   const [verses, setVerses] = useState<BibleVerseHit[]>([]);
   const [videos, setVideos] = useState<VideoHit[]>([]);
   const [articles, setArticles] = useState<InsightHit[]>([]);
@@ -254,7 +260,12 @@ export function BibleSearchResults({ query, onSelectVerse, onOpenDetail }: Bible
             itself is a pill, and results would show around it — and bleeds
             into the container's side padding. */}
         <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-10 -mx-4 bg-background/95 px-4 py-2 backdrop-blur-md sm:-mx-6 sm:px-6">
-        <TabsList className="w-full">
+        {/* Four labelled tabs with counts are wider than a phone, and the list's
+            default centring spilled the overflow off BOTH edges (the first tab
+            was clipped with no way to reach it). Left-aligned and scrollable
+            instead, tabs keep their natural width, and the active one is
+            scrolled into view below. */}
+        <TabsList ref={tabsListRef} className="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>[data-slot=tabs-trigger]]:flex-none [&>[data-slot=tabs-trigger]]:px-3">
           <TabsTrigger value="versiculos">
             <BookOpen className="size-3.5" />
             Versículos

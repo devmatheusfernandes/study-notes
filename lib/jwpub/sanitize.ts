@@ -13,18 +13,40 @@ import type { JwpubBibleCitation, JwpubExtractIndex } from "./types";
  * which it does by default — instead of whitelisting an exotic URI scheme.
  */
 export function sanitizeChapterHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-    ALLOWED_ATTR: [
-      "class", "id", "style", "src", "alt", "title", "href", "colspan", "rowspan",
-      "data-jwpub-footnote", "data-jwpub-ref", "data-pid", "data-key",
-      "data-jwpub-bible-first", "data-jwpub-bible-last",
-      "data-jwpub-pubref", "data-jwpub-pubref-pid", "data-jwpub-extract",
-      "data-wol-path", "data-wol-verse",
-    ],
-    FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
-    FORBID_ATTR: ["onerror", "onload", "onclick", "srcset"],
-  });
+  // Publishers paint sections with light paper textures / tinted backdrops via
+  // inline `background-*` styles, designed for dark text. This app renders in
+  // its single dark theme with light text, so those panels came out as pale
+  // speckled blocks with unreadable text (the "Lições do livro" boxes in the
+  // study-edition Bible books). Dropping the background lets the section
+  // inherit the app's own surface instead. Done here, at render time, so
+  // already-imported publications are fixed without reprocessing.
+  const stripBackground = (node: Element) => {
+    if (!node.hasAttribute?.("style")) return;
+    const kept = (node.getAttribute("style") ?? "")
+      .split(";")
+      .filter((decl) => decl.trim() && !/^\s*background/i.test(decl))
+      .join(";");
+    if (kept) node.setAttribute("style", kept);
+    else node.removeAttribute("style");
+    node.removeAttribute("data-bg-image");
+  };
+  DOMPurify.addHook("afterSanitizeAttributes", stripBackground);
+  try {
+    return DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true },
+      ALLOWED_ATTR: [
+        "class", "id", "style", "src", "alt", "title", "href", "colspan", "rowspan",
+        "data-jwpub-footnote", "data-jwpub-ref", "data-pid", "data-key",
+        "data-jwpub-bible-first", "data-jwpub-bible-last",
+        "data-jwpub-pubref", "data-jwpub-pubref-pid", "data-jwpub-extract",
+        "data-wol-path", "data-wol-verse",
+      ],
+      FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
+      FORBID_ATTR: ["onerror", "onload", "onclick", "srcset"],
+    });
+  } finally {
+    DOMPurify.removeHook("afterSanitizeAttributes", stripBackground);
+  }
 }
 
 /**
