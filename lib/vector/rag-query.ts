@@ -591,7 +591,13 @@ export async function fetchExactMetadataMatches(
   // to just them via RLS, so a single distinctive word (a rare name like
   // "Rispa") is precise enough on its own without that same risk.
   const hasVideoKeywordSignal = titleKeywords.length >= 2;
-  const hasNoteKeywordSignal = titleKeywords.length >= 1;
+  // A bare year/number ("2026", "6") says WHICH edition, never WHAT the
+  // content is about: ILIKE '%2026%' over the caller's note chunks matched any
+  // note that merely mentions the year (a JiuJitsu note, a one-word "Info"
+  // note), listed as sources for "boletim número 6 de 2026". Those numbers are
+  // already used by the video path above, so the note search only gets words.
+  const noteKeywords = titleKeywords.filter((w) => !/^\d+$/.test(w));
+  const hasNoteKeywordSignal = noteKeywords.length >= 1;
 
   // A specific "book chapter[:verse]" mention paired with a named category
   // ("adorações matinais com 1 Coríntios capítulo 9") gets its own precise
@@ -767,18 +773,18 @@ export async function fetchExactMetadataMatches(
     // chunks that are still a real, specific match rather than a single
     // stray word — safe to be this lenient specifically because it's scoped
     // to just the caller's own content (RLS), not a shared catalog.
-    const orExpr = titleKeywords.map((w) => `content.ilike.%${escapeLikePattern(w)}%`).join(",");
+    const orExpr = noteKeywords.map((w) => `content.ilike.%${escapeLikePattern(w)}%`).join(",");
     const { data: chunkRows } = await supabase
       .from("note_embeddings")
       .select("note_id, content, metadata, jwpub_chapter_id")
       .or(orExpr)
       .limit(30);
 
-    const minHits = titleKeywords.length <= 2 ? titleKeywords.length : Math.ceil(titleKeywords.length / 2);
+    const minHits = noteKeywords.length <= 2 ? noteKeywords.length : Math.ceil(noteKeywords.length / 2);
     const scored = (chunkRows ?? [])
       .map((row) => {
         const lower = row.content.toLowerCase();
-        const hits = titleKeywords.filter((w) => lower.includes(w)).length;
+        const hits = noteKeywords.filter((w) => lower.includes(w)).length;
         return { row, hits };
       })
       .filter((s) => s.hits >= minHits)
@@ -803,7 +809,7 @@ export async function fetchExactMetadataMatches(
         // by how many of the significant words actually hit, floored at the
         // rerank/RAG_THRESHOLD cutoff (0.35) so a bare-minimum match still
         // clears it rather than getting silently dropped later.
-        similarity: Math.max(0.4, Math.min(0.95, hits / titleKeywords.length)),
+        similarity: Math.max(0.4, Math.min(0.95, hits / noteKeywords.length)),
         metadata: {
           title: meta.title as string | undefined,
           type,
