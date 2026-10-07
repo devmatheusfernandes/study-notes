@@ -51,6 +51,18 @@ interface JwpubReaderProps {
   initialDocParam?: string;
 }
 
+/** Opens the OS file picker for a `.jwpub`; resolves null if dismissed. */
+function pickLocalJwpub(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".jwpub";
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
 export function JwpubReader({
   noteId,
   initialPublication,
@@ -691,15 +703,20 @@ export function JwpubReader({
     setHighlightMark(null);
   }, [highlightMark, publication, activeChapter]);
 
-  /** Recovery path: re-download the original from Storage and parse it again. */
+  /** Recovery path: re-download the original from Storage (or, for a publication too big to have been stored, ask for the file again) and parse it again. */
   async function reprocess() {
-    if (!note?.storagePath) return;
     setIsReprocessing(true);
     try {
-      const { url, error } = await getFileUrl(note.storagePath);
-      if (error || !url) throw new Error(error ?? "Não foi possível baixar o arquivo.");
-
-      const blob = await fetch(url).then((r) => r.blob());
+      let blob: Blob;
+      if (note?.storagePath) {
+        const { url, error } = await getFileUrl(note.storagePath);
+        if (error || !url) throw new Error(error ?? "Não foi possível baixar o arquivo.");
+        blob = await fetch(url).then((r) => r.blob());
+      } else {
+        const picked = await pickLocalJwpub();
+        if (!picked) return;
+        blob = picked;
+      }
       const { ingestJwpub } = await import("@/lib/jwpub/ingest");
       const result = await ingestJwpub(blob, noteId);
       if (!result.ok) throw new Error(result.error);

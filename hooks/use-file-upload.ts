@@ -3,9 +3,14 @@
 import { useState } from "react";
 import { notify } from "@/components/ui/toaster";
 import { useNotesStore } from "@/lib/store/notes-store";
-import { requestFileUploadSlots, finalizeFileUpload, type UploadedFile } from "@/app/(app)/files-actions";
+import {
+  requestFileUploadSlots,
+  finalizeFileUpload,
+  createParseOnlyJwpubNote,
+  type UploadedFile,
+} from "@/app/(app)/files-actions";
 import { createClient } from "@/lib/supabase/client";
-import { ALLOWED_EXTENSIONS, FILES_BUCKET } from "@/lib/storage-config";
+import { ALLOWED_EXTENSIONS, FILES_BUCKET, isParseOnlyJwpub } from "@/lib/storage-config";
 import { ingestJwpubWithFeedback } from "@/lib/jwpub/ingest";
 import {
   isNoteImportFile,
@@ -31,15 +36,27 @@ interface UploadBatchResult {
  * after one file fails so the rest of the batch still lands, and reports
  * the first failure's message.
  */
-async function uploadFilesDirect(files: File[], folderId?: string): Promise<UploadBatchResult> {
+async function uploadFilesDirect(allFiles: File[], folderId?: string): Promise<UploadBatchResult> {
+  const uploaded: UploadedFile[] = [];
+  let firstError: string | undefined;
+
+  // A `.jwpub` past the Storage object limit is never uploaded: only its note
+  // row is created, and it is parsed from the local file afterwards (see
+  // isParseOnlyJwpub in storage-config.ts).
+  const files = allFiles.filter((f) => !isParseOnlyJwpub(f.name, f.size));
+  for (const file of allFiles.filter((f) => isParseOnlyJwpub(f.name, f.size))) {
+    const { file: row, error } = await createParseOnlyJwpubNote(file.name, file.size, folderId);
+    if (error || !row) firstError ??= error ?? `Falha ao registrar "${file.name}".`;
+    else uploaded.push(row);
+  }
+  if (files.length === 0) return { files: uploaded, error: firstError };
+
   const { slots, error: slotError } = await requestFileUploadSlots(
     files.map((f) => ({ name: f.name, size: f.size }))
   );
-  if (slotError) return { files: [], error: slotError };
+  if (slotError) return { files: uploaded, error: firstError ?? slotError };
 
   const supabase = createClient();
-  const uploaded: UploadedFile[] = [];
-  let firstError: string | undefined;
 
   for (const file of files) {
     const slot = slots.find((s) => s.fileName === file.name);

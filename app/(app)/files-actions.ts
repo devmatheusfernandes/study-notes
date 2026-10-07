@@ -9,6 +9,8 @@ import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
 import {
   ALLOWED_EXTENSIONS,
   FILES_BUCKET,
+  isParseOnlyJwpub,
+  JWPUB_PARSE_ONLY_MAX_SIZE,
   MAX_FILES_PER_BATCH,
   maxSizeForExtension,
   RATE_LIMIT_MAX_UPLOADS,
@@ -121,6 +123,56 @@ export async function requestFileUploadSlots(
   }
 
   return { slots };
+}
+
+/**
+ * A `.jwpub` too big for Storage (see isParseOnlyJwpub): creates just the note
+ * row — no `storage_path` — and the browser then parses the local file into the
+ * database exactly as it does after an upload. Nothing is stored, so there is
+ * no ownership-by-path check to make; the row is the user's own, via RLS.
+ */
+export async function createParseOnlyJwpubNote(
+  fileName: string,
+  size: number,
+  folderId?: string
+): Promise<FinalizeUploadResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada. Entre novamente." };
+
+  const name = fileName.trim();
+  if (!isParseOnlyJwpub(name, size)) return { error: "Este arquivo deve ser enviado normalmente." };
+  if (size > JWPUB_PARSE_ONLY_MAX_SIZE) {
+    return { error: `"${name}" excede o limite de ${JWPUB_PARSE_ONLY_MAX_SIZE / 1024 / 1024} MB.` };
+  }
+
+  const { data: row, error } = await supabase
+    .from("notes")
+    .insert({
+      user_id: user.id,
+      type: typeFromFileName(name),
+      title: encryptText(name),
+      body: encryptText(formatFileSize(size)),
+      storage_path: null,
+      folder_id: folderId ?? null,
+    })
+    .select("id, type, title, body, updated_at")
+    .single();
+
+  if (error || !row) return { error: `Falha ao registrar "${name}".` };
+
+  return {
+    file: {
+      id: row.id,
+      type: row.type as NoteType,
+      title: decryptText(row.title) ?? "",
+      body: decryptText(row.body) ?? "",
+      storagePath: "",
+      updatedAt: new Date(row.updated_at).getTime(),
+    },
+  };
 }
 
 export interface FinalizeUploadResult {

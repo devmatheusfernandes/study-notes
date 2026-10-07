@@ -37,12 +37,31 @@ export const MAX_FILE_SIZE = 15 * 1024 * 1024;
  * next.config.ts, which is the real ceiling.
  */
 export const MAX_FILE_SIZE_BY_EXTENSION: Record<string, number> = {
-  jwpub: 60 * 1024 * 1024,
+  // Capped by Supabase's project-wide Storage limit (50 MB on the current
+  // plan — the `files` bucket can't be raised above it, verified by trying),
+  // not by this app. Bigger publications skip Storage altogether, see
+  // JWPUB_PARSE_ONLY_MAX_SIZE.
+  jwpub: 50 * 1024 * 1024,
   // A backup is years of notes/highlights as plain text — much lighter than
   // a whole illustrated publication, but still given headroom over the
   // 15 MB default.
   jwlibrary: 20 * 1024 * 1024,
 };
+
+/**
+ * A `.jwpub` past what Storage will hold (e.g. "Ande Corajosamente com Deus",
+ * 80 MB) is still readable: parsing already happens in the browser, from the
+ * local file, and everything the reader needs lands in the database
+ * (chapters, footnotes, illustrations). Only the *original archive* is not
+ * kept — so it is read straight from the user's disk and never uploaded. The
+ * ceiling here is browser memory (jszip + sql.js hold it whole), not storage.
+ */
+export const JWPUB_PARSE_ONLY_MAX_SIZE = 200 * 1024 * 1024;
+
+/** True for a file that must take the parse-only path instead of the Storage upload. */
+export function isParseOnlyJwpub(fileName: string, size: number) {
+  return fileName.toLowerCase().endsWith(".jwpub") && size > maxSizeForExtension("jwpub");
+}
 
 export function maxSizeForExtension(extension: string) {
   return MAX_FILE_SIZE_BY_EXTENSION[extension] ?? MAX_FILE_SIZE;
