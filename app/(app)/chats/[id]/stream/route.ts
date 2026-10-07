@@ -141,7 +141,7 @@ export async function POST(
           allowed_types: allowedSourceTypes,
         });
 
-        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes);
+        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes, plan.keywords);
         const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
         const matchRows = (await rerankMatches(supabase, searchQuery, rawMatches))
           .filter((m) => allowedSourceTypes.includes(m.source_type))

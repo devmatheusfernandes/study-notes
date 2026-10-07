@@ -1,9 +1,20 @@
 import "server-only";
 import type OpenAI from "openai";
+import { formatTodayPt } from "./today";
 
 export interface PlannedQuery {
   /** What retrieval (embedding + exact-match parsing) should search for. */
   searchQuery: string;
+  /**
+   * Only the words that NAME what to find (a title, a person, a topic), as
+   * judged by the model — undefined when planning failed, so retrieval falls
+   * back to its own stopword heuristics. Never includes request verbs
+   * ("resuma"), format words ("algumas frases"), time words ("último") or
+   * bare numbers/years: retrieval ANDs these against titles/transcripts, so a
+   * single filler word that no title contains ("lançado", "frases") used to
+   * empty the match and drop the real latest video.
+   */
+  keywords?: string[];
   promptTokens: number;
   completionTokens: number;
 }
@@ -29,7 +40,13 @@ Exemplos (histórico -> última mensagem => consulta):
 - [usuário: "boletim 6 de 2026?"] "o que diz Mateus 24:14" => "o que diz Mateus 24:14"
 - [vazio] "E o boletin 2 de 2025?" => "boletim 2 de 2025"
 
-Responda somente com JSON: {"followUp": true|false, "query": "..."}`;
+Passo 3 — liste em "keywords" SÓ as palavras que NOMEIAM o que deve ser encontrado (título, pessoa, tema, termo): minúsculas, no máximo 5.
+- NÃO inclua verbos/pedidos ("resuma", "fale", "procure", "mostre"), formato ou tamanho ("em algumas frases", "resumo", "lista"), palavras de tempo ou ordem ("último", "mais recente", "lançado", "novo", "primeiro"), números/anos, nem palavras genéricas ("vídeo", "boletim", "assunto").
+- Exemplos: "resuma em algumas frases o último broadcasting lançado" -> ["broadcasting"]; "vídeos do Mark Sanderson sobre o tempo" -> ["mark","sanderson","tempo"]; "boletim número 6 de 2026" -> [].
+
+Hoje é {{HOJE}}. Use isso para entender "este mês", "este ano", "ano passado" (escreva o ano explícito na consulta quando fizer sentido), mas NÃO transforme "o último"/"o mais recente" em uma data.
+
+Responda somente com JSON: {"followUp": true|false, "query": "...", "keywords": ["..."]}`;
 
 /**
  * Turns the user's latest message into a standalone search query using the
@@ -61,7 +78,7 @@ export async function planSearchQuery(
       {
         model: PLANNER_MODEL,
         messages: [
-          { role: "system", content: PLANNER_PROMPT },
+          { role: "system", content: PLANNER_PROMPT.replace("{{HOJE}}", formatTodayPt()) },
           {
             role: "user",
             content: `Histórico:\n${transcript || "(vazio)"}\n\nÚltima mensagem do usuário: ${message}`,
@@ -69,15 +86,23 @@ export async function planSearchQuery(
         ],
         response_format: { type: "json_object" },
         temperature: 0,
-        max_tokens: 150,
+        max_tokens: 200,
       },
       { timeout: PLANNER_TIMEOUT_MS }
     );
 
-    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown };
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown; keywords?: unknown };
+    const keywords = Array.isArray(parsed.keywords)
+      ? parsed.keywords
+          .filter((k): k is string => typeof k === "string")
+          .map((k) => k.trim().toLowerCase())
+          .filter((k) => k.length >= 2 && !/^\d+$/.test(k))
+          .slice(0, 5)
+      : undefined;
     const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
     return {
       searchQuery: query && query.length <= 500 ? query : message,
+      keywords,
       promptTokens: res.usage?.prompt_tokens ?? 0,
       completionTokens: res.usage?.completion_tokens ?? 0,
     };

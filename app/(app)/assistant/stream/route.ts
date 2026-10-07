@@ -55,7 +55,8 @@ export async function POST(request: Request) {
         // 0. Clean the question up for retrieval (typos, filler) — the dock
         // has no conversation history, so this is a one-shot rewrite. The
         // answer still responds to the user's own wording.
-        const { searchQuery } = await planSearchQuery(openai, question);
+        const plan = await planSearchQuery(openai, question);
+        const searchQuery = plan.searchQuery;
 
         // 1. Generate query embedding for similarity search
         const { embedding, tokens: queryTokens, cost: queryCost } =
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
           allowed_types: allowedSourceTypes,
         });
 
-        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes);
+        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes, plan.keywords);
         const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
         const matchRows = (await rerankMatches(supabase, searchQuery, rawMatches))
           .filter((m) => allowedSourceTypes.includes(m.source_type))

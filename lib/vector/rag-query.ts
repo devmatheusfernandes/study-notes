@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { formatTodayPt } from "./today";
 import { findBibleReferenceInText } from "@/lib/bible/parse-reference";
 
 export interface MatchResult {
@@ -364,6 +365,16 @@ function isKeywordListing(matchRows: MatchResult[]): boolean {
  * risking the two copies drifting apart.
  */
 export function buildRagSystemPrompt(matchRows: MatchResult[], sourcesLabel: string): string {
+  return (
+    `Data de hoje: ${formatTodayPt()}. Use-a para qualquer julgamento de tempo ("recente", "último", "este mês"): ` +
+    `compare sempre com esta data e com as datas de publicação indicadas nas fontes, nunca com a sua própria noção de data.
+
+` +
+    buildRagSystemPromptBody(matchRows, sourcesLabel)
+  );
+}
+
+function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string): string {
   if (matchRows.length === 0) {
     return (
       `Você é o assistente inteligente do Study Notes. O usuário pesquisou especificamente em ${sourcesLabel}, ` +
@@ -562,7 +573,9 @@ function extractTitleKeywords(query: string): string[] {
 export async function fetchExactMetadataMatches(
   supabase: Awaited<ReturnType<typeof createClient>>,
   query: string,
-  allowedTypes: string[]
+  allowedTypes: string[],
+  /** Keywords chosen by the query planner; when given they replace the stopword-based extraction. */
+  plannedKeywords?: string[]
 ): Promise<MatchResult[]> {
   const { targetYear, targetNum, targetNumExplicit } = parseQueryConstraints(query);
   // "boletin"/"boletins" typos (missing "m") are common on a phone keyboard
@@ -572,7 +585,7 @@ export async function fetchExactMetadataMatches(
   const isBoletimSearch = norm.includes("boletim");
   const categoryMatch = detectCategoryKey(normStripped);
   const categoryKey = categoryMatch?.categoryKey ?? null;
-  const titleKeywords = extractTitleKeywords(norm);
+  const titleKeywords = plannedKeywords ?? extractTitleKeywords(norm);
   // When a category phrase matched ("adorações matinais" -> category_key
   // filter below), its own words describe the PROGRAM, not the talk -- a
   // Morning Worship talk's transcript essentially never repeats "adorações
