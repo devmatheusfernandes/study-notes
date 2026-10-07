@@ -7,6 +7,7 @@ import {
   rerankMatches,
   type MatchResult,
 } from "@/lib/vector/rag-query";
+import { planSearchQuery } from "@/lib/vector/query-planner";
 import OpenAI from "openai";
 
 export async function POST(
@@ -55,10 +56,13 @@ export async function POST(
     .from("chat_messages")
     .select("role, content")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(10);
 
-  const history = (historyRows ?? []).map((m) => ({
+  // Fetched newest-first so the limit keeps the LAST 10 messages (ascending +
+  // limit kept the first 10, i.e. the oldest, in a long conversation), then
+  // flipped back to chronological order.
+  const history = (historyRows ?? []).reverse().map((m) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
   }));
@@ -72,9 +76,30 @@ export async function POST(
       }
 
       try {
+        const openai = new OpenAI({ apiKey });
+
+        // 0. Rewrite the message into a standalone search query using the
+        // conversation so far ("Procure mais uma vez" -> the topic it refers
+        // to; typos fixed). Only retrieval uses it — the answer below still
+        // responds to the user's real message.
+        const plan = await planSearchQuery(openai, message, history);
+        const searchQuery = plan.searchQuery;
+        if (plan.promptTokens + plan.completionTokens > 0) {
+          await supabase.from("ai_usage_logs").insert({
+            user_id: user.id,
+            operation_type: "chat_rag_query_planner",
+            model: "gpt-4o-mini",
+            prompt_tokens: plan.promptTokens,
+            completion_tokens: plan.completionTokens,
+            total_tokens: plan.promptTokens + plan.completionTokens,
+            estimated_cost_usd:
+              (plan.promptTokens / 1_000_000) * 0.15 + (plan.completionTokens / 1_000_000) * 0.6,
+          });
+        }
+
         // 1. Generate query embedding
         const { embedding, tokens: queryTokens, cost: queryCost } =
-          await generateSingleEmbedding(message);
+          await generateSingleEmbedding(searchQuery);
 
         // Log embedding cost
         if (queryTokens > 0) {
@@ -106,9 +131,9 @@ export async function POST(
           allowed_types: allowedSourceTypes,
         });
 
-        const exactMatches = await fetchExactMetadataMatches(supabase, message, allowedSourceTypes);
+        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes);
         const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
-        const matchRows = (await rerankMatches(supabase, message, rawMatches))
+        const matchRows = (await rerankMatches(supabase, searchQuery, rawMatches))
           .filter((m) => allowedSourceTypes.includes(m.source_type))
           .filter((m) => m.similarity >= RAG_THRESHOLD);
 
@@ -209,8 +234,6 @@ export async function POST(
           ...history,
           { role: "user", content: message },
         ];
-
-        const openai = new OpenAI({ apiKey });
 
         // Auto-generate title for "Nova conversa"
         if (conv.title === "Nova conversa") {

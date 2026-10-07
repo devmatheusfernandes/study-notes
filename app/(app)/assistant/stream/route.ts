@@ -7,6 +7,7 @@ import {
   rerankMatches,
   type MatchResult,
 } from "@/lib/vector/rag-query";
+import { planSearchQuery } from "@/lib/vector/query-planner";
 import OpenAI from "openai";
 
 export async function POST(request: Request) {
@@ -49,9 +50,16 @@ export async function POST(request: Request) {
       }
 
       try {
+        const openai = new OpenAI({ apiKey });
+
+        // 0. Clean the question up for retrieval (typos, filler) — the dock
+        // has no conversation history, so this is a one-shot rewrite. The
+        // answer still responds to the user's own wording.
+        const { searchQuery } = await planSearchQuery(openai, question);
+
         // 1. Generate query embedding for similarity search
         const { embedding, tokens: queryTokens, cost: queryCost } =
-          await generateSingleEmbedding(question);
+          await generateSingleEmbedding(searchQuery);
 
         // Log query embedding AI usage
         if (queryTokens > 0) {
@@ -76,9 +84,9 @@ export async function POST(request: Request) {
           allowed_types: allowedSourceTypes,
         });
 
-        const exactMatches = await fetchExactMetadataMatches(supabase, question, allowedSourceTypes);
+        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes);
         const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
-        const matchRows = (await rerankMatches(supabase, question, rawMatches))
+        const matchRows = (await rerankMatches(supabase, searchQuery, rawMatches))
           .filter((m) => allowedSourceTypes.includes(m.source_type))
           .filter((m) => m.similarity >= RAG_THRESHOLD);
 
@@ -175,7 +183,6 @@ export async function POST(request: Request) {
         const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel);
 
         // 4. Stream from OpenAI
-        const openai = new OpenAI({ apiKey });
         const completion = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
