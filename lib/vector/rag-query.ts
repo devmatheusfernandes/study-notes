@@ -416,9 +416,30 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
       const label = m.metadata?.chapterTitle
         ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
         : m.metadata?.title || "Conteúdo";
-      return `[Fonte ${idx + 1}: ${label}]\n${m.content}`;
+      const published = m.metadata?.publishedAt
+        ? ` — publicado em ${new Date(m.metadata.publishedAt).toLocaleDateString("pt-BR", { timeZone: "UTC" })}`
+        : "";
+      const body = m.content.length > perSourceCap ? `${m.content.slice(0, perSourceCap)}…` : m.content;
+      return `[Fonte ${idx + 1}: ${label}${published}]\n${body}`;
     })
     .join("\n\n---\n\n");
+
+  // With several sources the model matched titles to the wrong dates inside the
+  // long transcripts (n.º 1 reported with n.º 2's date). A compact index of
+  // title + date up front gives it the facts without digging through the text.
+  const sourceIndex =
+    contextRows.length > 1
+      ? `ÍNDICE DAS FONTES (título — data de publicação, fatos verificados):\n` +
+        contextRows
+          .map((m, idx) => {
+            const date = m.metadata?.publishedAt
+              ? new Date(m.metadata.publishedAt).toLocaleDateString("pt-BR", { timeZone: "UTC" })
+              : "data não informada";
+            return `${idx + 1}. ${m.metadata?.title || "Conteúdo"} — ${date}`;
+          })
+          .join("\n") +
+        "\n\n"
+      : "";
 
   // A similarity this high only happens for a forced exact match
   // (fetchExactMetadataMatches' year/número/category hits start at 0.99, and
@@ -442,12 +463,12 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
         `(como "[Este é o vídeo mais recente sobre o tema pedido, publicado em ...]"): isso é um FATO já verificado, não uma suposição sua. ` +
         `Responda diretamente a pergunta do usuário usando esse conteúdo, em português, de forma clara e concisa, usando Markdown quando apropriado. ` +
         `Não invente detalhes que não estejam no trecho, mas TAMBÉM não diga que a informação não foi encontrada — ela foi.\n\n` +
-        `CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`
+        `${sourceIndex}CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`
     : `Você é o assistente inteligente do Study Notes. Responda APENAS com base nos trechos de contexto fornecidos abaixo, ` +
         `extraídos de ${sourcesLabel}. NÃO invente informações que não estejam nos trechos. ` +
         `Se os trechos não contiverem a resposta exata para a pergunta, diga especificamente que a informação não foi encontrada em ${sourcesLabel}. ` +
         `Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado.\n\n` +
-        `CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`;
+        `${sourceIndex}CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`;
 }
 
 /**
@@ -696,7 +717,8 @@ export async function fetchExactMetadataMatches(
   // and would otherwise skip the bulletin path entirely.
   const norm = query.toLowerCase().replace(/\bboletin(s?)\b/g, (_m, pl) => (pl ? "boletins" : "boletim"));
   const normStripped = norm.normalize("NFD").replace(/[̀-ͯ]/g, "");
-  const isBoletimSearch = norm.includes("boletim");
+  // "boletins" (plural) does not contain "boletim", so both spellings count.
+  const isBoletimSearch = /boletim|boletins/.test(norm);
   const categoryMatch = detectCategoryKey(normStripped);
   const categoryKey = categoryMatch?.categoryKey ?? null;
   const period = plan?.period;

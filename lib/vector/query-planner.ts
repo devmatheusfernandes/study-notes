@@ -50,7 +50,7 @@ Passo 3 — liste em "keywords" SÓ as palavras que NOMEIAM o que deve ser encon
 - NÃO inclua verbos/pedidos ("resuma", "fale", "procure", "mostre"), formato ou tamanho ("em algumas frases", "resumo", "lista"), palavras de tempo ou ordem ("último", "mais recente", "lançado", "novo", "primeiro"), números/anos, nem palavras genéricas ("vídeo", "boletim", "assunto").
 - Exemplos: "resuma em algumas frases o último broadcasting lançado" -> ["broadcasting"]; "vídeos do Mark Sanderson sobre o tempo" -> ["mark","sanderson","tempo"]; "boletim número 6 de 2026" -> [].
 
-Passo 4 — "period": se o usuário pede algo de um período em que foi LANÇADO/PUBLICADO ("de julho de 2021", "deste mês", "do mês passado", "de 2024", "da semana passada", "lançados em setembro"), resolva-o para datas reais e devolva {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} (limites inclusivos; um mês inteiro vai do dia 1 ao último dia; um ano do 01/01 ao 31/12). Se NÃO há período ("o último", "o mais recente" sem data), ou se a data faz parte do NOME de um evento ("Reunião Anual de 2021", "turma 150 de Gileade"), devolva null. "O último de 2024" -> o ano 2024 inteiro.
+Passo 4 — "period": se o usuário pede algo de um período em que foi LANÇADO/PUBLICADO ("de julho de 2021", "deste mês", "do mês passado", "de 2024", "da semana passada", "lançados em setembro"), resolva-o para datas reais e devolva {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} (limites inclusivos; um mês inteiro vai do dia 1 ao último dia; um ano do 01/01 ao 31/12). Se NÃO há período ("o último", "o mais recente" sem data), ou se a data faz parte do NOME de um evento ("Reunião Anual de 2021", "turma 150 de Gileade"), devolva null. "O último de 2024" -> o ano 2024 inteiro. "Este ano" / "neste ano" -> o ano de hoje inteiro; "este mês" -> o mês de hoje inteiro; "ano passado" / "mês passado" -> o ano/mês anterior inteiro.
 
 Hoje é {{HOJE}}. Use isso para entender "este mês", "este ano", "ano passado" (escreva o ano explícito na consulta quando fizer sentido), mas NÃO transforme "o último"/"o mais recente" em uma data.
 
@@ -84,6 +84,26 @@ function inferMonthPeriod(...texts: string[]): { from: string; to: string } | un
     const mm = String(month).padStart(2, "0");
     return { from: `${year}-${mm}-01`, to: `${year}-${mm}-${String(last).padStart(2, "0")}` };
   }
+  return undefined;
+}
+
+/** "este ano" / "mês passado" etc., resolved against today in Brazil — the same rule-based safety net as above. */
+export function inferRelativePeriod(text: string, now: Date = new Date()): { from: string; to: string } | undefined {
+  const norm = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const [year, month] = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit" })
+    .format(now)
+    .split("-")
+    .map(Number);
+  const wholeYear = (y: number) => ({ from: `${y}-01-01`, to: `${y}-12-31` });
+  const wholeMonth = (y: number, m: number) => {
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const mm = String(m).padStart(2, "0");
+    return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(last).padStart(2, "0")}` };
+  };
+  if (/\b(?:ano passado|ultimo ano)\b/.test(norm)) return wholeYear(year - 1);
+  if (/\b(?:mes passado)\b/.test(norm)) return month === 1 ? wholeMonth(year - 1, 12) : wholeMonth(year, month - 1);
+  if (/\b(?:este|neste|deste|esse|nesse|desse) ano\b/.test(norm)) return wholeYear(year);
+  if (/\b(?:este|neste|deste|esse|nesse|desse) mes\b/.test(norm)) return wholeMonth(year, month);
   return undefined;
 }
 
@@ -141,7 +161,7 @@ export async function planSearchQuery(
     const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
     // The model occasionally forgets the period on an explicit "mês de ano"
     // (non-deterministic), so spelled-out months are also read by rule.
-    const period = parsePeriod(parsed.period) ?? inferMonthPeriod(message, query);
+    const period = parsePeriod(parsed.period) ?? inferMonthPeriod(message, query) ?? inferRelativePeriod(message);
     return {
       searchQuery: query && query.length <= 500 ? query : message,
       keywords,
