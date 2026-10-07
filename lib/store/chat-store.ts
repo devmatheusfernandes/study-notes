@@ -45,6 +45,8 @@ interface ChatStore {
   isLoaded: boolean;
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** What the server is doing right now ("Procurando vídeos…"); shown in the composer until the first word arrives. */
+  streamStatus: string | null;
   activeConversationId: string | null;
 
   setConversations: (conversations: ChatConversation[]) => void;
@@ -57,6 +59,7 @@ interface ChatStore {
   setMessages: (messages: ChatMessage[]) => void;
   addUserMessage: (content: string) => void;
   startAssistantStream: () => void;
+  setStreamStatus: (status: string | null) => void;
   appendDelta: (content: string) => void;
   finishStream: (sources: ChatSource[], sourcesUncertain?: boolean) => void;
   failStream: (errorMessage: string) => void;
@@ -69,6 +72,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   isLoaded: false,
   messages: [],
   isStreaming: false,
+  streamStatus: null,
   activeConversationId: null,
 
   setConversations: (conversations) => set({ conversations, isLoaded: true }),
@@ -131,6 +135,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   startAssistantStream: () =>
     set((s) => ({
       isStreaming: true,
+      streamStatus: "Enviando…",
       messages: [
         ...s.messages,
         {
@@ -144,8 +149,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ],
     })),
 
+  setStreamStatus: (streamStatus) => set({ streamStatus }),
+
   appendDelta: (content) =>
     set((s) => ({
+      streamStatus: null,
       messages: s.messages.map((m, i) =>
         i === s.messages.length - 1 && m.isStreaming
           ? { ...m, content: m.content + content }
@@ -156,6 +164,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   finishStream: (sources, sourcesUncertain) =>
     set((s) => ({
       isStreaming: false,
+      streamStatus: null,
       messages: s.messages.map((m, i) =>
         i === s.messages.length - 1 && m.isStreaming
           ? { ...m, isStreaming: false, sources, sourcesUncertain }
@@ -166,6 +175,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   failStream: (errorMessage) =>
     set((s) => ({
       isStreaming: false,
+      streamStatus: null,
       messages: s.messages.map((m, i) =>
         i === s.messages.length - 1 && m.isStreaming
           ? { ...m, isStreaming: false, content: errorMessage }

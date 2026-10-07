@@ -14,6 +14,7 @@ interface ChatViewProps {
 export function ChatView({ conversationId }: ChatViewProps) {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamStatus = useChatStore((s) => s.streamStatus);
   const addUserMsg = useChatStore((s) => s.addUserMessage);
   const startStream = useChatStore((s) => s.startAssistantStream);
   const appendDelta = useChatStore((s) => s.appendDelta);
@@ -76,6 +77,8 @@ export function ChatView({ conversationId }: ChatViewProps) {
 
               if (event.type === "delta" && event.content) {
                 appendDelta(event.content);
+              } else if (event.type === "status" && event.text) {
+                useChatStore.getState().setStreamStatus(event.text);
               } else if (event.type === "title" && event.title) {
                 useChatStore.getState().updateConversation(conversationId, { title: event.title });
               } else if (event.type === "sources") {
@@ -177,7 +180,8 @@ export function ChatView({ conversationId }: ChatViewProps) {
             variant="chat"
             onSend={sendMessage}
             disabled={isStreaming}
-            placeholder={isStreaming ? "Gerando resposta…" : "Pergunte às suas notas ou vídeos…"}
+            statusText={isStreaming ? (streamStatus ?? "Escrevendo resposta…") : undefined}
+            placeholder="Pergunte às suas notas ou vídeos…"
           />
         </div>
       </div>

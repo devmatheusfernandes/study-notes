@@ -78,6 +78,11 @@ export async function POST(
       try {
         const openai = new OpenAI({ apiKey });
 
+        // Progress labels the composer shows while the answer is prepared.
+        // Wording follows what this request will actually search.
+        const searchesVideos = allowedSourceTypes.includes("video");
+        sendEvent({ type: "status", text: "Entendendo sua pergunta…" });
+
         // 0. Rewrite the message into a standalone search query using the
         // conversation so far ("Procure mais uma vez" -> the topic it refers
         // to; typos fixed). Only retrieval uses it — the answer below still
@@ -96,6 +101,11 @@ export async function POST(
               (plan.promptTokens / 1_000_000) * 0.15 + (plan.completionTokens / 1_000_000) * 0.6,
           });
         }
+
+        sendEvent({
+          type: "status",
+          text: searchesVideos ? "Procurando vídeos e fontes…" : "Procurando nas suas fontes…",
+        });
 
         // 1. Generate query embedding
         const { embedding, tokens: queryTokens, cost: queryCost } =
@@ -221,6 +231,10 @@ export async function POST(
           }
         }
         const sources = Array.from(sourcesMap.values());
+        sendEvent({
+          type: "status",
+          text: sources.length > 0 ? `Analisando ${sources.length} ${sources.length === 1 ? "fonte" : "fontes"}…` : "Preparando a resposta…",
+        });
 
         // 4. Build system prompt — shared with assistant/stream/route.ts so
         // the "nothing found" / "list of named matches" / "answer from

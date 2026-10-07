@@ -76,6 +76,8 @@ interface SmartComposerChatProps extends SmartComposerBaseProps {
   variant: "chat";
   onSend: (message: string, allowedSourceTypes: string[]) => void;
   disabled?: boolean;
+  /** While set, the input row is replaced by this animated, centred status ("Procurando vídeos…"). */
+  statusText?: string;
   placeholder?: string;
 }
 
@@ -83,6 +85,7 @@ interface SmartComposerOtherProps extends SmartComposerBaseProps {
   variant: "notes" | "panel";
   onSend?: never;
   disabled?: never;
+  statusText?: never;
   placeholder?: string;
 }
 
@@ -97,6 +100,7 @@ export function SmartComposer(props: SmartComposerProps) {
     placeholder,
   } = props;
 
+  const statusText = props.variant === "chat" ? props.statusText : undefined;
   const router = useRouter();
   const [value, setValue] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -633,9 +637,60 @@ export function SmartComposer(props: SmartComposerProps) {
       <div
         className={cn(
           "relative z-10 flex items-center gap-3",
-          isPanel ? "px-4 py-2.5" : "px-4 py-3 sm:px-5 sm:py-3.5"
+          isPanel ? "px-4 py-2.5" : "px-4 py-3 sm:px-5 sm:py-3.5",
+          // The controls stay in the layout (so the capsule keeps its height)
+          // but fade out under the status overlay below.
+          statusText && "[&>*:not([data-status])]:pointer-events-none [&>*:not([data-status])]:opacity-0"
         )}
+        aria-busy={statusText ? true : undefined}
       >
+        <AnimatePresence>
+          {statusText && (
+            <motion.div
+              data-status
+              role="status"
+              aria-live="polite"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="absolute inset-0 z-10 flex items-center justify-center gap-2.5 px-6"
+            >
+              <motion.span
+                animate={{ rotate: [0, 18, -12, 0], scale: [1, 1.18, 1] }}
+                transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                className="flex size-5 shrink-0 items-center justify-center text-accent"
+              >
+                <Sparkles className="size-4" />
+              </motion.span>
+              <span className="relative h-5 min-w-0 overflow-hidden">
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={statusText}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.18 }}
+                    className="block truncate font-mono text-[12.5px] leading-5 text-muted-foreground"
+                  >
+                    {statusText}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
+              <span className="flex shrink-0 items-center gap-1" aria-hidden>
+                {[0, 0.2, 0.4].map((delay) => (
+                  <motion.span
+                    key={delay}
+                    animate={{ scale: [1, 1.3, 1], opacity: [0.35, 1, 0.35] }}
+                    transition={{ duration: 0.8, repeat: Infinity, delay, ease: "easeInOut" }}
+                    className="size-1.5 rounded-full bg-accent"
+                  />
+                ))}
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Sparkles / accent dot */}
         {!isPanel ? (
           <button
@@ -684,12 +739,7 @@ export function SmartComposer(props: SmartComposerProps) {
                 handleSubmit();
               }
             }}
-            placeholder={
-              placeholder ??
-              (props.variant === "chat" && props.disabled
-                ? "Gerando resposta…"
-                : "Pergunte aqui…")
-            }
+            placeholder={placeholder ?? "Pergunte aqui…"}
             disabled={props.variant === "chat" ? props.disabled : false}
             rows={1}
             className="min-h-[26px] max-h-44 flex-1 resize-none bg-transparent text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed"

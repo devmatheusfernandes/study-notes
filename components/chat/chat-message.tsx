@@ -156,9 +156,8 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
         <div
           className={cn(
             "flex-1 rounded-[20px_20px_20px_6px] px-4 py-3.5 text-[13.5px] leading-relaxed transition-all",
-            isStreaming && !content
-              ? "border border-accent/30 bg-gradient-to-r from-secondary via-secondary/90 to-accent/10 shadow-[0_0_20px_rgba(246,160,107,0.12)]"
-              : "bg-secondary text-foreground/90"
+            "bg-secondary text-foreground/90",
+            isStreaming && !content && "min-w-[70%]"
           )}
         >
           {content ? (
@@ -167,27 +166,17 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
               dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
             />
           ) : isStreaming ? (
-            <div className="flex items-center gap-2 py-0.5">
-              <div className="flex items-center gap-1.5">
+            // Placeholder lines standing in for the text that's about to be
+            // written — the status itself lives in the composer.
+            <div className="flex flex-col gap-2.5 py-1" aria-hidden>
+              {["w-[92%]", "w-[78%]", "w-[54%]"].map((width, i) => (
                 <motion.span
-                  animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
-                  className="size-2 rounded-full bg-accent"
+                  key={width}
+                  animate={{ opacity: [0.35, 0.8, 0.35] }}
+                  transition={{ duration: 1.4, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+                  className={cn("block h-3 rounded-full bg-foreground/15", width)}
                 />
-                <motion.span
-                  animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 0.8, repeat: Infinity, delay: 0.2, ease: "easeInOut" }}
-                  className="size-2 rounded-full bg-accent"
-                />
-                <motion.span
-                  animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 0.8, repeat: Infinity, delay: 0.4, ease: "easeInOut" }}
-                  className="size-2 rounded-full bg-accent"
-                />
-              </div>
-              <span className="font-mono text-xs text-muted-foreground animate-pulse ml-1">
-                Analisando fontes e gerando resposta…
-              </span>
+              ))}
             </div>
           ) : null}
           {isStreaming && content && (
