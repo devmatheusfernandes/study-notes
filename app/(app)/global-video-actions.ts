@@ -5,6 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { crawlCategory } from "@/lib/video/video-crawler";
 import { formatVttToText } from "@/lib/video/video-utils";
 import { buildVideoScriptureRows } from "@/lib/bible/video-scripture-refs";
+import { splitTextIntoChunks } from "@/lib/vector/chunker";
+import { generateEmbeddings } from "@/lib/vector/openai";
 
 export interface GlobalVideoStats {
   totalVideos: number;
@@ -21,14 +23,14 @@ export async function getGlobalVideoStats(): Promise<GlobalVideoStats> {
     .from("global_videos")
     .select("*", { count: "exact", head: true });
 
-  const { count: pendingCount } = await supabase
-    .from("vectorization_queue")
-    .select("*", { count: "exact", head: true })
-    .eq("note_type", "video")
-    .neq("status", "completed");
+  // Videos are embedded inline (syncGlobalJwVideos / scripts/seed-all-videos.mjs),
+  // not through vectorization_queue, so "pending" is whatever has a transcript
+  // but no embedding chunks yet.
+  const { data: pendingData } = await supabase.rpc("count_unvectorized_videos");
+  const pendingCount = Number(pendingData ?? 0);
 
   const total = totalVideos ?? 0;
-  const pending = pendingCount ?? 0;
+  const pending = pendingCount;
   const vectorized = Math.max(0, total - pending);
 
   return {
@@ -84,6 +86,7 @@ export async function syncGlobalJwVideos(): Promise<{
 
     // 4. Batch fetch VTT subtitles and save to global_videos
     let addedCount = 0;
+    let failedCount = 0;
     const batchSize = 10;
 
     for (let i = 0; i < newVideos.length; i += batchSize) {
@@ -110,10 +113,13 @@ export async function syncGlobalJwVideos(): Promise<{
             title: v.title,
             category_key: v.categoryKey,
             duration_formatted: v.durationFormatted,
-            duration_seconds: v.durationSeconds,
+            // The column is INTEGER but the API reports fractional seconds
+            // (873.706167) — an unrounded value makes Postgres reject the row.
+            duration_seconds: Math.round(v.durationSeconds || 0),
             cover_image: v.coverImage,
             video_url: v.videoUrl,
             subtitles_url: v.subtitlesUrl,
+            first_published: v.firstPublished ?? null,
             content_text: contentText,
             metadata: {
               jwVideoId: v.id,
@@ -123,7 +129,10 @@ export async function syncGlobalJwVideos(): Promise<{
             },
           });
 
-          if (!insertErr) {
+          if (insertErr) {
+            console.error(`Erro ao inserir vídeo ${v.id}:`, insertErr.message);
+            failedCount++;
+          } else {
             addedCount++;
 
             // Link the video to whatever Bible chapters its title and
@@ -145,16 +154,37 @@ export async function syncGlobalJwVideos(): Promise<{
                 .eq("id", v.id);
             }
 
-            // Queue for global vectorization
-            await admin.from("vectorization_queue").insert({
-              note_id: null,
-              user_id: user.id,
-              status: "pending",
-              attempts: 0,
-              error_message: null,
-              note_type: "video",
-              video_id: v.id,
-            });
+            // Embed right away so the video is searchable in the chat. A
+            // failure only leaves it counted as "pendente" (and the seed
+            // script picks it up) — the video row itself is already saved.
+            if (contentText) {
+              try {
+                const chunks = splitTextIntoChunks(`Vídeo: ${v.title}
+
+${contentText}`, 350);
+                const { embeddings } = await generateEmbeddings(chunks.map((c) => c.content));
+                const { error: embErr } = await admin.from("global_video_embeddings").insert(
+                  chunks.map((chunk, idx) => ({
+                    video_id: v.id,
+                    chunk_index: chunk.index,
+                    content: chunk.content,
+                    embedding: `[${embeddings[idx].join(",")}]`,
+                    metadata: {
+                      title: v.title,
+                      type: "video",
+                      videoId: v.id,
+                      videoUrl: v.videoUrl,
+                      coverImage: v.coverImage,
+                      durationFormatted: v.durationFormatted,
+                      subtitlesUrl: v.subtitlesUrl,
+                    },
+                  }))
+                );
+                if (embErr) throw new Error(embErr.message);
+              } catch (err) {
+                console.error(`Erro ao vetorizar vídeo ${v.id}:`, err);
+              }
+            }
           }
         })
       );
@@ -163,7 +193,9 @@ export async function syncGlobalJwVideos(): Promise<{
     return {
       ok: true,
       addedCount,
-      message: `${addedCount} novos vídeos foram importados e enfileirados para vetorização com sucesso!`,
+      message:
+        `${addedCount} novos vídeos foram importados e vetorizados.` +
+        (failedCount ? ` ${failedCount} falharam ao salvar (veja o log do servidor).` : ""),
     };
   } catch (err) {
     console.error("Erro ao sincronizar vídeos do JW.org:", err);

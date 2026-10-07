@@ -13,6 +13,7 @@ interface JWMediaApiItem {
   title?: string;
   primaryCategory?: string;
   duration?: number;
+  firstPublished?: string;
   durationFormattedMinSec?: string;
   images?: {
     wss?: { lg?: string };
@@ -91,6 +92,7 @@ export async function crawlCategory(
       coverImage,
       videoUrl,
       subtitlesUrl,
+      firstPublished: video.firstPublished ?? null,
     });
   }
 

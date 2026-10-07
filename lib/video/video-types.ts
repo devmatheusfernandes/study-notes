@@ -28,4 +28,5 @@ export interface VideoCrawlerItem {
   coverImage?: string;
   videoUrl?: string;
   subtitlesUrl?: string;
+  firstPublished?: string | null;
 }
