@@ -135,7 +135,7 @@
   background-image: linear-gradient(var(--hl), var(--hl));
   background-repeat: no-repeat;
   background-size: 0% 100%;
-  animation: highlight-draw 600ms ease-out forwards;
+  animation: highlight-draw 600ms ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {
