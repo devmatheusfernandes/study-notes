@@ -111,6 +111,31 @@
   }
 }
 
+/* A highlighter pen drawing across the text — used when a chapter's
+   highlights first appear (bible-chapter-view.tsx). The mark's colour comes
+   from --hl; the fill is a background-image so its width can be animated. */
+@keyframes highlight-draw {
+  from {
+    background-size: 0% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+
+.jwlibrary-highlight-draw {
+  background-image: linear-gradient(var(--hl), var(--hl));
+  background-repeat: no-repeat;
+  background-size: 0% 100%;
+  animation: highlight-draw 600ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jwlibrary-highlight-draw {
+    animation-duration: 1ms;
+  }
+}
+
 /* Horizontal drift for the wave-line texture riding on top of the upload
    progress fill (see UploadWaveProgress in note-card.tsx, whose actual
    height is driven inline by the simulated progress value, not by this). */

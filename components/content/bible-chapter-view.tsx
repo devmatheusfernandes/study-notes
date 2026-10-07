@@ -110,6 +110,8 @@ export function BibleChapterView({
   onOpenStudy,
 }: BibleChapterViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const hadHighlightsRef = useRef(false);
+  const animateRef = useRef(false);
 
   // Highlight-note click listener, plus: tapping a verse (no drag) just
   // reports which verse was tapped (for the references panel) — it does
@@ -274,6 +276,12 @@ export function BibleChapterView({
     if (!container) return;
     // Always unwrap first — see jwpub-chapter-view.tsx's identical effect for why.
     unwrapHighlightMarks(container);
+    // Animate only the pass that follows an empty one (a chapter change clears
+    // the list first), so later edits don't replay it.
+    const animate = !hadHighlightsRef.current && highlights.length > 0;
+    hadHighlightsRef.current = highlights.length > 0;
+    animateRef.current = animate;
+    let drawIndex = 0;
     if (highlights.length === 0) return;
 
     for (const highlight of highlights) {
@@ -308,6 +316,17 @@ export function BibleChapterView({
       // Stamped so a note-less highlight's click handler can show the
       // highlighted text itself — see JwlibraryHighlightNotePanel's highlightText prop.
       if (mark) mark.dataset.jwlibraryText = mark.textContent ?? "";
+
+      // Draw the highlight in like a pen, but only when the chapter's
+      // highlights first arrive — not when one is added/recolored later,
+      // which redraws every mark through this same effect.
+      if (mark && animateRef.current) {
+        mark.style.setProperty("--hl", colorHex);
+        mark.style.backgroundColor = "transparent";
+        mark.style.animationDelay = `${drawIndex * 120}ms`;
+        mark.classList.add("jwlibrary-highlight-draw");
+        drawIndex++;
+      }
 
       if (highlight.note && mark) {
         el.style.position = "relative";

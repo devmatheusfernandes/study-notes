@@ -406,6 +406,10 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   useEffect(() => {
     if (screen !== "reading") return;
     let cancelled = false;
+    // Drop the previous chapter's highlights right away — they're keyed by
+    // verse number, so they'd otherwise paint onto this chapter's verses
+    // until the fetch below resolves.
+    setHighlights([]);
     void getBibleChapterHighlights(bookOrder, chapter).then((result) => {
       if (!cancelled) setHighlights(result.highlights ?? []);
     });
