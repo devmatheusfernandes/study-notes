@@ -207,3 +207,10 @@ input[type="search"]::-webkit-search-decoration {
 .note-reference:hover {
   background: color-mix(in oklab, var(--primary) 26%, transparent);
 }
+
+/* The citation a personal note was opened at (note-mention-panel.tsx), painted
+   with the CSS Custom Highlight API so the note's own markup stays untouched. */
+::highlight(note-citation) {
+  background-color: color-mix(in oklab, var(--primary) 55%, transparent);
+  color: var(--foreground);
+}

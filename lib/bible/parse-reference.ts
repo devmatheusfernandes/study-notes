@@ -494,6 +494,62 @@ function snippetAround(text: string, start: number, end: number): string {
     .trim();
 }
 
+export interface NoteReferenceOccurrence {
+  bookOrder: number;
+  chapter: number;
+  startVerse: number | null;
+  endVerse: number | null;
+  /** Character range of the citation in the text that was scanned. */
+  charStart: number;
+  charEnd: number;
+}
+
+/**
+ * Every place a note cites a scripture, in reading order and with its exact
+ * character range — not deduplicated, so a caller can find the specific
+ * occurrence it wants (the Bible reader scrolls a note to the citation).
+ */
+export function findBibleReferenceOccurrences(text: string): NoteReferenceOccurrence[] {
+  const found: NoteReferenceOccurrence[] = [];
+
+  for (const match of text.matchAll(TITLE_REFERENCE_PATTERN)) {
+    const bookOrder = bookOrderFromName(`${match[1] ?? ""}${match[2]}`);
+    if (bookOrder === null) continue;
+
+    const chapter = Number(match[3]);
+    if (chapter < 1 || chapter > BIBLE_BOOK_CHAPTER_COUNTS[bookOrder]) continue;
+
+    const startVerse = Number(match[4]);
+    const endVerse = match[5] ? Number(match[5]) : null;
+    const charStart = match.index ?? 0;
+    found.push({
+      bookOrder,
+      chapter,
+      startVerse,
+      endVerse: endVerse !== null && endVerse > startVerse ? endVerse : null,
+      charStart,
+      charEnd: charStart + match[0].length,
+    });
+  }
+
+  // The full-name scan finds the same "Mateus 5:3" the pass above already
+  // did, minus the range — keep only what lies outside an existing match.
+  const taken = [...found];
+  for (const ref of scanBibleReferences(text)) {
+    if (taken.some((t) => ref.charStart < t.charEnd && ref.charEnd > t.charStart)) continue;
+    found.push({
+      bookOrder: ref.bookOrder,
+      chapter: ref.chapter,
+      startVerse: ref.startVerse,
+      endVerse: null,
+      charStart: ref.charStart,
+      charEnd: ref.charEnd,
+    });
+  }
+
+  return found.sort((x, y) => x.charStart - y.charStart);
+}
+
 /**
  * Every scripture a personal note cites, with an excerpt around each.
  *
@@ -509,39 +565,16 @@ export function findBibleReferencesInNote(text: string): NoteBibleReference[] {
   const found: NoteBibleReference[] = [];
   const seen = new Set<string>();
 
-  function push(ref: NoteBibleReference) {
+  for (const ref of findBibleReferenceOccurrences(text)) {
     const key = `${ref.bookOrder}:${ref.chapter}:${ref.startVerse ?? ""}`;
-    if (seen.has(key)) return;
+    if (seen.has(key)) continue;
     seen.add(key);
-    found.push(ref);
-  }
-
-  for (const match of text.matchAll(TITLE_REFERENCE_PATTERN)) {
-    const bookOrder = bookOrderFromName(`${match[1] ?? ""}${match[2]}`);
-    if (bookOrder === null) continue;
-
-    const chapter = Number(match[3]);
-    if (chapter < 1 || chapter > BIBLE_BOOK_CHAPTER_COUNTS[bookOrder]) continue;
-
-    const startVerse = Number(match[4]);
-    const endVerse = match[5] ? Number(match[5]) : null;
-    const from = match.index ?? 0;
-    push({
-      bookOrder,
-      chapter,
-      startVerse,
-      endVerse: endVerse !== null && endVerse > startVerse ? endVerse : null,
-      snippet: snippetAround(text, from, from + match[0].length),
-    });
-  }
-
-  for (const ref of findAllBibleReferenceSnippets(text)) {
-    push({
+    found.push({
       bookOrder: ref.bookOrder,
       chapter: ref.chapter,
       startVerse: ref.startVerse,
-      endVerse: null,
-      snippet: ref.snippet,
+      endVerse: ref.endVerse,
+      snippet: snippetAround(text, ref.charStart, ref.charEnd),
     });
   }
 

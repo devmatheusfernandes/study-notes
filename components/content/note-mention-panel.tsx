@@ -1,13 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DOMPurify from "dompurify";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNotesStore } from "@/lib/store/notes-store";
 import type { NoteScriptureMention } from "@/app/(app)/note-scripture-actions";
+import { findCitationRange } from "@/lib/note-citation-range";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+
+/** Name of the CSS Custom Highlight registered for the citation — styled in globals.css as `::highlight(note-citation)`. */
+const CITATION_HIGHLIGHT = "note-citation";
 
 interface NoteMentionPanelProps {
   mention: NoteScriptureMention | null;
@@ -38,6 +42,30 @@ export function NoteMentionPanel({ mention, onClose }: NoteMentionPanelProps) {
   const body = note?.body;
   const html = useMemo(() => (body ? DOMPurify.sanitize(body, { USE_PROFILES: { html: true } }) : ""), [body]);
 
+  // Scroll to the citation that brought the user here and mark it. The CSS
+  // Custom Highlight API paints a Range without touching the note's DOM (no
+  // wrapper element to split across bold/links); where it isn't supported the
+  // note still scrolls there. The delay lets the panel's width animation finish
+  // first, since scrolling while it's still opening lands in the wrong place.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!mention || !html) return;
+    const timer = window.setTimeout(() => {
+      const root = bodyRef.current;
+      if (!root) return;
+      const range = findCitationRange(root, mention);
+      if (!range) return;
+      if (typeof CSS !== "undefined" && "highlights" in CSS) {
+        CSS.highlights.set(CITATION_HIGHLIGHT, new Highlight(range));
+      }
+      range.startContainer.parentElement?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 380);
+    return () => {
+      window.clearTimeout(timer);
+      if (typeof CSS !== "undefined" && "highlights" in CSS) CSS.highlights.delete(CITATION_HIGHLIGHT);
+    };
+  }, [mention, html]);
+
   return (
     <JwpubSidePanel open={mention !== null} title="Nota" onClose={onClose} width={420}>
       {note ? (
@@ -45,6 +73,7 @@ export function NoteMentionPanel({ mention, onClose }: NoteMentionPanelProps) {
           <h2 className="font-heading text-lg leading-snug">{note.title || "Sem título"}</h2>
           {html ? (
             <div
+              ref={bodyRef}
               className="text-[14px] leading-relaxed text-foreground/90 [&_img]:max-w-full [&_img]:rounded-xl [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
               dangerouslySetInnerHTML={{ __html: html }}
             />

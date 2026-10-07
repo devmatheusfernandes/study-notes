@@ -10,6 +10,8 @@ const BACKFILL_BATCH_SIZE = 40;
 /** One place a personal note cites the chapter being read. */
 export interface NoteScriptureMention {
   noteId: string;
+  bookOrder: number;
+  chapter: number;
   title: string;
   verse: number | null;
   endVerse: number | null;
@@ -53,6 +55,8 @@ export async function getNoteScriptureMentions(
     const note = Array.isArray(row.notes) ? row.notes[0] : row.notes;
     return {
       noteId: row.note_id,
+      bookOrder,
+      chapter,
       title: decryptText(note.title) ?? "",
       verse: row.verse,
       endVerse: row.end_verse,
