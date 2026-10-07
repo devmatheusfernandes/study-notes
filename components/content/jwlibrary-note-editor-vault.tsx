@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Loader2, Plus, Search, Trash2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ConfirmVault } from "@/components/ui/confirm-vault";
-import { Vault, VaultContent, VaultHeader, VaultTitle, VaultDescription, VaultBody } from "@/components/ui/vault";
+import { Vault, VaultContent, VaultDescription } from "@/components/ui/vault";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/content/rich-text-editor";
 import { BibleReferencePicker, type BibleReferenceValue } from "./bible-reference-picker";
@@ -16,7 +14,6 @@ import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import {
   createJwlibraryNote,
   updateJwlibraryNote,
-  deleteJwlibraryNote,
   updateJwlibraryHighlightColor,
   listOwnPublications,
   listOwnJwlibraryTags,
@@ -71,29 +68,6 @@ interface JwlibraryNoteEditorVaultProps {
 }
 
 type LocationMode = "publication" | "bible";
-type SaveState = "idle" | "saving" | "saved" | "error";
-
-function SaveIndicator({ state }: { state: SaveState }) {
-  if (state === "saving") {
-    return (
-      <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-        <Loader2 className="size-3 animate-spin" /> salvando…
-      </span>
-    );
-  }
-  if (state === "saved") {
-    return (
-      <span className="flex items-center gap-1.5 text-[11.5px] text-success">
-        <Check className="size-3" /> salvo
-      </span>
-    );
-  }
-  if (state === "error") {
-    return <span className="text-[11.5px] text-destructive">falha ao salvar</span>;
-  }
-  return null;
-}
-
 const EMPTY_BIBLE_REF: BibleReferenceValue = { bookOrder: null, chapter: null, verse: null };
 
 export function JwlibraryNoteEditorVault({
@@ -119,8 +93,6 @@ export function JwlibraryNoteEditorVault({
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [createdId, setCreatedId] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const [mode, setMode] = useState<LocationMode>("publication");
   const [publications, setPublications] = useState<OwnPublication[]>([]);
@@ -147,7 +119,6 @@ export function JwlibraryNoteEditorVault({
       setTitle(note?.title ?? "");
       setContent(note?.content ?? "");
       setCreatedId(note?.id ?? null);
-      setSaveState("idle");
       setMode("publication");
       setPublicationId("");
       setBibleRef(EMPTY_BIBLE_REF);
@@ -309,10 +280,8 @@ export function JwlibraryNoteEditorVault({
   const pendingSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function performSave() {
-    setSaveState("saving");
     if (createdId) {
       const result = await updateJwlibraryNote(createdId, { title, content });
-      setSaveState(result.error ? "error" : "saved");
       if (!result.error) onSaved();
     } else {
       const input = buildCreateInput();
@@ -320,10 +289,7 @@ export function JwlibraryNoteEditorVault({
       const result = await createJwlibraryNote(input);
       if (result.id) {
         setCreatedId(result.id);
-        setSaveState("saved");
         onSaved();
-      } else {
-        setSaveState("error");
       }
     }
   }
@@ -363,14 +329,6 @@ export function JwlibraryNoteEditorVault({
     onOpenChange(next);
   }
 
-  async function handleDelete() {
-    if (!note) return;
-    await deleteJwlibraryNote(note.id);
-    setConfirmDeleteOpen(false);
-    onOpenChange(false);
-    onSaved();
-  }
-
   // When a UserMark already exists (editing a note that has one, or
   // attaching a new note to a highlight created standalone), a color pick
   // recolors it right away instead of waiting on note creation — there's no
@@ -400,12 +358,30 @@ export function JwlibraryNoteEditorVault({
   return (
     <>
       <Vault open={open} onOpenChange={handleOpenChange}>
-        <VaultContent aria-label={isEdit ? "Editar nota" : "Nova nota"}>
-          <VaultHeader showCloseButton={false}>
-            <VaultTitle>{isEdit ? "Editar nota" : "Nova nota"}</VaultTitle>
-            {isPrefilled && <VaultDescription>{prefilledLocation.label}</VaultDescription>}
-          </VaultHeader>
-          <VaultBody>
+        {/* noPadding: the padding is applied per section below instead of by
+            VaultContent's own wrapper. The header and footer are `sticky`, and
+            a sticky element sticks to its containing block's *padding* edge —
+            with the wrapper's own top/bottom padding, scrolled text would
+            show through the strips above and below them. */}
+        <VaultContent aria-label={isEdit ? "Editar nota" : "Nova nota"} noPadding>
+          {/* The title IS the heading — "Nova nota"/"Editar nota" told the user
+              nothing the surface didn't already say. VaultContent still carries
+              the accessible name for screen readers. */}
+          <div className="sticky top-0 z-10 bg-background px-6 pb-1 pt-2">
+            <Input
+              variant="underline"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Título"
+              aria-label="Título da nota"
+              className="font-heading text-lg"
+            />
+            {isPrefilled && (
+              <VaultDescription className="pt-1.5 text-left">{prefilledLocation.label}</VaultDescription>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2.5 px-6 pb-4 pt-2">
             {isPrefilled && prefilledLocation.tokenRange && prefilledLocation.selectedText && (
               <blockquote className="line-clamp-3 rounded-xl border-l-2 border-accent/50 bg-secondary/50 px-3 py-2 text-[13px] italic leading-relaxed text-muted-foreground">
                 “{prefilledLocation.selectedText}”
@@ -452,121 +428,87 @@ export function JwlibraryNoteEditorVault({
             )}
 
             {locationReady ? (
-              <div className={cn("flex flex-col gap-2.5", !isEdit && !isPrefilled && "mt-3")}>
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Título"
-                    aria-label="Título da nota"
-                    className="flex-1"
-                  />
-                  {showColorPicker && (
-                    <Select
-                      value={highlightColor !== null ? String(highlightColor) : "none"}
-                      onValueChange={(v) => void handleColorSelect(v === "none" ? null : Number(v))}
-                    >
-                      <SelectTrigger className="w-36 shrink-0" aria-label="Cor do destaque">
-                        <SelectValue placeholder="Destacar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {!activeUserMarkId && <SelectItem value="none">Sem destaque</SelectItem>}
-                        {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
-                          <SelectItem key={index} value={index}>
-                            <span className="flex items-center gap-2">
-                              <span
-                                className="size-3 shrink-0 rounded-full"
-                                style={{ backgroundColor: color.hex }}
-                              />
-                              {color.name}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-                <RichTextEditor content={content} onChange={setContent} placeholder="Escreva sua nota…" />
-
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[11.5px] text-muted-foreground">Tags</span>
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-28 shrink-0">
-                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        value={tagQuery}
-                        onChange={(e) => setTagQuery(e.target.value)}
-                        placeholder="Buscar"
-                        className="h-8 pl-8 pr-2 text-[12px]"
-                      />
-                    </div>
-                    <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                      {tagsLoading ? (
-                        <>
-                          <Skeleton className="h-8 w-16 shrink-0 rounded-full" />
-                          <Skeleton className="h-8 w-20 shrink-0 rounded-full" />
-                          <Skeleton className="h-8 w-14 shrink-0 rounded-full" />
-                        </>
-                      ) : (
-                        <>
-                          {filteredTags.map((tag) => (
-                            <span key={tag.id} className="shrink-0">
-                              <JwlibraryTagChip
-                                tag={tag}
-                                active={noteTagIds.includes(tag.id)}
-                                onClick={() => toggleNoteTag(tag.id)}
-                              />
-                            </span>
-                          ))}
-                          {tagQuery.trim() !== "" && filteredTags.length === 0 && (
-                            <button
-                              type="button"
-                              onClick={() => void handleCreateAndAssignTag()}
-                              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-accent/50 px-2.5 text-[12px] text-accent transition-colors hover:bg-accent/10"
-                            >
-                              <Plus className="size-3" />
-                              Criar &quot;{tagQuery.trim()}&quot;
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <SaveIndicator state={saveState} />
-                  {isEdit && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteOpen(true)}
-                      className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] text-destructive transition-colors hover:bg-destructive/10"
-                    >
-                      <Trash2 className="size-3.5" />
-                      Excluir
-                    </button>
-                  )}
-                </div>
-              </div>
+              <RichTextEditor content={content} onChange={setContent} placeholder="Escreva sua nota…" />
             ) : (
               <p className="py-6 text-center text-[13px] text-muted-foreground">
                 Escolha onde essa nota se conecta pra continuar.
               </p>
             )}
-          </VaultBody>
+          </div>
+
+          {/* Colour and tags stay pinned to the bottom of the sheet while the
+              note scrolls above them — they used to sit after the editor, so
+              reaching them meant scrolling the title out of view. */}
+          {locationReady && (
+            <div className="sticky bottom-0 z-10 flex flex-col gap-2 border-t border-border bg-background px-6 pb-6 pt-3">
+              <div className="flex items-center gap-2">
+                {showColorPicker && (
+                  <Select
+                    value={highlightColor !== null ? String(highlightColor) : "none"}
+                    onValueChange={(v) => void handleColorSelect(v === "none" ? null : Number(v))}
+                  >
+                    <SelectTrigger className="w-36 shrink-0" aria-label="Cor do destaque">
+                      <SelectValue placeholder="Destacar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {!activeUserMarkId && <SelectItem value="none">Sem destaque</SelectItem>}
+                      {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
+                        <SelectItem key={index} value={index}>
+                          <span className="flex items-center gap-2">
+                            <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: color.hex }} />
+                            {color.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.target.value)}
+                    placeholder="Buscar tag"
+                    aria-label="Buscar tag"
+                    className="h-8 pl-8 pr-2 text-[12px]"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {tagsLoading ? (
+                  <>
+                    <Skeleton className="h-8 w-16 shrink-0 rounded-full" />
+                    <Skeleton className="h-8 w-20 shrink-0 rounded-full" />
+                    <Skeleton className="h-8 w-14 shrink-0 rounded-full" />
+                  </>
+                ) : (
+                  <>
+                    {filteredTags.map((tag) => (
+                      <span key={tag.id} className="shrink-0">
+                        <JwlibraryTagChip
+                          tag={tag}
+                          active={noteTagIds.includes(tag.id)}
+                          onClick={() => toggleNoteTag(tag.id)}
+                        />
+                      </span>
+                    ))}
+                    {tagQuery.trim() !== "" && filteredTags.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateAndAssignTag()}
+                        className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-dashed border-accent/50 px-2.5 text-[12px] text-accent transition-colors hover:bg-accent/10"
+                      >
+                        <Plus className="size-3" />
+                        Criar &quot;{tagQuery.trim()}&quot;
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </VaultContent>
       </Vault>
-
-      {isEdit && (
-        <ConfirmVault
-          open={confirmDeleteOpen}
-          onOpenChange={setConfirmDeleteOpen}
-          title="Excluir nota?"
-          description="Essa ação não pode ser desfeita."
-          confirmLabel="Excluir"
-          onConfirm={handleDelete}
-        />
-      )}
     </>
   );
 }
