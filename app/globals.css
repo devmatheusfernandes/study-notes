@@ -115,10 +115,18 @@
    highlights first appear (bible-chapter-view.tsx). The mark's colour comes
    from --hl; the fill is a background-image so its width can be animated. */
 @keyframes highlight-draw {
-  from {
+  /* The mark's own text colour is dark (for the pastel fill), which would
+     make the line vanish against the dark page until the fill arrives. So it
+     keeps the normal text colour while the fill sweeps and only darkens at
+     the end — the unspecified 100% colour is the mark's inline dark one. */
+  0% {
     background-size: 0% 100%;
+    color: var(--foreground);
   }
-  to {
+  50% {
+    color: var(--foreground);
+  }
+  100% {
     background-size: 100% 100%;
   }
 }

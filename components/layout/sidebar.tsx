@@ -27,25 +27,35 @@ export function Sidebar() {
     );
   }
 
+  const width = desktopCollapsed ? "w-[76px]" : "w-[232px]";
+
   return (
-    <aside
-      // No visible collapse/expand button anymore — the sidebar itself is
-      // the toggle target instead. `e.target === e.currentTarget` only fires
-      // for clicks that land on the aside's own empty space (the gaps
-      // between nav items, the header padding, the bottom spacer), not on
-      // any nav link/button inside SidebarContent, so this never hijacks a
-      // normal navigation click.
-      onClick={(e) => {
-        if (e.target === e.currentTarget) toggleDesktop();
-      }}
-      aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
-      title={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
-      className={cn(
-        "sticky top-0 hidden h-dvh shrink-0 cursor-pointer flex-col overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-r border-border bg-[#161413] pb-5 pt-5 transition-[width] duration-200 md:flex",
-        desktopCollapsed ? "w-[76px] px-3" : "w-[232px] px-4"
-      )}
-    >
-      <SidebarContent collapsed={desktopCollapsed} onToggleCollapse={toggleDesktop} />
-    </aside>
+    <>
+      {/* The sidebar is `fixed` to the viewport, not `sticky`: sticky depends on
+          every ancestor's overflow and on the page's own scroll, and on the
+          Bible screen it scrolled away with the content. This spacer holds the
+          sidebar's column in the flex row so the content keeps its offset. */}
+      <div aria-hidden className={cn("hidden shrink-0 transition-[width] duration-200 md:block", width)} />
+      <aside
+        // No visible collapse/expand button anymore — the sidebar itself is
+        // the toggle target instead. `e.target === e.currentTarget` only fires
+        // for clicks that land on the aside's own empty space (the gaps
+        // between nav items, the header padding, the bottom spacer), not on
+        // any nav link/button inside SidebarContent, so this never hijacks a
+        // normal navigation click.
+        onClick={(e) => {
+          if (e.target === e.currentTarget) toggleDesktop();
+        }}
+        aria-label={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
+        title={desktopCollapsed ? "Expandir menu" : "Recolher menu"}
+        className={cn(
+          "fixed inset-y-0 left-0 z-30 hidden cursor-pointer flex-col overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-r border-border bg-[#161413] pb-5 pt-5 transition-[width] duration-200 md:flex",
+          width,
+          desktopCollapsed ? "px-3" : "px-4"
+        )}
+      >
+        <SidebarContent collapsed={desktopCollapsed} onToggleCollapse={toggleDesktop} />
+      </aside>
+    </>
   );
 }
