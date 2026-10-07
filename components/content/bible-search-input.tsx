@@ -61,7 +61,7 @@ export function BibleSearchInput({ value, onChange, onSubmit, onClear }: BibleSe
   return (
     <>
       {/* Inline field, sm and up. */}
-      <form onSubmit={handleSubmit} role="search" className="relative hidden min-w-0 sm:block sm:w-56 lg:w-72">
+      <form onSubmit={handleSubmit} role="search" className="relative hidden min-w-0 @2xl:block @2xl:w-56 @4xl:w-72">
         <button
           type="submit"
           aria-label="Pesquisar"
@@ -97,7 +97,7 @@ export function BibleSearchInput({ value, onChange, onSubmit, onClear }: BibleSe
         onClick={() => setMobileOpen(true)}
         aria-label="Buscar"
         className={cn(
-          "shrink-0 rounded-full p-2 transition-colors sm:hidden",
+          "shrink-0 rounded-full p-2 transition-colors @2xl:hidden",
           value.length > 0
             ? "bg-primary/[0.18] text-accent"
             : "text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -115,7 +115,7 @@ export function BibleSearchInput({ value, onChange, onSubmit, onClear }: BibleSe
             transition={{ duration: 0.15 }}
             // Covers the header's own contents instead of displacing them, so
             // nothing behind it reflows while the field is open.
-            className="absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-10 flex items-center gap-2 bg-background px-4 sm:hidden"
+            className="absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-10 flex items-center gap-2 bg-background px-4 @2xl:hidden"
           >
             <form onSubmit={handleSubmit} role="search" className="relative min-w-0 flex-1">
               <button
