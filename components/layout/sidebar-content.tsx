@@ -141,7 +141,7 @@ export function SidebarContent({ collapsed = false, onNavigate, onToggleCollapse
             <span className="px-1 font-mono text-[9.5px] font-medium tracking-[0.09em] text-muted-foreground">
               CONVERSAS RECENTES
             </span>
-            <ChatList compact maxItems={3} />
+            <ChatList compact maxItems={3} onNavigate={onNavigate} />
           </div>
         )}
 

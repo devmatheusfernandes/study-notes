@@ -40,6 +40,8 @@ interface ChatListProps {
   compact?: boolean;
   /** Maximum items to show in compact mode */
   maxItems?: number;
+  /** Called when a conversation link is followed — lets the mobile sidebar drawer close itself. */
+  onNavigate?: () => void;
 }
 
 /**
@@ -52,12 +54,14 @@ interface ChatListProps {
 function ConversationItem({
   conv,
   compact,
+  onNavigate,
   onArchive,
   onRestore,
   onRequestDelete,
 }: {
   conv: ChatConversation;
   compact: boolean;
+  onNavigate?: () => void;
   onArchive: (conv: ChatConversation) => void;
   onRestore: (conv: ChatConversation) => void;
   onRequestDelete: (id: string) => void;
@@ -76,7 +80,7 @@ function ConversationItem({
           compact ? "hover:bg-secondary" : "bg-secondary hover:bg-surface"
         )}
       >
-        <Link href={`/chats/${conv.id}`} className="flex min-w-0 flex-1 items-center gap-2.5">
+        <Link href={`/chats/${conv.id}`} onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
             <MessageSquare className="size-3.5" />
           </span>
@@ -131,7 +135,7 @@ function ConversationItem({
   );
 }
 
-export function ChatList({ compact = false, maxItems }: ChatListProps) {
+export function ChatList({ compact = false, maxItems, onNavigate }: ChatListProps) {
   const conversations = useChatStore((s) => s.conversations);
   const isLoaded = useChatStore((s) => s.isLoaded);
   const removeConversation = useChatStore((s) => s.removeConversation);
@@ -197,6 +201,7 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
       <div className="flex flex-col gap-0.5">
         {displayItems.map((conv) => (
           <ConversationItem
+            onNavigate={onNavigate}
             key={conv.id}
             conv={conv}
             compact={compact}
@@ -232,6 +237,7 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
       <AnimatePresence mode="popLayout">
         {displayItems.map((conv) => (
           <ConversationItem
+            onNavigate={onNavigate}
             key={conv.id}
             conv={conv}
             compact={compact}
@@ -250,6 +256,7 @@ export function ChatList({ compact = false, maxItems }: ChatListProps) {
           <AnimatePresence mode="popLayout">
             {archivedConversations.map((conv) => (
               <ConversationItem
+            onNavigate={onNavigate}
             key={conv.id}
             conv={conv}
             compact={compact}
