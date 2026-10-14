@@ -151,12 +151,19 @@ export async function planSearchQuery(
     );
 
     const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown; keywords?: unknown; period?: unknown };
+    // Split every keyword into plain letter/digit words: the model sometimes
+    // returns "sal. 119:2," or "(sal.", and those commas/parentheses end up
+    // inside a PostgREST `.or()` filter, where they are syntax -- the whole
+    // query errored and the video was silently "not found".
     const keywords = Array.isArray(parsed.keywords)
-      ? parsed.keywords
-          .filter((k): k is string => typeof k === "string")
-          .map((k) => k.trim().toLowerCase())
-          .filter((k) => k.length >= 2 && !/^\d+$/.test(k))
-          .slice(0, 5)
+      ? [
+          ...new Set(
+            parsed.keywords
+              .filter((k): k is string => typeof k === "string")
+              .flatMap((k) => k.toLowerCase().split(/[^\p{L}\p{N}]+/u))
+              .filter((k) => k.length >= 2 && !/^\d+$/.test(k))
+          ),
+        ].slice(0, 6)
       : undefined;
     const query = typeof parsed.query === "string" ? parsed.query.trim() : "";
     // The model occasionally forgets the period on an explicit "mês de ano"

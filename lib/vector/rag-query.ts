@@ -892,18 +892,43 @@ export async function fetchExactMetadataMatches(
     // filter — multiple top-level filters are ANDed by default) — this is
     // effectively "search titles and search transcripts", combined, rather
     // than two separate passes the caller would have to reconcile itself.
+    // The word is reduced to letters/digits and double-quoted: a comma or
+    // parenthesis inside an unquoted `.or()` value is PostgREST syntax and
+    // made the whole request fail (returning no rows, silently).
+    const likePattern = (word: string) => `"%${word.replace(/[^\p{L}\p{N}]+/gu, "")}%"`;
     function withWordFilter<T extends { or: (s: string) => T }>(q: T, word: string): T {
-      const pattern = `%${escapeLikePattern(word)}%`;
+      const pattern = likePattern(word);
       return q.or(`title.ilike.${pattern},content_text.ilike.${pattern}`);
+    }
+    function withTitleWordFilter<T extends { or: (s: string) => T }>(q: T, word: string): T {
+      return q.or(`title.ilike.${likePattern(word)}`);
     }
 
     // Without the trailing `.order().limit(30)`, an unordered slice risks
     // missing the actual most recent video entirely on a category/year match
     // with hundreds of rows — which the ordinal rerank step below depends on
     // being present.
-    let videoQuery = baseVideoQuery();
-    for (const word of videoContentKeywords) videoQuery = withWordFilter(videoQuery, word);
-    let { data: vids } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
+    //
+    // Title-only pass first: a user naming a video ("Troy Snyder: Um Lembrete
+    // Que Nos Ajuda") has its words in the title, and that query is cheap. The
+    // title-or-transcript scan below ILIKEs ~16 MB of transcripts per word and
+    // can time out (also returning nothing); it now only runs when no title
+    // holds every keyword.
+    let vids: Awaited<ReturnType<typeof baseVideoQuery>>["data"] = null;
+    if (videoContentKeywords.length > 0) {
+      let titleQuery = baseVideoQuery();
+      for (const word of videoContentKeywords) titleQuery = withTitleWordFilter(titleQuery, word);
+      const { data, error } = await titleQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
+      if (error) console.error("Video title search failed:", error.message);
+      vids = data;
+    }
+    if (!vids || vids.length === 0) {
+      let videoQuery = baseVideoQuery();
+      for (const word of videoContentKeywords) videoQuery = withWordFilter(videoQuery, word);
+      const { data, error } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
+      if (error) console.error("Video title/transcript search failed:", error.message);
+      vids = data;
+    }
 
     // The stopword list above is inherently incomplete — a filler word that
     // slips through (an unanticipated verb, a name that also happens to be a
