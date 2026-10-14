@@ -151,7 +151,13 @@ export function ResearchGuideUploadCard() {
       }
 
       if (entries.length === 0) {
-        notify.error("Nenhuma citação encontrada", "O arquivo abriu, mas não achei nenhum versículo indexado nele.");
+        // The 2026 edition changed its verse-heading markup (class "su", not
+        // "se"), so this splitter finds nothing in it. That edition is
+        // imported by the separate global-publication card instead.
+        notify.error(
+          "Nenhuma citação encontrada",
+          "Se este é o Guia de Pesquisa de 2026, envie-o pelo cartão “Guia de Pesquisa (2026)” logo abaixo."
+        );
         return;
       }
 

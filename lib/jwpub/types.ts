@@ -7,6 +7,10 @@ export interface JwpubChapter {
   mepsDocumentId: number | null;
   position: number;
   title: string;
+  /** `Document.SectionNumber` — which part of the publication this is (null if the column was missing). */
+  sectionNumber: number | null;
+  /** `Document.Class` — the archive's document kind (null if the column was missing). */
+  docClass: number | null;
   html: string;
   /** `jwpub-media://` filenames referenced by this chapter's HTML, before rewriting. */
   mediaRefs: string[];

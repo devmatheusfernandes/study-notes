@@ -2,6 +2,7 @@
 
 import type { BibleAppendixHeader, BibleBook } from "@/app/(app)/bible-actions";
 import { cn } from "@/lib/utils";
+import type { GlobalPublicationSymbol } from "./global-publication-reader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BIBLE_BOOK_ABBREVIATIONS_PT, OLD_TESTAMENT_MAX_BOOK_ORDER } from "@/lib/bible/book-abbreviations";
 import {
@@ -17,6 +18,9 @@ interface BibleBookGridProps {
   /** Fetched by bible-reader.tsx — null while loading, empty once loaded if data/nwt_st.sqlite predates the appendices table. */
   appendixHeaders: BibleAppendixHeader[] | null;
   onSelectAppendix: (mepsDocumentId: number) => void;
+  /** Shared publications that have been imported (Configurações) — each opens its own A–Z reader. */
+  publications: { symbol: GlobalPublicationSymbol; label: string }[];
+  onSelectPublication: (symbol: GlobalPublicationSymbol) => void;
 }
 
 function BookButton({ book, onClick }: { book: BibleBook; onClick: () => void }) {
@@ -42,7 +46,14 @@ function BookButton({ book, onClick }: { book: BibleBook; onClick: () => void })
 }
 
 /** Landing screen of /bible — full-page book grid grouped by testament, matching the JW Library app's own Bible navigation (not a Vault/drawer). */
-export function BibleBookGrid({ books, onSelectBook, appendixHeaders, onSelectAppendix }: BibleBookGridProps) {
+export function BibleBookGrid({
+  books,
+  onSelectBook,
+  appendixHeaders,
+  onSelectAppendix,
+  publications,
+  onSelectPublication,
+}: BibleBookGridProps) {
   const oldTestament = (books ?? []).filter((b) => b.bookOrder <= OLD_TESTAMENT_MAX_BOOK_ORDER);
   const newTestament = (books ?? []).filter((b) => b.bookOrder > OLD_TESTAMENT_MAX_BOOK_ORDER);
 
@@ -55,24 +66,33 @@ export function BibleBookGrid({ books, onSelectBook, appendixHeaders, onSelectAp
         </div>
 
         {/* Same place JW Library puts its own Apêndice A/B/C tabs, next to
-            the book list. Each header's own content is that section's index
-            of articles — see bible-appendix-surface.tsx — so there's nothing
-            else to fetch to render this as a picker. */}
-        {appendixHeaders && appendixHeaders.length > 0 && (
-          <div className="flex shrink-0 gap-1.5">
-            {appendixHeaders.map((header) => (
-              <button
-                key={header.mepsDocumentId}
-                type="button"
-                onClick={() => onSelectAppendix(header.mepsDocumentId)}
-                title={header.title}
-                className="rounded-full bg-secondary px-3 py-1.5 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-surface hover:text-foreground"
-              >
-                {header.letter}
-              </button>
-            ))}
-          </div>
-        )}
+            the book list — each opens as its own page (an appendix header's
+            content is that section's index of articles). The shared
+            publications sit alongside them, once imported. */}
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {publications.map((publication) => (
+            <button
+              key={publication.symbol}
+              type="button"
+              onClick={() => onSelectPublication(publication.symbol)}
+              title={publication.label}
+              className="rounded-full bg-secondary px-3 py-1.5 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-surface hover:text-foreground"
+            >
+              {publication.label}
+            </button>
+          ))}
+          {appendixHeaders?.map((header) => (
+            <button
+              key={header.mepsDocumentId}
+              type="button"
+              onClick={() => onSelectAppendix(header.mepsDocumentId)}
+              title={header.title}
+              className="rounded-full bg-secondary px-3 py-1.5 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-surface hover:text-foreground"
+            >
+              {header.letter}
+            </button>
+          ))}
+        </div>
       </div>
 
       {books === null ? (

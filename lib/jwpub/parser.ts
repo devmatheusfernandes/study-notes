@@ -134,6 +134,13 @@ function readPublicationMeta(db: import("sql.js").Database): JwpubPublicationMet
   };
 }
 
+/** A column that may be absent (undefined), NULL, or — for `Class` — stored as text. */
+function optionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function readChapters(
   db: import("sql.js").Database,
   keys: Awaited<ReturnType<typeof deriveJwpubKeys>>,
@@ -147,9 +154,15 @@ async function readChapters(
   // unresolvable by a jwlibrary import, nothing else breaks.
   let res;
   try {
-    res = db.exec("SELECT DocumentId, MepsDocumentId, Title, Content FROM Document ORDER BY DocumentId");
+    res = db.exec(
+      "SELECT DocumentId, MepsDocumentId, SectionNumber, Class, Title, Content FROM Document ORDER BY DocumentId"
+    );
   } catch {
-    res = db.exec("SELECT DocumentId, Title, Content FROM Document ORDER BY DocumentId");
+    try {
+      res = db.exec("SELECT DocumentId, MepsDocumentId, Title, Content FROM Document ORDER BY DocumentId");
+    } catch {
+      res = db.exec("SELECT DocumentId, Title, Content FROM Document ORDER BY DocumentId");
+    }
   }
   if (res.length === 0) return [];
 
@@ -178,6 +191,8 @@ async function readChapters(
       mepsDocumentId: mepsDocumentId === null || mepsDocumentId === undefined ? null : Number(mepsDocumentId),
       position: i,
       title: title === null ? `Capítulo ${documentId}` : String(title),
+      sectionNumber: optionalNumber(row.SectionNumber),
+      docClass: optionalNumber(row.Class),
       html,
       mediaRefs: collectMediaRefs(html),
     });

@@ -25,6 +25,7 @@ import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-car
 import { VideoScriptureIndexCard } from "@/components/settings/video-scripture-index-card";
 import { ResearchGuideUploadCard } from "@/components/settings/research-guide-upload-card";
 import { InsightUploadCard } from "@/components/settings/insight-upload-card";
+import { ResearchGuideTopicsUploadCard } from "@/components/settings/research-guide-topics-upload-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
@@ -196,6 +197,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
               {/* Row 3c: Research Guide (Guia de Pesquisa) upload */}
               <ResearchGuideUploadCard />
+
+              {/* Row 3c': 2026 Guia de Pesquisa A–Z topics — shared global content */}
+              <ResearchGuideTopicsUploadCard />
 
               {/* Row 3d: Perspicaz (Insight) upload — shared global content */}
               <InsightUploadCard />

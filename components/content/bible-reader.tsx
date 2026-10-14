@@ -50,7 +50,13 @@ import {
   type NoteScriptureMention,
 } from "@/app/(app)/note-scripture-actions";
 import { BibleStudyPanel, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
-import { BibleAppendixSurface } from "./bible-appendix-surface";
+import { BibleAppendixContent } from "./bible-appendix-surface";
+import {
+  GlobalPublicationReader,
+  GLOBAL_PUBLICATION_LABELS,
+  type GlobalPublicationSymbol,
+} from "./global-publication-reader";
+import { listGlobalPublicationSymbols } from "@/app/(app)/global-publications-actions";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import {
   JwlibraryNoteEditorVault,
@@ -66,7 +72,7 @@ interface BibleReaderProps {
   userEmail?: string;
 }
 
-type BibleScreen = "books" | "chapters" | "reading" | "search";
+type BibleScreen = "books" | "chapters" | "reading" | "search" | "appendix" | "publication";
 
 interface BibleTopHeaderProps {
   title: string;
@@ -181,10 +187,24 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     void listBibleAppendixHeaders().then((result) => setAppendixHeaders(result.headers ?? []));
   }, []);
 
-  // Which appendix (by meps_document_id) the appendix reader is showing —
+  // Which appendix (by meps_document_id) the appendix page is showing —
   // opened either from the book-grid entry point or from a link inside a
-  // study note / another appendix. `null` means the surface is closed.
+  // study note / another appendix.
   const [openAppendixId, setOpenAppendixId] = useState<number | null>(null);
+  const [appendixTitle, setAppendixTitle] = useState<string | null>(null);
+
+  // The shared publications (Perspicaz, the 2026 Guia de Pesquisa) the book
+  // grid offers, once they've actually been imported (Configurações).
+  const [importedPublications, setImportedPublications] = useState<GlobalPublicationSymbol[]>([]);
+  useEffect(() => {
+    void listGlobalPublicationSymbols().then(({ publications }) => {
+      const symbols = new Set(publications.map((p) => p.symbol));
+      setImportedPublications((["rsg", "it"] as const).filter((s) => symbols.has(s)));
+    });
+  }, []);
+  const [publication, setPublication] = useState<{ symbol: GlobalPublicationSymbol; documentId: number | null } | null>(
+    null
+  );
 
   const [screen, setScreen] = useState<BibleScreen>(
     initialBookOrder !== null && initialChapter !== null ? "reading" : "books"
@@ -236,6 +256,36 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     setSubmittedQuery(trimmed);
     setScreen("search");
   }, [query]);
+
+  // Where "back" goes from an appendix or a publication page: the screen it
+  // was opened from (the book grid, or the chapter being read when a study
+  // note linked to an appendix). Opening one from inside another keeps the
+  // original return point instead of bouncing between the two.
+  const returnScreenRef = useRef<BibleScreen>("books");
+  const leaveTo = useCallback(
+    (next: BibleScreen) => {
+      if (screen !== "appendix" && screen !== "publication" && screen !== "search") returnScreenRef.current = screen;
+      setScreen(next);
+    },
+    [screen]
+  );
+
+  const openAppendix = useCallback(
+    (mepsDocumentId: number) => {
+      setOpenAppendixId(mepsDocumentId);
+      leaveTo("appendix");
+      window.scrollTo(0, 0);
+    },
+    [leaveTo]
+  );
+
+  const openPublication = useCallback(
+    (symbol: GlobalPublicationSymbol) => {
+      setPublication({ symbol, documentId: null });
+      leaveTo("publication");
+    },
+    [leaveTo]
+  );
 
   const exitSearch = useCallback(() => {
     setSearchDetail(null);
@@ -785,33 +835,63 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     );
   }
 
-  if (screen === "books") {
+  if (screen === "appendix" && openAppendixId !== null) {
     return (
-      // JwpubSidePanel (rendered inside BibleAppendixSurface) is a flex
-      // sibling that animates its own width to push the content beside it —
-      // it only does that inside a flex ROW. Without this wrapper it just
-      // stacked in normal document flow, full-width, underneath the book
-      // grid instead of opening as a side panel next to it.
-      <div className="flex min-h-dvh w-full flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <BibleTopHeader title="Bíblia" userEmail={userEmail} {...searchHeaderProps} />
-          <BibleBookGrid
-            books={books}
-            onSelectBook={pickBook}
-            appendixHeaders={appendixHeaders}
-            onSelectAppendix={setOpenAppendixId}
-          />
-        </div>
-        <BibleAppendixSurface
-          mepsDocumentId={openAppendixId}
-          onClose={() => setOpenAppendixId(null)}
-          onOpenAppendix={setOpenAppendixId}
-          onOpenBibleRef={(refBookOrder, refChapter, refVerse) => {
-            setOpenAppendixId(null);
-            enterReading(refBookOrder, refChapter, refVerse);
-          }}
+      <>
+        <BibleTopHeader
+          title={appendixTitle ?? "Apêndice"}
+          onBack={() => setScreen(returnScreenRef.current)}
+          backLabel="Voltar"
+          userEmail={userEmail}
+          {...searchHeaderProps}
         />
-      </div>
+        <div className="flex-1 px-4 py-6 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl">
+            <BibleAppendixContent
+              key={openAppendixId}
+              variant="page"
+              mepsDocumentId={openAppendixId}
+              onLoaded={(appendix) =>
+                setAppendixTitle(appendix ? (appendix.section === "header" ? appendix.title : `Apêndice ${appendix.letter}`) : null)
+              }
+              onOpenAppendix={openAppendix}
+              onOpenBibleRef={(refBookOrder, refChapter, refVerse) => enterReading(refBookOrder, refChapter, refVerse)}
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (screen === "publication" && publication) {
+    return (
+      <GlobalPublicationReader
+        key={publication.symbol}
+        symbol={publication.symbol}
+        documentId={publication.documentId}
+        onOpenDocument={(documentId) => setPublication({ symbol: publication.symbol, documentId })}
+        onExit={() => setScreen(returnScreenRef.current)}
+        onOpenBibleVerse={(refBookOrder, refChapter, refVerse) => enterReading(refBookOrder, refChapter, refVerse)}
+        renderHeader={(title, onBack) => (
+          <BibleTopHeader title={title} onBack={onBack} backLabel="Voltar" userEmail={userEmail} {...searchHeaderProps} />
+        )}
+      />
+    );
+  }
+
+  if (screen === "books" || screen === "appendix" || screen === "publication") {
+    return (
+      <>
+        <BibleTopHeader title="Bíblia" userEmail={userEmail} {...searchHeaderProps} />
+        <BibleBookGrid
+          books={books}
+          onSelectBook={pickBook}
+          appendixHeaders={appendixHeaders}
+          onSelectAppendix={openAppendix}
+          publications={importedPublications.map((symbol) => ({ symbol, label: GLOBAL_PUBLICATION_LABELS[symbol] }))}
+          onSelectPublication={openPublication}
+        />
+      </>
     );
   }
 
@@ -919,7 +999,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         studyNotes={panelStudyNotes}
         studyLoading={isLoadingStudy}
         onOpenBibleRef={enterReading}
-        onOpenAppendix={setOpenAppendixId}
+        onOpenAppendix={openAppendix}
         videos={panelVideos}
         videosLoading={isLoadingChapterVideos}
         researchGuideEntries={panelResearchGuide}
@@ -936,16 +1016,6 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         onAddNoteToActiveHighlight={handleAddNoteToHighlight}
         onColorChangeActiveHighlight={handleHighlightMarkColorChange}
         onDeleteActiveHighlight={handleDeleteHighlightMark}
-      />
-
-      <BibleAppendixSurface
-        mepsDocumentId={openAppendixId}
-        onClose={() => setOpenAppendixId(null)}
-        onOpenAppendix={setOpenAppendixId}
-        onOpenBibleRef={(refBookOrder, refChapter, refVerse) => {
-          setOpenAppendixId(null);
-          enterReading(refBookOrder, refChapter, refVerse);
-        }}
       />
 
       <JwlibraryNoteEditorVault

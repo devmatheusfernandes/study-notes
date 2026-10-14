@@ -39,7 +39,19 @@ export interface GlobalPublicationChapterInput {
   mepsDocumentId: number | null;
   position: number;
   title: string;
+  sectionNumber: number | null;
+  docClass: number | null;
   contentHtml: string;
+}
+
+/** One embedded excerpt behind a `data-jwpub-extract` citation, already rewritten and sanitized by the importer. Mirrors JwpubExtractRow in jwpub-actions.ts. */
+export interface GlobalPublicationExtract {
+  extractId: number;
+  html: string;
+  caption: string | null;
+  refTitle: string | null;
+  refSymbol: string | null;
+  refMepsDocumentId: number | null;
 }
 
 export interface GlobalPublicationFootnoteInput {
@@ -172,6 +184,8 @@ export async function appendGlobalPublicationChapters(
         meps_document_id: c.mepsDocumentId,
         position: c.position,
         title: c.title,
+        section_number: c.sectionNumber,
+        doc_class: c.docClass,
         content_html: c.contentHtml,
         content_text: stripHtmlToText(c.contentHtml),
       }))
@@ -221,6 +235,39 @@ export async function appendGlobalPublicationFootnotes(
   } catch (error) {
     console.error("Erro ao gravar notas de rodapé de publicação global:", error);
     return { ok: false, error: "Não foi possível gravar as notas de rodapé." };
+  }
+}
+
+export async function appendGlobalPublicationExtracts(
+  publicationId: string,
+  extracts: GlobalPublicationExtract[]
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sessão expirada." };
+  if (extracts.length === 0) return { ok: true };
+
+  try {
+    const admin = createAdminClient();
+    const { error } = await admin.from("global_publication_extracts").upsert(
+      extracts.map((e) => ({
+        publication_id: publicationId,
+        extract_id: e.extractId,
+        content_html: e.html,
+        caption: e.caption,
+        ref_title: e.refTitle,
+        ref_symbol: e.refSymbol,
+        ref_meps_document_id: e.refMepsDocumentId,
+      })),
+      { onConflict: "publication_id,extract_id" }
+    );
+    if (error) return { ok: false, error: "Não foi possível gravar os trechos citados." };
+    return { ok: true };
+  } catch (error) {
+    console.error("Erro ao gravar trechos de publicação global:", error);
+    return { ok: false, error: "Não foi possível gravar os trechos citados." };
   }
 }
 
@@ -297,6 +344,122 @@ export async function getGlobalPublicationChapterContent(
 
   if (!data) return { error: "Artigo não encontrado." };
   return { html: data.content_html ?? "" };
+}
+
+export interface GlobalPublicationIndexEntry {
+  documentId: number;
+  title: string;
+  sectionNumber: number | null;
+  docClass: number | null;
+}
+
+export interface GlobalPublicationIndex {
+  publicationId: string;
+  title: string;
+  entries: GlobalPublicationIndexEntry[];
+}
+
+/**
+ * Article list of one fully-imported global publication — titles only, no
+ * content, so the Bible page's Perspicaz / Guia de Pesquisa index stays cheap
+ * (Perspicaz alone is ~5.000 articles). Returns nothing for a publication
+ * that isn't imported, or is mid-import.
+ */
+export async function getGlobalPublicationIndex(
+  symbol: string
+): Promise<{ index?: GlobalPublicationIndex; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const [{ data: pub }, { data: meta }] = await Promise.all([
+    supabase.from("global_publications").select("id, title").eq("symbol", symbol).maybeSingle(),
+    supabase.from("global_publications_meta").select("imported_at").eq("symbol", symbol).maybeSingle(),
+  ]);
+  if (!pub || !meta?.imported_at) return { error: "Publicação ainda não importada." };
+
+  // PostgREST caps a single response (1.000 rows by default), and Perspicaz
+  // has several thousand articles — paged until a short page comes back.
+  const PAGE = 1000;
+  const entries: GlobalPublicationIndexEntry[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("global_publication_chapters")
+      .select("document_id, title, section_number, doc_class")
+      .eq("publication_id", pub.id)
+      .order("position", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return { error: "Não foi possível carregar o índice." };
+    for (const row of data ?? []) {
+      entries.push({
+        documentId: row.document_id,
+        title: row.title,
+        sectionNumber: row.section_number,
+        docClass: row.doc_class,
+      });
+    }
+    if (!data || data.length < PAGE) break;
+  }
+
+  return { index: { publicationId: pub.id, title: pub.title, entries } };
+}
+
+/** The excerpts behind one `data-jwpub-extract` citation, in the order the citation names them. */
+export async function getGlobalPublicationExtracts(
+  publicationId: string,
+  extractIds: number[]
+): Promise<{ extracts?: GlobalPublicationExtract[]; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+  const ids = extractIds.filter((id) => Number.isFinite(id));
+  if (ids.length === 0) return { extracts: [] };
+
+  const { data, error } = await supabase
+    .from("global_publication_extracts")
+    .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
+    .eq("publication_id", publicationId)
+    .in("extract_id", ids);
+  if (error) return { error: "Não foi possível carregar o trecho citado." };
+
+  const byId = new Map(
+    (data ?? []).map((row) => [
+      row.extract_id,
+      {
+        extractId: row.extract_id,
+        html: row.content_html,
+        caption: row.caption,
+        refTitle: row.ref_title,
+        refSymbol: row.ref_symbol,
+        refMepsDocumentId: row.ref_meps_document_id,
+      } satisfies GlobalPublicationExtract,
+    ])
+  );
+  return { extracts: ids.map((id) => byId.get(id)).filter((row): row is GlobalPublicationExtract => row !== undefined) };
+}
+
+export async function getGlobalPublicationFootnote(
+  publicationId: string,
+  footnoteId: number
+): Promise<{ html?: string; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { data } = await supabase
+    .from("global_publication_footnotes")
+    .select("content_html")
+    .eq("publication_id", publicationId)
+    .eq("footnote_id", footnoteId)
+    .maybeSingle();
+  if (!data) return { error: "Nota de rodapé não encontrada." };
+  return { html: data.content_html };
 }
 
 /**
