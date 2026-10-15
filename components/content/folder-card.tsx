@@ -18,7 +18,7 @@ export interface FolderCardProps {
   onOpen?: () => void;
   onRename?: (name: string) => void;
   onDelete?: () => void;
-  /** Hidden behind the lock: the real name and item count aren't shown and the folder can't be renamed until unlocked. */
+  /** Behind the lock: the name stays visible so it can be found, but the item count is hidden and it can't be renamed until unlocked. */
   masked?: boolean;
   /** Locked on its own (not only through a parent folder) — picks "Trancar" vs "Destrancar". */
   lockedDirectly?: boolean;
@@ -139,7 +139,7 @@ export function FolderCard({
         <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col text-left cursor-pointer">
           <span className="flex min-w-0 items-center gap-1.5 font-heading text-[15px]">
             {(masked || lockedDirectly) && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Trancada" />}
-            <span className="truncate">{masked ? "Pasta trancada" : name}</span>
+            <span className="truncate">{name}</span>
           </span>
           <span className="text-[11.5px] text-muted-foreground">
             {isDragOver

@@ -194,9 +194,11 @@ export function NotesCollection({
     showFolders && !isSearching ? { folderId: activeFolder } : undefined
   );
   const matchesNote = (note: Note) =>
-    // A locked note never matches a search — its title/body are exactly what's being protected.
-    !hiddenNoteIds.has(note.id) &&
-    (matchesSearch(query, note.title, note.body) || jwpubMatches.has(note.id)) &&
+    // A locked note can be found by its title (which stays visible so it can be told apart),
+    // but never by what's inside it.
+    (hiddenNoteIds.has(note.id)
+      ? matchesSearch(query, note.title)
+      : matchesSearch(query, note.title, note.body) || jwpubMatches.has(note.id)) &&
     (selectedTagIds.length === 0 || selectedTagIds.some((id) => note.tagIds.includes(id)));
   const pinned = allPinned.filter(matchesNote);
   const others = allOthers.filter(matchesNote);
@@ -233,7 +235,7 @@ export function NotesCollection({
   // Subfolders of whatever level we're currently browsing (root, or the open folder).
   const childFolders = (
     showFolders ? folders.filter((f) => (f.parentId ?? null) === (activeFolder ?? null)) : []
-  ).filter((f) => !hiddenFolderIds.has(f.id) || !isSearching).filter((f) => hiddenFolderIds.has(f.id) || matchesSearch(query, f.name));
+  ).filter((f) => matchesSearch(query, f.name));
   const foldersVisible = childFolders.length > 0;
   // A screen showing folders isn't empty, even with no notes beside them —
   // the "vazio" notice is only for when there's truly nothing to show.
@@ -311,7 +313,7 @@ export function NotesCollection({
         key={note.clientKey ?? note.id}
         id={note.id}
         type={note.type}
-        title={masked ? "Nota trancada" : note.title}
+        title={note.title}
         body={masked ? "" : note.body}
         masked={masked}
         lockedDirectly={note.locked === true}
@@ -489,7 +491,7 @@ export function NotesCollection({
             )}
           >
             <ChevronLeft className="size-4" />
-            {hiddenFolderIds.has(openFolder.id) ? "Pasta trancada" : openFolder.name}
+            {openFolder.name}
           </button>
         )}
 
