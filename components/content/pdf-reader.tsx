@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, ExternalLink, FileText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { notify } from "@/components/ui/toaster";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { getFileUrl } from "@/app/(app)/files-actions";
@@ -104,6 +105,15 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
 
   const title = note?.title || "Documento PDF";
 
+  const updateNote = useNotesStore((s) => s.updateNote);
+  const [draftTitle, setDraftTitle] = useState<string | null>(null);
+  const commitTitle = () => {
+    if (draftTitle === null) return;
+    const next = draftTitle.trim();
+    setDraftTitle(null);
+    if (next && next !== note?.title) updateNote(noteId, { title: next });
+  };
+
   return (
     <div className="flex min-h-dvh w-full flex-col">
       <motion.main
@@ -124,9 +134,22 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
           </Button>
 
           <div className="mx-2 flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate font-heading text-[15px] leading-tight">
-              {title}
-            </span>
+            <Input
+              variant="underline"
+              value={draftTitle ?? note?.title ?? ""}
+              placeholder="Documento PDF"
+              aria-label="Nome do arquivo"
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  setDraftTitle(null);
+                  e.currentTarget.blur();
+                }
+              }}
+              className="h-9 min-w-0 flex-1 font-heading text-[15px]"
+            />
             <Badge variant="outline" className="shrink-0 font-mono text-[10px] uppercase">
               PDF
             </Badge>
@@ -151,7 +174,7 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
           )}
         </header>
 
-        <div className="flex flex-1 flex-col p-3 sm:p-5">
+        <div className="flex flex-1 flex-col">
           {isLoading ? (
             <div className="flex flex-1 items-center justify-center gap-2 py-20 text-[13px] text-muted-foreground">
               <motion.span
@@ -177,11 +200,11 @@ export function PdfReader({ noteId, initialNote }: PdfReaderProps) {
               </Button>
             </div>
           ) : (
-            <div className="flex-1 w-full min-h-[calc(100dvh-6rem)] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="relative min-h-[calc(100dvh-3.5rem)] w-full flex-1">
               <iframe
                 src={searchParams.get("page") ? `${url}#page=${searchParams.get("page")}` : url!}
                 title={title}
-                className="h-full w-full border-0 bg-card"
+                className="absolute inset-0 size-full border-0"
               />
             </div>
           )}
