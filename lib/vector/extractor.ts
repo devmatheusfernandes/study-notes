@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptText } from "@/lib/encryption";
 import { stripHtmlTags, splitTextIntoChunks } from "./chunker";
 import { FILES_BUCKET } from "@/lib/storage-config";
+import { isOwnedStoragePath } from "@/lib/storage-path";
 
 export interface ExtractedChunk {
   chunkIndex: number;
@@ -57,6 +58,12 @@ export async function extractContentForNote(
 
   // 2. PDF Document
   if (note.type === "pdf" && note.storage_path) {
+    // notes.storage_path is writable by the row's owner, and the admin client below
+    // bypasses Storage ownership — never download a path outside the owner's prefix.
+    if (!isOwnedStoragePath(note.storage_path, note.user_id)) {
+      console.error("storage_path fora do prefixo do dono — vetorização ignorada.");
+      return null;
+    }
     try {
       const admin = createAdminClient();
       const { data: fileData, error: downloadError } = await admin.storage

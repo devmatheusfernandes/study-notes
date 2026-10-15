@@ -3,6 +3,7 @@ import { AssistantSurface } from "@/components/assistant/assistant-surface";
 import { SidePanelStackProvider } from "@/components/content/side-panel-stack";
 import { StoreHydration } from "@/components/providers/store-hydration";
 import { ChatHydration } from "@/components/chat/chat-hydration";
+import { LockProvider } from "@/components/lock/lock-provider";
 import { listUserContent } from "./notes-actions";
 import { listConversations } from "./chat-actions";
 import { getUserPreferences } from "./preferences-actions";
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           initialPreferences={initialPreferences}
         />
         <ChatHydration conversations={conversations} />
+        <LockProvider />
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
         <AssistantSurface />

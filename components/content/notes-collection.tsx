@@ -26,6 +26,9 @@ import { getFileUrl } from "@/app/(app)/files-actions";
 import { searchJwpubContent, type JwpubSearchMatch } from "@/app/(app)/jwpub-actions";
 import { extractMatchSnippet, type MatchSnippet } from "@/lib/note-preview";
 import { NOTE_DRAG_MIME, hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
+import { useHiddenFolderIds, useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
+import { lockItem, unlockItem } from "@/lib/lock/toggle-lock";
+import { useLockStore } from "@/lib/store/lock-store";
 
 interface NotesCollectionProps {
   status: NoteStatus;
@@ -126,6 +129,13 @@ export function NotesCollection({
   );
   const folders = useNotesStore((s) => s.folders);
   const tags = useNotesStore((s) => s.tags);
+  // Locked notes/folders stay visible as masked cards (so the user can find and unlock
+  // them) but never show a title, preview, or name until the session is unlocked.
+  const hiddenNoteIds = useHiddenNoteIds();
+  const hiddenFolderIds = useHiddenFolderIds();
+  const requestUnlock = useLockStore((s) => s.requestUnlock);
+  const setNoteLocked = useNotesStore((s) => s.setNoteLocked);
+  const setFolderLocked = useNotesStore((s) => s.setFolderLocked);
   const [manageTagsNoteId, setManageTagsNoteId] = useState<string | null>(null);
   const [moveFolderNoteId, setMoveFolderNoteId] = useState<string | null>(null);
   const [isBackDragOver, setIsBackDragOver] = useState(false);
@@ -184,6 +194,8 @@ export function NotesCollection({
     showFolders && !isSearching ? { folderId: activeFolder } : undefined
   );
   const matchesNote = (note: Note) =>
+    // A locked note never matches a search — its title/body are exactly what's being protected.
+    !hiddenNoteIds.has(note.id) &&
     (matchesSearch(query, note.title, note.body) || jwpubMatches.has(note.id)) &&
     (selectedTagIds.length === 0 || selectedTagIds.some((id) => note.tagIds.includes(id)));
   const pinned = allPinned.filter(matchesNote);
@@ -209,10 +221,19 @@ export function NotesCollection({
   }, [pinned, others, setVisibleIds]);
 
   const openFolder = folders.find((f) => f.id === activeFolder);
+  // Reaching a locked folder any way other than clicking its card (a `?folder=` link, back/forward) still asks first.
+  const openFolderHidden = !!activeFolder && hiddenFolderIds.has(activeFolder);
+  const openFolderParent = openFolder?.parentId ?? null;
+  useEffect(() => {
+    if (!openFolderHidden) return;
+    void requestUnlock().then((ok) => {
+      if (!ok) setActiveFolder(openFolderParent);
+    });
+  }, [openFolderHidden, openFolderParent, requestUnlock, setActiveFolder]);
   // Subfolders of whatever level we're currently browsing (root, or the open folder).
   const childFolders = (
     showFolders ? folders.filter((f) => (f.parentId ?? null) === (activeFolder ?? null)) : []
-  ).filter((f) => matchesSearch(query, f.name));
+  ).filter((f) => !hiddenFolderIds.has(f.id) || !isSearching).filter((f) => hiddenFolderIds.has(f.id) || matchesSearch(query, f.name));
   const foldersVisible = childFolders.length > 0;
   // A screen showing folders isn't empty, even with no notes beside them —
   // the "vazio" notice is only for when there's truly nothing to show.
@@ -233,7 +254,8 @@ export function NotesCollection({
   }
 
   async function openNote(note: Note) {
-    if (note.processing) return; // still uploading/ingesting — NoteCard already blocks the click, this is belt-and-suspenders.
+    if (note.processing) return;
+    if (hiddenNoteIds.has(note.id) && !(await requestUnlock())) return; // still uploading/ingesting — NoteCard already blocks the click, this is belt-and-suspenders.
     if (!note.storagePath) {
       // Text notes (and legacy seed/demo file cards with no real upload) use the editor.
       router.push(`/notes/${note.id}${searchParamsFor(note)}`);
@@ -282,13 +304,25 @@ export function NotesCollection({
     // so only the open-to-read action stays gated at that point.
     const isOptimistic = note.id.startsWith("optimistic:");
 
+    const masked = hiddenNoteIds.has(note.id);
+
     return (
       <NoteCard
         key={note.clientKey ?? note.id}
         id={note.id}
         type={note.type}
-        title={note.title}
-        body={note.body}
+        title={masked ? "Nota trancada" : note.title}
+        body={masked ? "" : note.body}
+        masked={masked}
+        lockedDirectly={note.locked === true}
+        onToggleLock={
+          isOptimistic
+            ? undefined
+            : () =>
+                void (note.locked
+                  ? unlockItem(() => setNoteLocked(note.id, false))
+                  : lockItem(() => setNoteLocked(note.id, true)))
+        }
         meta={note.meta}
         syncStatus={note.syncStatus}
         vectorStatus={note.vectorStatus}
@@ -299,8 +333,8 @@ export function NotesCollection({
         permanentDelete={isTrashed}
         selectionMode={selectionMode}
         selected={isSelected(note.id)}
-        tags={note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
-        searchSnippet={getSearchSnippet(note)}
+        tags={!masked && note.tagIds.length > 0 ? tags.filter((t) => note.tagIds.includes(t.id)) : undefined}
+        searchSnippet={masked ? undefined : getSearchSnippet(note)}
         onToggleSelect={isOptimistic ? undefined : (id) => { hapticTap(); toggleSelect(id); }}
         onOpen={() => void openNote(note)}
         onTogglePin={!isOptimistic && status === "active" ? () => togglePin(note.id) : undefined}
@@ -309,7 +343,7 @@ export function NotesCollection({
         onDelete={isOptimistic ? undefined : isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
         onManageTags={isOptimistic ? undefined : () => setManageTagsNoteId(note.id)}
         onMoveToFolder={isOptimistic || !showFolders ? undefined : () => setMoveFolderNoteId(note.id)}
-        onToggleChecklistItem={(index) => { hapticTap(); toggleChecklistItem(note.id, index); }}
+        onToggleChecklistItem={masked ? undefined : (index) => { hapticTap(); toggleChecklistItem(note.id, index); }}
         onDragStart={isOptimistic || !showFolders ? undefined : (e) => handleNoteDragStart(e, note)}
       />
     );
@@ -455,7 +489,7 @@ export function NotesCollection({
             )}
           >
             <ChevronLeft className="size-4" />
-            {openFolder.name}
+            {hiddenFolderIds.has(openFolder.id) ? "Pasta trancada" : openFolder.name}
           </button>
         )}
 
@@ -469,13 +503,25 @@ export function NotesCollection({
                 <FolderCard
                   key={folder.id}
                   name={folder.name}
+                  masked={hiddenFolderIds.has(folder.id)}
+                  lockedDirectly={folder.locked === true}
+                  onToggleLock={() =>
+                    void (folder.locked
+                      ? unlockItem(() => setFolderLocked(folder.id, false))
+                      : lockItem(() => setFolderLocked(folder.id, true)))
+                  }
                   // Subfolders count too: a folder holding nothing but other
                   // folders was reporting "0 itens" while visibly not empty.
                   itemCount={
                     notes.filter((n) => n.folderId === folder.id && n.status === "active").length +
                     folders.filter((f) => f.parentId === folder.id).length
                   }
-                  onOpen={() => setActiveFolder(folder.id)}
+                  onOpen={() =>
+                    void (async () => {
+                      if (hiddenFolderIds.has(folder.id) && !(await requestUnlock())) return;
+                      setActiveFolder(folder.id);
+                    })()
+                  }
                   onRename={(name) => renameFolder(folder.id, name)}
                   onDelete={() => deleteFolder(folder.id)}
                   onDropItems={(items) => void processDiscoveredItems(items, folder.id)}

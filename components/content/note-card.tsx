@@ -9,6 +9,8 @@ import {
   FileText,
   FileType,
   FolderInput,
+  Lock,
+  LockOpen,
   MoreHorizontal,
   NotebookPen,
   Pin,
@@ -97,6 +99,11 @@ export interface NoteCardProps {
   onDelete?: () => void;
   onManageTags?: () => void;
   onMoveToFolder?: () => void;
+  /** The parent has hidden this card's title/preview (it's locked and the session isn't unlocked) — shown with a lock icon. */
+  masked?: boolean;
+  /** Locked on its own (not just through a folder) — decides between "Trancar" and "Destrancar" in the menu. */
+  lockedDirectly?: boolean;
+  onToggleLock?: () => void;
   /** Checks/unchecks one of the checklist items shown in the preview, by its index among all of them. */
   onToggleChecklistItem?: (index: number) => void;
   /** Native HTML5 drag start, for dragging this card onto a FolderCard to move it. Parent decides the drag payload (single vs. multi-select) and omits this entirely for cards that shouldn't be draggable (optimistic/processing). */
@@ -130,6 +137,9 @@ export function NoteCard({
   onDelete,
   onManageTags,
   onMoveToFolder,
+  masked = false,
+  lockedDirectly = false,
+  onToggleLock,
   onToggleChecklistItem,
   onDragStart,
 }: NoteCardProps) {
@@ -260,6 +270,7 @@ export function NoteCard({
       onRename ||
       onManageTags ||
       onMoveToFolder ||
+      onToggleLock ||
       onArchive ||
       onRestore ||
       onDelete
@@ -299,6 +310,12 @@ export function NoteCard({
           <DropdownMenuItem onSelect={onMoveToFolder}>
             <FolderInput className="size-4" />
             Mover para pasta
+          </DropdownMenuItem>
+        )}
+        {onToggleLock && (
+          <DropdownMenuItem onSelect={onToggleLock}>
+            {lockedDirectly ? <LockOpen className="size-4" /> : <Lock className="size-4" />}
+            {lockedDirectly ? "Destrancar" : "Trancar"}
           </DropdownMenuItem>
         )}
         {onArchive && <DropdownMenuItem onSelect={onArchive}>Arquivar</DropdownMenuItem>}
@@ -381,8 +398,9 @@ export function NoteCard({
           )}
           style={{ touchAction: "manipulation" }}
         >
-          <span className="truncate font-heading text-[15px] transition-colors group-hover/open:text-accent">
-            {title}
+          <span className="flex min-w-0 items-center gap-1.5 truncate font-heading text-[15px] transition-colors group-hover/open:text-accent">
+            {(masked || lockedDirectly) && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Trancada" />}
+            <span className="truncate">{title}</span>
           </span>
           {snippetNode ? (
             <span className="truncate text-[12.5px] text-muted-foreground">{snippetNode}</span>
@@ -517,8 +535,9 @@ export function NoteCard({
         )}
         style={{ touchAction: "manipulation" }}
       >
-        <span className="font-heading text-[17px] leading-tight text-balance transition-colors group-hover/open:text-accent">
-          {title}
+        <span className="flex items-start gap-2 font-heading text-[17px] leading-tight text-balance transition-colors group-hover/open:text-accent">
+          {(masked || lockedDirectly) && <Lock className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Trancada" />}
+          <span>{title}</span>
         </span>
 
         {previewImageUrl && (

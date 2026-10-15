@@ -4,7 +4,8 @@ import { NoteEditor } from "@/components/content/note-editor";
 import { JwpubReader } from "@/components/content/jwpub-reader";
 import { PdfReader } from "@/components/content/pdf-reader";
 import { getPublication } from "@/app/(app)/jwpub-actions";
-import { getNoteRow } from "@/app/(app)/notes-actions";
+import { getNoteLockState, getNoteRow } from "@/app/(app)/notes-actions";
+import { LockGate } from "@/components/lock/lock-gate";
 import { getDrawing } from "@/app/(app)/drawing-actions";
 
 export const metadata: Metadata = {
@@ -17,10 +18,13 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
   const chapterParam = typeof searchParams?.chapter === "string" ? searchParams.chapter : undefined;
   const docParam = typeof searchParams?.doc === "string" ? searchParams.doc : undefined;
 
+  const locked = await getNoteLockState(id);
+
   // An uploaded .jwpub gets the JwpubReader.
   const { publication, chapters } = await getPublication(id);
   if (publication) {
     return (
+      <LockGate noteId={id} initialLocked={locked}>
       <Suspense fallback={null}>
         <JwpubReader
           noteId={id}
@@ -30,19 +34,28 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
           initialDocParam={docParam}
         />
       </Suspense>
+      </LockGate>
     );
   }
 
   // An uploaded PDF gets the PdfReader.
   const note = await getNoteRow(id);
   if (note && (note.type === "pdf" || note.storagePath?.toLowerCase().endsWith(".pdf"))) {
-    return <PdfReader noteId={id} initialNote={note} />;
+    return (
+      <LockGate noteId={id} initialLocked={locked}>
+        <PdfReader noteId={id} initialNote={note} />
+      </LockGate>
+    );
   }
 
   // Any note can carry a handwriting layer and a recording over its text, so
   // this is fetched for every note rather than gated on a note "type".
   const drawing = await getDrawing(id);
 
-  return <NoteEditor noteId={id} initialNote={note} initialDrawing={drawing} />;
+  return (
+    <LockGate noteId={id} initialLocked={locked}>
+      <NoteEditor noteId={id} initialNote={note} initialDrawing={drawing} />
+    </LockGate>
+  );
 }
 

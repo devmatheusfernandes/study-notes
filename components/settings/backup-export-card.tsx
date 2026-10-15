@@ -5,11 +5,15 @@ import { Download, FileJson, Folder, NotebookPen, FileText } from "lucide-react"
 import { useNotesStore } from "@/lib/store/notes-store";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
+import { useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
+import { useLockStore } from "@/lib/store/lock-store";
 
 export function BackupExportCard() {
   const notes = useNotesStore((s) => s.notes);
   const folders = useNotesStore((s) => s.folders);
   const [isExporting, setIsExporting] = useState(false);
+  const hiddenNoteIds = useHiddenNoteIds();
+  const requestUnlock = useLockStore((s) => s.requestUnlock);
 
   // Filter out JWPUB publications and JW Library backups — neither's real
   // content lives in this row (a publication's chapters, or a backup's own
@@ -20,7 +24,9 @@ export function BackupExportCard() {
   const notesCount = backupNotes.filter((n) => n.type === "nota").length;
   const filesCount = backupNotes.filter((n) => n.type !== "nota").length;
 
-  function handleExport() {
+  async function handleExport() {
+    // Locked notes ride along in the export in clear text, so the export itself needs the unlock.
+    if (hiddenNoteIds.size > 0 && !(await requestUnlock())) return;
     if (backupNotes.length === 0 && folders.length === 0) {
       notify.error("Nenhum dado disponível para exportar.");
       return;

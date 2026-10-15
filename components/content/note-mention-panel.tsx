@@ -6,6 +6,8 @@ import DOMPurify from "dompurify";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
+import { useLockStore } from "@/lib/store/lock-store";
 import type { NoteScriptureMention } from "@/app/(app)/note-scripture-actions";
 import { findCitationRange } from "@/lib/note-citation-range";
 import { JwpubSidePanel } from "./jwpub-side-panel";
@@ -39,7 +41,10 @@ export function NoteMentionPanel({ mention, onClose }: NoteMentionPanelProps) {
   if (mention && mention !== shown) setShown(mention);
 
   const note = useMemo(() => notes.find((n) => n.id === shown?.noteId), [notes, shown?.noteId]);
-  const body = note?.body;
+  const hiddenIds = useHiddenNoteIds();
+  const requestUnlock = useLockStore((s) => s.requestUnlock);
+  const isHidden = !!note && hiddenIds.has(note.id);
+  const body = isHidden ? undefined : note?.body;
   const html = useMemo(() => (body ? DOMPurify.sanitize(body, { USE_PROFILES: { html: true } }) : ""), [body]);
 
   // Scroll to the citation that brought the user here and mark it. The CSS
@@ -68,7 +73,14 @@ export function NoteMentionPanel({ mention, onClose }: NoteMentionPanelProps) {
 
   return (
     <JwpubSidePanel open={mention !== null} title="Nota" onClose={onClose} width={420}>
-      {note ? (
+      {isHidden ? (
+        <div className="flex flex-col items-start gap-3 py-6">
+          <p className="text-[13px] text-muted-foreground">Esta nota está trancada.</p>
+          <Button variant="outline" size="sm" onClick={() => void requestUnlock()}>
+            Desbloquear
+          </Button>
+        </div>
+      ) : note ? (
         <div className="flex flex-col gap-4">
           <h2 className="font-heading text-lg leading-snug">{note.title || "Sem título"}</h2>
           {html ? (

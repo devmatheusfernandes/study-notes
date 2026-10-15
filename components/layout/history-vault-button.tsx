@@ -12,6 +12,7 @@ import {
   VaultDescription,
 } from "@/components/ui/vault";
 import { useNavigationHistoryStore, type HistoryEntry } from "@/lib/store/navigation-history-store";
+import { useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
 import { useHistoryVaultUiStore } from "@/lib/store/history-vault-ui-store";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +41,10 @@ function formatVisitedAt(timestamp: number): string {
 }
 
 function HistoryList({ onNavigate }: { onNavigate: (href: string) => void }) {
-  const entries = useNavigationHistoryStore((s) => s.entries);
+  const allEntries = useNavigationHistoryStore((s) => s.entries);
+  // A locked note's title doesn't belong in a list anyone holding the device can open.
+  const hiddenNoteIds = useHiddenNoteIds();
+  const entries = allEntries.filter((e) => !hiddenNoteIds.has(e.id));
   const clear = useNavigationHistoryStore((s) => s.clear);
 
   if (entries.length === 0) {

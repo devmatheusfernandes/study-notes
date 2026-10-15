@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
+import { useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
 import {
   cachedNoteReference,
   resolveNoteReference,
@@ -42,9 +43,13 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
   // note-editor.tsx's own comment on noteMentionOptions) — no fetch, no
   // loading state, just a live selector so a title edited elsewhere updates
   // the panel immediately.
-  const linkedNote = useNotesStore((s) =>
+  const hiddenNoteIds = useHiddenNoteIds();
+  const linkedNoteRaw = useNotesStore((s) =>
     reference?.kind === "note" ? s.notes.find((n) => n.id === reference.noteId) : undefined
   );
+  // A locked note is treated as if it weren't in the store: the surface falls back to its
+  // "not available" state instead of showing the note's title or text.
+  const linkedNote = linkedNoteRaw && !hiddenNoteIds.has(linkedNoteRaw.id) ? linkedNoteRaw : undefined;
 
   // Keyed on the reference's identity, not the object: clicking the same chip
   // twice (or a re-render handing over an equal-but-new object) must not

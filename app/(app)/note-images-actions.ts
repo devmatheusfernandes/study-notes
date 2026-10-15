@@ -10,6 +10,8 @@ import {
   IMAGE_RATE_LIMIT_MAX_UPLOADS,
   IMAGE_RATE_LIMIT_WINDOW_MS,
 } from "@/lib/storage-config";
+import { isOwnedStoragePath } from "@/lib/storage-path";
+import { noteImageUrl } from "@/lib/note-images";
 
 export interface UploadNoteImageResult {
   url?: string;
@@ -33,7 +35,7 @@ async function countRecentUploads(userId: string) {
   return data.filter((f) => f.created_at && new Date(f.created_at).getTime() > cutoff).length;
 }
 
-/** Uploads one image pasted/dropped into a note's rich-text body and returns its public URL. */
+/** Uploads one image pasted/dropped into a note's rich-text body and returns the app URL that serves it (session-checked, bucket stays private). */
 export async function uploadNoteImage(formData: FormData): Promise<UploadNoteImageResult> {
   const supabase = await createClient();
   const {
@@ -71,8 +73,7 @@ export async function uploadNoteImage(formData: FormData): Promise<UploadNoteIma
   });
   if (uploadError) return { error: "Falha ao enviar a imagem." };
 
-  const { data } = admin.storage.from(NOTE_IMAGES_BUCKET).getPublicUrl(storagePath);
-  return { url: data.publicUrl };
+  return { url: noteImageUrl(storagePath) };
 }
 
 /**
@@ -94,7 +95,7 @@ export async function deleteNoteImages(paths: string[]): Promise<{ error?: strin
   // Ownership by path prefix — same convention as files-actions.ts. Silently
   // drops anything not under the caller's own prefix rather than erroring,
   // since this is best-effort cleanup, not a user-facing operation.
-  const owned = paths.filter((p) => p.startsWith(`${user.id}/`));
+  const owned = paths.filter((p) => isOwnedStoragePath(p, user.id));
   if (owned.length === 0) return {};
 
   const admin = createAdminClient();

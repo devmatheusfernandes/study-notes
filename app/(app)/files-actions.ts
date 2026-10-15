@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { typeFromFileName, formatFileSize, type NoteType } from "@/lib/file-types";
 import { encryptText, decryptText } from "@/lib/encryption";
+import { isOwnedStoragePath } from "@/lib/storage-path";
 import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
 import {
   ALLOWED_EXTENSIONS,
@@ -200,7 +201,7 @@ export async function finalizeFileUpload(
   } = await supabase.auth.getUser();
 
   if (!user) return { error: "Sessão expirada. Entre novamente." };
-  if (!storagePath.startsWith(`${user.id}/`)) return { error: "Acesso negado." };
+  if (!isOwnedStoragePath(storagePath, user.id)) return { error: "Acesso negado." };
 
   const admin = createAdminClient();
   const slashIndex = storagePath.indexOf("/");
@@ -262,7 +263,7 @@ async function assertOwnedPath(storagePath: string) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user || !storagePath.startsWith(`${user.id}/`)) {
+  if (!user || !isOwnedStoragePath(storagePath, user.id)) {
     return null;
   }
   return user;

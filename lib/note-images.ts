@@ -4,7 +4,18 @@
  * note's old vs. new body on every edit in notes-store.ts), and DOMParser
  * only exists in the browser.
  */
-const NOTE_IMAGES_URL_MARKER = "/storage/v1/object/public/note-images/";
+const NOTE_IMAGES_URL_MARKERS = [
+  // Current: served by app/api/note-images/[...path]/route.ts, behind the session.
+  "/api/note-images/",
+  // Legacy: the bucket used to be public. Kept so old bodies are still recognised
+  // (and cleaned up) — scripts/make-note-images-private.mjs rewrites them to the form above.
+  "/storage/v1/object/public/note-images/",
+];
+
+/** The URL a note body stores for an image at this Storage path. */
+export function noteImageUrl(storagePath: string) {
+  return `/api/note-images/${storagePath}`;
+}
 
 /** Every `note-images` Storage path referenced by an `<img>` in this HTML body. */
 export function extractNoteImagePaths(html: string): string[] {
@@ -13,10 +24,13 @@ export function extractNoteImagePaths(html: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = imgSrcPattern.exec(html))) {
     const src = match[1];
-    const markerIndex = src.indexOf(NOTE_IMAGES_URL_MARKER);
-    if (markerIndex === -1) continue;
-    const path = src.slice(markerIndex + NOTE_IMAGES_URL_MARKER.length);
-    if (path) paths.push(decodeURIComponent(path));
+    for (const marker of NOTE_IMAGES_URL_MARKERS) {
+      const markerIndex = src.indexOf(marker);
+      if (markerIndex === -1) continue;
+      const path = src.slice(markerIndex + marker.length).split(/[?#]/)[0];
+      if (path) paths.push(decodeURIComponent(path));
+      break;
+    }
   }
   return paths;
 }

@@ -14,7 +14,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { signOut } from "@/app/login/actions";
+import { signOutAndWipeLocalData } from "@/lib/sign-out-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
@@ -27,6 +27,7 @@ import { ResearchGuideUploadCard } from "@/components/settings/research-guide-up
 import { InsightUploadCard } from "@/components/settings/insight-upload-card";
 import { ResearchGuideTopicsUploadCard } from "@/components/settings/research-guide-topics-upload-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
+import { PrivacyLockCard } from "@/components/settings/privacy-lock-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
@@ -211,6 +212,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               <BackupsCard />
 
               {/* Row 6: Full Width Backup Export Card */}
+              <PrivacyLockCard />
+
               <BackupExportCard />
 
               {/* Row 7: Full Width Danger Zone Card */}
@@ -282,6 +285,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                 </div>
               </section>
 
+              <PrivacyLockCard />
+
               <BackupExportCard />
             </div>
 
@@ -300,7 +305,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
         confirmLabel="Sair agora"
         onConfirm={() => {
           setConfirmSignOut(false);
-          void signOut();
+          void signOutAndWipeLocalData();
         }}
       />
     </div>

@@ -20,6 +20,8 @@ export interface NoteRow {
   pinned: boolean;
   status: "active" | "archived" | "trashed";
   folderId?: string;
+  /** Locked directly; a folder's own flag covers the inherited case. */
+  locked: boolean;
   updatedAt: number;
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
   tagIds: string[];
@@ -29,6 +31,7 @@ export interface FolderRow {
   id: string;
   name: string;
   parentId?: string;
+  locked: boolean;
 }
 
 export interface TagRow {
@@ -46,6 +49,7 @@ interface DbNoteRow {
   pinned: boolean;
   status: string;
   folder_id: string | null;
+  locked: boolean | null;
   updated_at: string;
 }
 
@@ -53,6 +57,7 @@ interface DbFolderRow {
   id: string;
   name: string;
   parent_id: string | null;
+  locked: boolean | null;
 }
 
 interface DbTagRow {
@@ -71,6 +76,7 @@ function mapNote(row: DbNoteRow, vectorStatus?: NoteRow["vectorStatus"], tagIds:
     pinned: row.pinned,
     status: row.status as NoteRow["status"],
     folderId: row.folder_id ?? undefined,
+    locked: row.locked === true,
     updatedAt: new Date(row.updated_at).getTime(),
     vectorStatus,
     tagIds,
@@ -78,7 +84,7 @@ function mapNote(row: DbNoteRow, vectorStatus?: NoteRow["vectorStatus"], tagIds:
 }
 
 function mapFolder(row: DbFolderRow): FolderRow {
-  return { id: row.id, name: row.name, parentId: row.parent_id ?? undefined };
+  return { id: row.id, name: row.name, parentId: row.parent_id ?? undefined, locked: row.locked === true };
 }
 
 function mapTag(row: DbTagRow): TagRow {
@@ -198,6 +204,51 @@ export async function setNotePinned(id: string, pinned: boolean): Promise<{ erro
 
   const { error } = await supabase.from("notes").update({ pinned }).eq("id", id);
   return error ? { error: "Não foi possível atualizar." } : {};
+}
+
+export async function setNoteLocked(id: string, locked: boolean): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("notes").update({ locked }).eq("id", id);
+  return error ? { error: "Não foi possível atualizar." } : {};
+}
+
+export async function setFolderLocked(id: string, locked: boolean): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const { error } = await supabase.from("folders").update({ locked }).eq("id", id);
+  return error ? { error: "Não foi possível atualizar." } : {};
+}
+
+/**
+ * Whether a note is locked directly or by any folder above it. Computed on the
+ * server so a locked note's page never renders its content for a frame before
+ * the client store has hydrated and could work it out itself.
+ */
+export async function getNoteLockState(id: string): Promise<boolean> {
+  const { supabase, user } = await requireUser();
+  if (!user) return false;
+
+  const [{ data: note }, { data: folders }] = await Promise.all([
+    supabase.from("notes").select("locked, folder_id").eq("id", id).maybeSingle(),
+    supabase.from("folders").select("id, parent_id, locked"),
+  ]);
+  if (!note) return false;
+  if (note.locked) return true;
+
+  const byId = new Map((folders ?? []).map((f) => [f.id as string, f]));
+  const seen = new Set<string>();
+  let cursor = note.folder_id as string | null;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const folder = byId.get(cursor);
+    if (!folder) break;
+    if (folder.locked) return true;
+    cursor = folder.parent_id as string | null;
+  }
+  return false;
 }
 
 type NoteStatus = "active" | "archived" | "trashed";

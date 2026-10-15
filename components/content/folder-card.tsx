@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Folder, MoreHorizontal, Upload } from "lucide-react";
+import { Folder, Lock, LockOpen, MoreHorizontal, Upload } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +18,11 @@ export interface FolderCardProps {
   onOpen?: () => void;
   onRename?: (name: string) => void;
   onDelete?: () => void;
+  /** Hidden behind the lock: the real name and item count aren't shown and the folder can't be renamed until unlocked. */
+  masked?: boolean;
+  /** Locked on its own (not only through a parent folder) — picks "Trancar" vs "Destrancar". */
+  lockedDirectly?: boolean;
+  onToggleLock?: () => void;
   onDropItems?: (items: DiscoveredFile[]) => void;
   /** Called with the dragged note/file ids when they're dropped here to move them into this folder. */
   onDropNoteIds?: (ids: string[]) => void;
@@ -29,6 +34,9 @@ export function FolderCard({
   onOpen,
   onRename,
   onDelete,
+  masked = false,
+  lockedDirectly = false,
+  onToggleLock,
   onDropItems,
   onDropNoteIds,
 }: FolderCardProps) {
@@ -129,9 +137,16 @@ export function FolderCard({
         />
       ) : (
         <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col text-left cursor-pointer">
-          <span className="truncate font-heading text-[15px]">{name}</span>
+          <span className="flex min-w-0 items-center gap-1.5 font-heading text-[15px]">
+            {(masked || lockedDirectly) && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Trancada" />}
+            <span className="truncate">{masked ? "Pasta trancada" : name}</span>
+          </span>
           <span className="text-[11.5px] text-muted-foreground">
-            {isDragOver ? "Soltar aqui" : `${itemCount} ${itemCount === 1 ? "item" : "itens"}`}
+            {isDragOver
+              ? "Soltar aqui"
+              : masked
+                ? "Toque para desbloquear"
+                : `${itemCount} ${itemCount === 1 ? "item" : "itens"}`}
           </span>
         </button>
       )}
@@ -147,7 +162,13 @@ export function FolderCard({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {onRename && (
+          {onToggleLock && (
+            <DropdownMenuItem onSelect={onToggleLock}>
+              {lockedDirectly ? <LockOpen className="size-4" /> : <Lock className="size-4" />}
+              {lockedDirectly ? "Destrancar pasta" : "Trancar pasta"}
+            </DropdownMenuItem>
+          )}
+          {onRename && !masked && (
             <DropdownMenuItem
               onSelect={() => {
                 setDraft(name);

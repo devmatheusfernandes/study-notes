@@ -5,6 +5,7 @@ import { FileQuestion } from "lucide-react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { NoteEditor } from "./note-editor";
+import { LockGate } from "@/components/lock/lock-gate";
 
 /**
  * Rendered at /notes-offline — the Service Worker's fallback body for any
@@ -44,7 +45,11 @@ export function OfflineNoteView() {
   // store alone — files/.jwpub/.pdf keep their content in Storage/separate
   // tables that never get mirrored to localStorage.
   if (note && note.type === "nota") {
-    return <NoteEditor noteId={note.id} onBack={() => { window.location.href = "/notes"; }} />;
+    return (
+      <LockGate noteId={note.id} initialLocked={false}>
+        <NoteEditor noteId={note.id} onBack={() => { window.location.href = "/notes"; }} />
+      </LockGate>
+    );
   }
 
   return (

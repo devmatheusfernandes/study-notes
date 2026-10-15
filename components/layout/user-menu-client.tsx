@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { signOut } from "@/app/login/actions";
+import { signOutAndWipeLocalData } from "@/lib/sign-out-client";
 import { useHistoryVaultUiStore } from "@/lib/store/history-vault-ui-store";
 
 interface UserMenuClientProps {
@@ -52,7 +52,7 @@ export function UserMenuClient({ email }: UserMenuClientProps) {
           Configurações
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={() => signOut()}>
+        <DropdownMenuItem variant="destructive" onSelect={() => void signOutAndWipeLocalData()}>
           <LogOut className="size-4" />
           Sair
         </DropdownMenuItem>

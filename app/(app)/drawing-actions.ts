@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptText, decryptText } from "@/lib/encryption";
 import { transcribeAudio, MAX_TRANSCRIPTION_BYTES } from "@/lib/vector/openai";
 import { MAX_AUDIO_SIZE, NOTE_AUDIO_BUCKET } from "@/lib/storage-config";
+import { isOwnedStoragePath } from "@/lib/storage-path";
 
 export interface DrawingRow {
   strokes: string;
@@ -105,7 +106,9 @@ export async function finalizeAudioUpload(
 ): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada. Entre novamente." };
-  if (!storagePath.startsWith(`${user.id}/${noteId}/`)) return { error: "Acesso negado." };
+  if (!isOwnedStoragePath(storagePath, user.id) || !storagePath.startsWith(`${user.id}/${noteId}/`)) {
+    return { error: "Acesso negado." };
+  }
 
   const admin = createAdminClient();
   const slashIndex = storagePath.lastIndexOf("/");
@@ -157,7 +160,7 @@ export async function finalizeAudioUpload(
 export async function getAudioUrl(storagePath: string): Promise<{ url?: string; error?: string }> {
   const { user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
-  if (!storagePath.startsWith(`${user.id}/`)) return { error: "Acesso negado." };
+  if (!isOwnedStoragePath(storagePath, user.id)) return { error: "Acesso negado." };
 
   const admin = createAdminClient();
   const { data, error } = await admin.storage
@@ -182,7 +185,7 @@ export async function transcribeNoteAudio(noteId: string): Promise<{ text?: stri
     .select("audio_path, audio_duration_ms")
     .eq("note_id", noteId)
     .maybeSingle();
-  if (!row?.audio_path || !row.audio_path.startsWith(`${user.id}/`)) {
+  if (!row?.audio_path || !isOwnedStoragePath(row.audio_path, user.id)) {
     return { error: "Esta nota não tem gravação." };
   }
 
@@ -234,7 +237,7 @@ export async function deleteDrawingAudio(noteId: string): Promise<{ error?: stri
     .eq("note_id", noteId)
     .maybeSingle();
 
-  if (data?.audio_path?.startsWith(`${user.id}/`)) {
+  if (isOwnedStoragePath(data?.audio_path, user.id)) {
     const admin = createAdminClient();
     await admin.storage.from(NOTE_AUDIO_BUCKET).remove([data.audio_path]);
   }
@@ -267,7 +270,7 @@ export async function deleteDrawingAudioForNotes(noteIds: string[]): Promise<voi
 
   const paths = (data ?? [])
     .map((row) => row.audio_path as string)
-    .filter((path) => path.startsWith(`${user.id}/`));
+    .filter((path) => isOwnedStoragePath(path, user.id));
   if (paths.length === 0) return;
 
   const admin = createAdminClient();

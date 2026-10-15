@@ -55,13 +55,24 @@ declare global {
 
 declare const self: ServiceWorkerGlobalScope;
 
-// note-images and jwpub-media are both public-read, content-addressed-by-UUID
-// Supabase Storage buckets (see lib/storage-config.ts) — stable URLs that
+// jwpub-media is a public-read, content-addressed-by-UUID Supabase Storage
+// bucket (see lib/storage-config.ts) — stable URLs that
 // never change once uploaded, so CacheFirst is safe. This runs before
 // defaultCache because defaultCache's own image rule is a same-origin-only
 // RegExp route and never matches these cross-origin *.supabase.co URLs.
 // Extends the app's offline-first note text (lib/store/notes-store.ts) to
 // the images referenced inside that same text.
+// Note images are private now: they come from the session-checked same-origin
+// /api/note-images/... route, and the whole of Cache Storage is wiped on sign-out
+// (lib/sign-out-client.ts), so caching them for offline use leaves nothing behind.
+const noteImagesCaching: RuntimeCaching = {
+  matcher: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith("/api/note-images/"),
+  handler: new CacheFirst({
+    cacheName: "note-images-private",
+    plugins: [new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 })],
+  }),
+};
+
 const supabaseMediaCaching: RuntimeCaching = {
   matcher: ({ url }) => url.hostname.endsWith(".supabase.co") && url.pathname.includes("/storage/v1/object/public/"),
   handler: new CacheFirst({
@@ -99,7 +110,7 @@ const serwist = new Serwist({
   skipWaiting: false,
   clientsClaim: true,
   navigationPreload: true,
-  runtimeCaching: [supabaseMediaCaching, wasmCaching, ...rscCacheKeyFix, ...defaultCache],
+  runtimeCaching: [noteImagesCaching, supabaseMediaCaching, wasmCaching, ...rscCacheKeyFix, ...defaultCache],
   fallbacks: {
     entries: [
       // More specific — checked first. A failed /notes/<id> navigation (the

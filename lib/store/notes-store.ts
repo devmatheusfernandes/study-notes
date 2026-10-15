@@ -9,6 +9,8 @@ import {
   createNoteRow,
   updateNoteRow,
   setNotePinned,
+  setNoteLocked as setNoteLockedRow,
+  setFolderLocked as setFolderLockedRow,
   setNoteStatus,
   bulkSetNoteStatus,
   setNoteFolderRow,
@@ -56,6 +58,8 @@ export interface Note {
   vectorStatus?: "completed" | "pending" | "processing" | "failed" | "none";
   /** Tag ids assigned to this note — the `note_tags` join table, denormalized client-side. */
   tagIds: string[];
+  /** Locked directly (PIN/biometric gate). Folders can lock their contents too — see lib/lock/locked.ts. */
+  locked?: boolean;
   /** True while a just-picked/dropped file is uploading or (for .jwpub) still being ingested — not clickable to open yet, see hooks/use-file-upload.ts. */
   processing?: boolean;
   /** 0-100, only meaningful on an optimistic (not-yet-uploaded) file card — a simulated estimate (Server Actions don't expose real byte progress), driven by hooks/use-file-upload.ts. Absent once the card resolves to a real row. */
@@ -69,6 +73,7 @@ export interface Folder {
   name: string;
   /** Parent folder, for folders nested inside other folders. Root folders omit this. */
   parentId?: string;
+  locked?: boolean;
 }
 
 export interface Tag {
@@ -92,11 +97,12 @@ function toNote(row: NoteRow): Note {
     storagePath: row.storagePath,
     vectorStatus: row.vectorStatus,
     tagIds: row.tagIds,
+    locked: row.locked,
   };
 }
 
 function toFolder(row: FolderRow): Folder {
-  return { id: row.id, name: row.name, parentId: row.parentId };
+  return { id: row.id, name: row.name, parentId: row.parentId, locked: row.locked };
 }
 
 function toTag(row: TagRow): Tag {
@@ -115,6 +121,8 @@ type PendingOp =
   | { key: string; entityId: string; kind: "createNote"; payload: { id: string; title: string; body: string; folderId?: string } }
   | { key: string; entityId: string; kind: "updateNote"; payload: { id: string; patch: { title?: string; body?: string } } }
   | { key: string; entityId: string; kind: "setNotePinned"; payload: { id: string; pinned: boolean } }
+  | { key: string; entityId: string; kind: "setNoteLocked"; payload: { id: string; locked: boolean } }
+  | { key: string; entityId: string; kind: "setFolderLocked"; payload: { id: string; locked: boolean } }
   | { key: string; entityId: string; kind: "setNoteStatus"; payload: { id: string; status: NoteStatus } }
   | { key: string; entityId: string; kind: "setNoteFolder"; payload: { id: string; folderId?: string } }
   | { key: string; entityId: string; kind: "deleteNote"; payload: { id: string } }
@@ -171,6 +179,9 @@ interface NotesStore {
   bulkAssignTags: (noteIds: string[], tagIds: string[]) => void;
 
   togglePin: (id: string) => void;
+  /** Locks/unlocks a note behind the PIN/biometric gate (the caller is responsible for having authenticated first when unlocking). */
+  setNoteLocked: (id: string, locked: boolean) => void;
+  setFolderLocked: (id: string, locked: boolean) => void;
   archive: (id: string) => void;
   trash: (id: string) => void;
   restore: (id: string) => void;
@@ -240,6 +251,10 @@ function opAction(op: PendingOp): () => Promise<{ error?: string }> {
       return () => updateNoteRow(op.payload.id, op.payload.patch);
     case "setNotePinned":
       return () => setNotePinned(op.payload.id, op.payload.pinned);
+    case "setNoteLocked":
+      return () => setNoteLockedRow(op.payload.id, op.payload.locked);
+    case "setFolderLocked":
+      return () => setFolderLockedRow(op.payload.id, op.payload.locked);
     case "setNoteStatus":
       return () => setNoteStatus(op.payload.id, op.payload.status);
     case "setNoteFolder":
@@ -615,6 +630,32 @@ export const useNotesStore = create<NotesStore>()(
           if (outcome === "rejected") {
             set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, pinned: !nextPinned } : n)) }));
             notify.error("Não foi possível fixar a nota");
+          }
+        });
+      },
+
+      setNoteLocked: (id, locked) => {
+        const previous = get().notes.find((n) => n.id === id)?.locked ?? false;
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, locked } : n)) }));
+
+        const op: PendingOp = { key: `note:${id}:lock`, entityId: id, kind: "setNoteLocked", payload: { id, locked } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, locked: previous } : n)) }));
+            notify.error("Não foi possível alterar o bloqueio da nota");
+          }
+        });
+      },
+
+      setFolderLocked: (id, locked) => {
+        const previous = get().folders.find((f) => f.id === id)?.locked ?? false;
+        set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, locked } : f)) }));
+
+        const op: PendingOp = { key: `folder:${id}:lock`, entityId: id, kind: "setFolderLocked", payload: { id, locked } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, locked: previous } : f)) }));
+            notify.error("Não foi possível alterar o bloqueio da pasta");
           }
         });
       },

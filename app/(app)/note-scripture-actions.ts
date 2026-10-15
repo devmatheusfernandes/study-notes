@@ -51,7 +51,14 @@ export async function getNoteScriptureMentions(
     notes: { title: string; updated_at: string } | { title: string; updated_at: string }[];
   };
 
-  const mentions = ((data ?? []) as unknown as Row[]).map((row) => {
+  // Locked notes (directly or through a folder) must not surface their title or
+  // snippet here — anyone holding the unlocked device could read them off this tab.
+  const { data: lockedRows } = await supabase.rpc("locked_note_ids");
+  const lockedIds = new Set((lockedRows ?? []) as string[]);
+
+  const mentions = ((data ?? []) as unknown as Row[])
+    .filter((row) => !lockedIds.has(row.note_id))
+    .map((row) => {
     const note = Array.isArray(row.notes) ? row.notes[0] : row.notes;
     return {
       noteId: row.note_id,

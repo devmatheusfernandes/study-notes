@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FILES_BUCKET } from "@/lib/storage-config";
+import { isOwnedStoragePath } from "@/lib/storage-path";
 import { parseJwlibrary } from "@/lib/jwlibrary/parser";
 import { saveJwlibraryBackup } from "@/app/(app)/jwlibrary-actions";
 
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   // The bucket has no RLS of its own — the path-prefix check is the real
   // ownership control here, same pattern as every other admin-client Storage
   // access in this app (see files-actions.ts).
-  if (!note.storage_path.startsWith(`${user.id}/`)) {
+  if (!isOwnedStoragePath(note.storage_path, user.id)) {
     return Response.json({ error: "Acesso negado." }, { status: 403 });
   }
 

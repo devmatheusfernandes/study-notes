@@ -1021,11 +1021,16 @@ export async function fetchExactMetadataMatches(
     // stray word — safe to be this lenient specifically because it's scoped
     // to just the caller's own content (RLS), not a shared catalog.
     const orExpr = noteKeywords.map((w) => `content.ilike.%${escapeLikePattern(w)}%`).join(",");
-    const { data: chunkRows } = await supabase
+    // Locked notes are off-limits to the assistant (it answers to whoever holds the device).
+    const { data: lockedRows } = await supabase.rpc("locked_note_ids");
+    const lockedIds = new Set((lockedRows ?? []) as string[]);
+
+    const { data: rawChunkRows } = await supabase
       .from("note_embeddings")
       .select("note_id, content, metadata, jwpub_chapter_id")
       .or(orExpr)
       .limit(30);
+    const chunkRows = (rawChunkRows ?? []).filter((row) => !lockedIds.has(row.note_id));
 
     const minHits = noteKeywords.length <= 2 ? noteKeywords.length : Math.ceil(noteKeywords.length / 2);
     const scored = (chunkRows ?? [])
