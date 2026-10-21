@@ -237,7 +237,7 @@ export function AssistantSurface() {
           animate={{ width: 420, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: "spring", stiffness: 320, damping: 34 }}
-          className="hidden shrink-0 overflow-hidden border-l border-border bg-[#161413] md:block"
+          className="hidden shrink-0 overflow-hidden border-l border-border bg-sidebar md:block"
         >
           <div className="flex h-dvh w-[420px] flex-col">
             <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-5">

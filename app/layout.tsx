@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { DeviceListener } from "@/components/providers/device-listener";
 import { SwUpdateListener } from "@/components/providers/sw-update-listener";
 import { UpdateToast } from "@/components/providers/update-toast";
+import { ThemeProvider } from "@/components/providers/theme-provider";
 import "./globals.css";
 
 const caprasimo = Caprasimo({
@@ -43,7 +44,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#121110",
+  // Must match --background in app/globals.css. ThemeProvider overwrites
+  // both once an explicit Claro/Escuro choice disagrees with the OS.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8f2e9" },
+    { media: "(prefers-color-scheme: dark)", color: "#121110" },
+  ],
   // Without this, Android/Chrome leaves the layout viewport (and every dvh/vh
   // calc) untouched when the on-screen keyboard opens and instead just shrinks
   // the *visual* viewport — which is what made the sticky assistant dock and
@@ -69,6 +75,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="pt-BR"
+      // next-themes sets the `dark` class on <html> from an inline script
+      // before hydration, so the server's className never matches the client's.
+      suppressHydrationWarning
       className={`${caprasimo.variable} ${figtree.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body
@@ -82,18 +91,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         tabIndex={-1}
         className="min-h-full flex flex-col bg-background text-foreground font-sans"
       >
-        <DeviceListener />
-        {/* reloadOnOnline defaults to true and force-calls location.reload() on
-            every "online" event — DeviceListener already handles reconnection
-            gracefully via the offline outbox, so a full reload here would just
-            discard in-progress state the outbox was designed to preserve. */}
-        <SerwistProvider swUrl="/serwist/sw.js" reloadOnOnline={false}>
-          <SwUpdateListener />
-          <UpdateToast />
-          {children}
-          <Toaster />
-        </SerwistProvider>
-        <div id="vault-root" />
+        <ThemeProvider>
+          <DeviceListener />
+          {/* reloadOnOnline defaults to true and force-calls location.reload() on
+              every "online" event — DeviceListener already handles reconnection
+              gracefully via the offline outbox, so a full reload here would just
+              discard in-progress state the outbox was designed to preserve. */}
+          <SerwistProvider swUrl="/serwist/sw.js" reloadOnOnline={false}>
+            <SwUpdateListener />
+            <UpdateToast />
+            {children}
+            <Toaster />
+          </SerwistProvider>
+          <div id="vault-root" />
+        </ThemeProvider>
       </body>
     </html>
   );

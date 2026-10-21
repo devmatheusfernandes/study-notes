@@ -60,6 +60,25 @@ export const INK_COLORS = [
 
 export const HIGHLIGHT_COLORS = ["#F2C744", "#7BE08A", "#6FC5F0", "#F08AC0"] as const;
 
+/** The resolved app theme the ink is being painted over. */
+export type InkAppearance = "light" | "dark";
+
+/**
+ * The two neutral inks mean "the page's text colour" and "its opposite", not
+ * literally cream and black — cream ink on the light theme's cream page would
+ * vanish. So on light they swap places at display time only: the stored value
+ * never changes, and a note written in either theme reads in the other (the
+ * same trick Samsung Notes plays with black/white ink in dark mode). Every
+ * other ink is a real colour and is drawn as stored.
+ */
+export function displayInkColor(color: string, appearance: InkAppearance = "dark"): string {
+  if (appearance === "dark") return color;
+  const upper = color.toUpperCase();
+  if (upper === INK_COLORS[0]) return INK_COLORS[1];
+  if (upper === INK_COLORS[1]) return INK_COLORS[0];
+  return color;
+}
+
 export const PEN_SIZES = [3, 6, 12] as const;
 export const HIGHLIGHTER_SIZE = 28;
 
@@ -141,7 +160,12 @@ function outlineToPath(outline: number[][]): Path2D {
  * on the recording's timeline — that partial reveal is what makes the replay
  * look like the pen is moving again rather than strokes popping in whole.
  */
-export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, revealUntilMs?: number) {
+export function drawStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: Stroke,
+  revealUntilMs?: number,
+  appearance: InkAppearance = "dark"
+) {
   let points = stroke.points;
 
   if (revealUntilMs !== undefined && stroke.t !== undefined) {
@@ -155,12 +179,15 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, reveal
   if (outline.length === 0) return;
 
   ctx.save();
-  ctx.fillStyle = stroke.color;
+  ctx.fillStyle = displayInkColor(stroke.color, appearance);
   if (stroke.tool === "highlighter") {
-    ctx.globalAlpha = 0.32;
+    ctx.globalAlpha = appearance === "dark" ? 0.32 : 0.4;
     // Keeps overlapping highlighter passes from compounding into a solid
     // block — the same way a real marker doesn't get darker on a second pass.
-    ctx.globalCompositeOperation = "lighter";
+    // "lighter" only works over a dark page (adding light to cream saturates
+    // to white and the marker disappears); over a light page a real marker
+    // multiplies, so that's what light mode uses.
+    ctx.globalCompositeOperation = appearance === "dark" ? "lighter" : "multiply";
   }
   ctx.fill(outlineToPath(outline));
   ctx.restore();
@@ -169,15 +196,16 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, reveal
 export function renderStrokes(
   ctx: CanvasRenderingContext2D,
   strokes: Stroke[],
-  revealUntilMs?: number
+  revealUntilMs?: number,
+  appearance: InkAppearance = "dark"
 ) {
   // Highlighter under ink, always — otherwise a marker pass drawn after the
   // writing veils it.
   for (const stroke of strokes) {
-    if (stroke.tool === "highlighter") drawStroke(ctx, stroke, revealUntilMs);
+    if (stroke.tool === "highlighter") drawStroke(ctx, stroke, revealUntilMs, appearance);
   }
   for (const stroke of strokes) {
-    if (stroke.tool !== "highlighter") drawStroke(ctx, stroke, revealUntilMs);
+    if (stroke.tool !== "highlighter") drawStroke(ctx, stroke, revealUntilMs, appearance);
   }
 }
 

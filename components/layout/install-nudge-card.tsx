@@ -53,7 +53,7 @@ export function InstallNudgeCard() {
           type="button"
           onClick={dismiss}
           aria-label="Dispensar"
-          className="-m-1 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          className="-m-1 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         >
           <X className="size-3.5" />
         </button>

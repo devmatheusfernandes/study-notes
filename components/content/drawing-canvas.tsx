@@ -11,6 +11,7 @@ import {
   type DrawTool,
   type Stroke,
 } from "@/lib/drawing/strokes";
+import { useInkAppearance } from "@/hooks/ui/use-ink-appearance";
 
 interface DrawingCanvasProps {
   strokes: Stroke[];
@@ -76,6 +77,7 @@ export function DrawingCanvas({
   const baseRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const appearance = useInkAppearance();
 
   const [box, setBox] = useState({ width: 0, height: 0 });
 
@@ -150,8 +152,8 @@ export function DrawingCanvas({
     const ctx = configure(baseRef.current);
     if (!ctx) return;
     ctx.clearRect(0, 0, PAGE_WIDTH, logicalHeight);
-    renderStrokes(ctx, strokes, revealUntilMs);
-  }, [strokes, revealUntilMs, configure, logicalHeight]);
+    renderStrokes(ctx, strokes, revealUntilMs, appearance);
+  }, [strokes, revealUntilMs, configure, logicalHeight, appearance]);
 
   const toPagePoint = useCallback(
     (clientX: number, clientY: number) => {
@@ -178,7 +180,7 @@ export function DrawingCanvas({
       size,
       tool: tool === "highlighter" ? "highlighter" : "pen",
       points,
-    });
+    }, undefined, appearance);
 
     // Remember what was painted so the next frame clears only that, instead of
     // wiping a canvas that may be several screens tall on every pointermove.
@@ -199,7 +201,7 @@ export function DrawingCanvas({
       maxX: maxX + pad,
       maxY: maxY + pad,
     };
-  }, [clearLive, color, size, tool]);
+  }, [clearLive, color, size, tool, appearance]);
 
   function pushPoint(event: React.PointerEvent, clientX: number, clientY: number, pressure: number) {
     const point = toPagePoint(clientX, clientY);

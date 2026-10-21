@@ -44,8 +44,8 @@ const TYPE_CONFIG: Record<ContentType, { label: string; icon: LucideIcon; classN
   pdf: { label: "PDF", icon: FileText, className: "bg-foreground/10 text-foreground/80" },
   docx: { label: "DOCX", icon: FileType, className: "bg-foreground/10 text-foreground/80" },
   xlsx: { label: "XLSX", icon: FileSpreadsheet, className: "bg-foreground/10 text-foreground/80" },
-  jwpub: { label: "JWPUB", icon: FileText, className: "bg-[#8B5CF6]/20 text-[#8B5CF6]" },
-  jwlibrary: { label: "BACKUP", icon: BookMarked, className: "bg-sky-500/20 text-sky-400" },
+  jwpub: { label: "JWPUB", icon: FileText, className: "bg-publication/15 text-publication" },
+  jwlibrary: { label: "BACKUP", icon: BookMarked, className: "bg-info/15 text-info" },
   arquivo: { label: "ARQUIVO", icon: File, className: "bg-foreground/10 text-foreground/80" },
 };
 
@@ -430,9 +430,9 @@ export function NoteCard({
         {processing && (
           <span
             title={processingLabel}
-            className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25 sm:inline-flex"
+            className="hidden shrink-0 items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-warning border border-warning/25 sm:inline-flex"
           >
-            <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+            <span className="size-1.5 animate-pulse rounded-full bg-warning" />
             {processingLabel}
           </span>
         )}
@@ -443,7 +443,7 @@ export function NoteCard({
           </span>
         )}
         {!processing && (vectorStatus === "pending" || vectorStatus === "processing") && (
-          <span title="Vetorização em andamento" className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25 sm:inline-flex">
+          <span title="Vetorização em andamento" className="hidden shrink-0 items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-warning border border-warning/25 sm:inline-flex">
             <Sparkles className="size-2.5 animate-pulse" />
             Vetorizando…
           </span>
@@ -485,9 +485,9 @@ export function NoteCard({
         {processing && (
           <span
             title={processingLabel}
-            className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25"
+            className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-warning border border-warning/25"
           >
-            <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+            <span className="size-1.5 animate-pulse rounded-full bg-warning" />
             {processingLabel}
           </span>
         )}
@@ -503,9 +503,9 @@ export function NoteCard({
         {!processing && (vectorStatus === "pending" || vectorStatus === "processing") && (
           <span
             title="Vetorização em andamento"
-            className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-amber-400 border border-amber-500/25"
+            className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-warning border border-warning/25"
           >
-            <Sparkles className="size-2.5 animate-pulse text-amber-400" />
+            <Sparkles className="size-2.5 animate-pulse text-warning" />
             Vetorizando…
           </span>
         )}

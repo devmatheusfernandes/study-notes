@@ -128,7 +128,7 @@ export function HeaderSearchInput({ placeholder }: { placeholder?: string }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-white/12 bg-[#211f1e]/95 shadow-[0_12px_36px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+            className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-foreground/12 bg-glass/95 shadow-[0_12px_36px_var(--shadow)] backdrop-blur-2xl"
           >
             <AnimatePresence mode="wait">
               {phase === "menu" ? (
@@ -154,7 +154,7 @@ export function HeaderSearchInput({ placeholder }: { placeholder?: string }) {
                           "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-all",
                           isSelected
                             ? "border-accent/50 bg-accent/20 text-accent"
-                            : "border-white/10 bg-white/5 text-foreground/80 hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
+                            : "border-foreground/10 bg-foreground/5 text-foreground/80 hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
                         )}
                       >
                         <TagDot color={tag.color} />
@@ -165,7 +165,7 @@ export function HeaderSearchInput({ placeholder }: { placeholder?: string }) {
                   <button
                     type="button"
                     onClick={() => setPhase("create")}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/15 px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-all hover:border-accent/50 hover:text-accent"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-foreground/15 px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-all hover:border-accent/50 hover:text-accent"
                   >
                     <Plus className="size-3 shrink-0" />
                     Nova tag
@@ -185,7 +185,7 @@ export function HeaderSearchInput({ placeholder }: { placeholder?: string }) {
                       type="button"
                       onClick={() => setPhase("menu")}
                       aria-label="Voltar"
-                      className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+                      className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
                     >
                       <X className="size-3.5" />
                     </button>

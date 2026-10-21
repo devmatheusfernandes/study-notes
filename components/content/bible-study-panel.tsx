@@ -201,7 +201,7 @@ function VerseHeading({ verse, onClick }: { verse: number | null; onClick: () =>
       // showing through right at the sticky boundary. `-mx-5`/`px-5` bleeds
       // the full 20px, so the header is edge-to-edge with the panel itself,
       // not just with its own already-inset flex column.
-      className="sticky top-0 z-10 -mx-5 flex w-[calc(100%+2.5rem)] items-baseline gap-1.5 bg-[#161413] px-5 py-1.5 text-left font-mono text-[11px] tracking-[0.04em] text-accent shadow-[0_1px_0_0_var(--border)] transition-colors hover:text-foreground"
+      className="sticky top-0 z-10 -mx-5 flex w-[calc(100%+2.5rem)] items-baseline gap-1.5 bg-sidebar px-5 py-1.5 text-left font-mono text-[11px] tracking-[0.04em] text-accent shadow-[0_1px_0_0_var(--border)] transition-colors hover:text-foreground"
     >
       {verse === null ? "sobrescrito" : `versículo ${verse}`}
     </button>

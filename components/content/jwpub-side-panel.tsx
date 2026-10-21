@@ -71,7 +71,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: 
           // the accessibility tree too — otherwise Tab lands on controls
           // nobody can see.
           inert={!isTop}
-          className="sticky top-0 hidden h-dvh shrink-0 overflow-hidden border-l border-border bg-[#161413] md:block"
+          className="sticky top-0 hidden h-dvh shrink-0 overflow-hidden border-l border-border bg-sidebar md:block"
         >
           <div className="flex h-full flex-col" style={{ width }}>
             <header className="flex items-center gap-2.5 border-b border-border px-5 py-4">

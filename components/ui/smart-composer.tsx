@@ -399,7 +399,7 @@ export function SmartComposer(props: SmartComposerProps) {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -8 }}
                 transition={{ duration: 0.18, ease: "easeOut" }}
-                className="flex flex-wrap items-center gap-1.5 border-b border-white/10 px-4 pb-3 pt-3 text-xs"
+                className="flex flex-wrap items-center gap-1.5 border-b border-foreground/10 px-4 pb-3 pt-3 text-xs"
                 data-no-drag
               >
                 <span className="mr-1 font-mono text-[10px] uppercase text-muted-foreground/80">
@@ -416,7 +416,7 @@ export function SmartComposer(props: SmartComposerProps) {
                     const qs = params.toString();
                     router.push(qs ? `/notes/new?${qs}` : "/notes/new");
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-foreground/10 bg-foreground/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
                 >
                   <NotebookPen className="size-3 shrink-0" />
                   <span>Nota</span>
@@ -426,7 +426,7 @@ export function SmartComposer(props: SmartComposerProps) {
                 <button
                   type="button"
                   onClick={() => setDrawerPhase("folder-input")}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-foreground/10 bg-foreground/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
                 >
                   <FolderPlus className="size-3 shrink-0" />
                   <span>Pasta</span>
@@ -439,7 +439,7 @@ export function SmartComposer(props: SmartComposerProps) {
                     onClick={() => {
                       fileInputRef.current?.click();
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-foreground/10 bg-foreground/5 px-2.5 py-1 text-[11.5px] font-medium text-foreground/80 transition-all hover:border-accent/50 hover:bg-accent/15 hover:text-accent"
                   >
                     {isUploading ? (
                       <motion.span
@@ -462,7 +462,7 @@ export function SmartComposer(props: SmartComposerProps) {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 8 }}
                 transition={{ duration: 0.18, ease: "easeOut" }}
-                className="flex items-center gap-2 border-b border-white/10 px-4 pb-3 pt-3"
+                className="flex items-center gap-2 border-b border-foreground/10 px-4 pb-3 pt-3"
                 data-no-drag
               >
                 {/* Back button */}
@@ -473,7 +473,7 @@ export function SmartComposer(props: SmartComposerProps) {
                     setFolderName("");
                   }}
                   aria-label="Voltar"
-                  className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
                 >
                   <X className="size-3.5" />
                 </button>
@@ -530,7 +530,7 @@ export function SmartComposer(props: SmartComposerProps) {
           className="overflow-hidden"
           data-no-drag
         >
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 px-4 pb-3 pt-3 text-xs sm:px-5">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-foreground/10 px-4 pb-3 pt-3 text-xs sm:px-5">
             <span className="mr-1 font-mono text-[10px] uppercase text-muted-foreground/80">
               Procurar em:
             </span>
@@ -546,7 +546,7 @@ export function SmartComposer(props: SmartComposerProps) {
                     "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-all",
                     isSelected
                       ? "bg-accent/20 border border-accent/50 text-accent shadow-xs"
-                      : "bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground"
+                      : "bg-foreground/5 border border-foreground/10 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                   )}
                 >
                   <Icon className="size-3 shrink-0" />
@@ -580,16 +580,16 @@ export function SmartComposer(props: SmartComposerProps) {
       style={gestureEnabled ? { touchAction: "none" } : undefined}
       className={cn(
         "relative w-full overflow-hidden rounded-[28px] sm:rounded-[32px] border transition-colors duration-200",
-        "bg-[#211f1e]/90 backdrop-blur-2xl",
-        !isPanel && "shadow-[0_12px_36px_rgba(0,0,0,0.5)]",
+        "bg-glass/90 backdrop-blur-2xl",
+        !isPanel && "shadow-[0_12px_36px_var(--shadow)]",
         // border states
         gestureEnabled
           ? willCommit
             ? "border-accent"
             : armed
             ? "border-accent/50"
-            : "border-white/12 hover:border-white/20 focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/20"
-          : "border-white/12 hover:border-white/20 focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/20"
+            : "border-foreground/12 hover:border-foreground/20 focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/20"
+          : "border-foreground/12 hover:border-foreground/20 focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/20"
       )}
     >
       {/* Ripple layer */}
@@ -725,7 +725,7 @@ export function SmartComposer(props: SmartComposerProps) {
             <Sparkles className="size-3.5" />
             {/* badge for narrowed chat filters */}
             {isChat && hasNarrowedFilters && !drawerOpen && (
-              <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-[#211f1e]" />
+              <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-glass" />
             )}
           </button>
         ) : (

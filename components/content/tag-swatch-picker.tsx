@@ -23,7 +23,7 @@ export function TagSwatchPicker({ value, onChange, className }: TagSwatchPickerP
           onClick={() => onChange(color)}
           className={cn(
             "size-6 shrink-0 rounded-full transition-transform",
-            value === color ? "scale-110 ring-2 ring-foreground ring-offset-2 ring-offset-background" : "ring-1 ring-white/15 hover:scale-105"
+            value === color ? "scale-110 ring-2 ring-foreground ring-offset-2 ring-offset-background" : "ring-1 ring-foreground/15 hover:scale-105"
           )}
           style={{ backgroundColor: color }}
         />

@@ -113,7 +113,7 @@ export function FolderCard({
     >
       <span
         className={`flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-          isDragOver ? "bg-accent text-background" : "bg-primary/20 text-accent"
+          isDragOver ? "bg-accent text-accent-foreground" : "bg-primary/20 text-accent"
         }`}
       >
         {isDragOver ? <Upload className="size-[18px] animate-bounce" /> : <Folder className="size-[18px]" />}

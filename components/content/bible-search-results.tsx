@@ -46,7 +46,7 @@ type ResultsTab = "versiculos" | "videos" | "perspicaz" | "biblioteca";
 function Highlighted({ html, className }: { html: string; className?: string }) {
   return (
     <span
-      className={cn("[&_mark]:rounded [&_mark]:bg-accent/25 [&_mark]:px-0.5 [&_mark]:text-accent", className)}
+      className={cn("[&_mark]:rounded [&_mark]:bg-accent/15 [&_mark]:px-0.5 [&_mark]:text-accent", className)}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

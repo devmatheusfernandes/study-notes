@@ -50,7 +50,7 @@ export function BulkActionBar({ status, showFolders = false }: BulkActionBarProp
           transition={{ type: "spring", stiffness: 420, damping: 36 }}
           className="pointer-events-none sticky bottom-0 z-30 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-6"
         >
-          <div className="pointer-events-auto flex w-full max-w-2xl flex-wrap items-center gap-2 rounded-3xl border border-border bg-surface-elevated px-4 py-2.5 shadow-[0_14px_34px_rgba(0,0,0,0.5)]">
+          <div className="pointer-events-auto flex w-full max-w-2xl flex-wrap items-center gap-2 rounded-3xl border border-border bg-surface-elevated px-4 py-2.5 shadow-[0_14px_34px_var(--shadow)]">
             <button
               type="button"
               onClick={clear}

@@ -549,7 +549,7 @@ export function JwpubChapterView({
             top: Math.min(selectionPrompt.bottom + 10, window.innerHeight - 52),
             transform: "translateX(-50%)",
           }}
-          className="z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_rgba(0,0,0,0.4)]"
+          className="z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_var(--shadow)]"
         >
           {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
             <button

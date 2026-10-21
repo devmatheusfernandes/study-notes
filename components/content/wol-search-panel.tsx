@@ -19,7 +19,7 @@ interface WolSearchPanelProps {
 function Headline({ html }: { html: string }) {
   return (
     <span
-      className="whitespace-pre-line text-[13.5px] leading-relaxed text-foreground/90 [&_mark]:rounded [&_mark]:bg-accent/25 [&_mark]:px-0.5 [&_mark]:text-accent"
+      className="whitespace-pre-line text-[13.5px] leading-relaxed text-foreground/90 [&_mark]:rounded [&_mark]:bg-accent/15 [&_mark]:px-0.5 [&_mark]:text-accent"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

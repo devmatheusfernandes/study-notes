@@ -1,7 +1,7 @@
 export const vaultIcons = {
     info: (
         <svg
-            className="w-8 h-8 text-indigo-500"
+            className="w-8 h-8 text-info"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -16,7 +16,7 @@ export const vaultIcons = {
     ),
     warning: (
         <svg
-            className="w-8 h-8 text-amber-500"
+            className="w-8 h-8 text-warning"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -31,7 +31,7 @@ export const vaultIcons = {
     ),
     error: (
         <svg
-            className="w-8 h-8 text-rose-500"
+            className="w-8 h-8 text-destructive"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -46,7 +46,7 @@ export const vaultIcons = {
     ),
     success: (
         <svg
-            className="w-8 h-8 text-emerald-500"
+            className="w-8 h-8 text-success"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -92,7 +92,7 @@ export const vaultIcons = {
 
     close: (
         <svg
-            className="w-8 h-8 text-gray-500"
+            className="w-8 h-8 text-muted-foreground"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -107,7 +107,7 @@ export const vaultIcons = {
     ),
     settings: (
         <svg
-            className="w-8 h-8 text-gray-700"
+            className="w-8 h-8 text-muted-foreground"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -128,7 +128,7 @@ export const vaultIcons = {
     ),
     user: (
         <svg
-            className="w-8 h-8 text-purple-500"
+            className="w-8 h-8 text-publication"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -143,7 +143,7 @@ export const vaultIcons = {
     ),
     edit: (
         <svg
-            className="w-8 h-8 text-indigo-500"
+            className="w-8 h-8 text-info"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -158,7 +158,7 @@ export const vaultIcons = {
     ),
     download: (
         <svg
-            className="w-8 h-8 text-emerald-500"
+            className="w-8 h-8 text-success"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -173,7 +173,7 @@ export const vaultIcons = {
     ),
     upload: (
         <svg
-            className="w-8 h-8 text-indigo-500"
+            className="w-8 h-8 text-info"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -188,7 +188,7 @@ export const vaultIcons = {
     ),
     search: (
         <svg
-            className="w-8 h-8 text-gray-500"
+            className="w-8 h-8 text-muted-foreground"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -203,7 +203,7 @@ export const vaultIcons = {
     ),
     notification: (
         <svg
-            className="w-8 h-8 text-amber-500"
+            className="w-8 h-8 text-warning"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -218,7 +218,7 @@ export const vaultIcons = {
     ),
     heart: (
         <svg
-            className="w-8 h-8 text-rose-500"
+            className="w-8 h-8 text-destructive"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -233,7 +233,7 @@ export const vaultIcons = {
     ),
     star: (
         <svg
-            className="w-8 h-8 text-amber-500"
+            className="w-8 h-8 text-warning"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -248,7 +248,7 @@ export const vaultIcons = {
     ),
     calendar: (
         <svg
-            className="w-8 h-8 text-indigo-500"
+            className="w-8 h-8 text-info"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -263,7 +263,7 @@ export const vaultIcons = {
     ),
     lock: (
         <svg
-            className="w-8 h-8 text-gray-700"
+            className="w-8 h-8 text-muted-foreground"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -278,7 +278,7 @@ export const vaultIcons = {
     ),
     unlock: (
         <svg
-            className="w-8 h-8 text-emerald-500"
+            className="w-8 h-8 text-success"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -293,7 +293,7 @@ export const vaultIcons = {
     ),
     home: (
         <svg
-            className="w-8 h-8 text-indigo-500"
+            className="w-8 h-8 text-info"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -308,7 +308,7 @@ export const vaultIcons = {
     ),
     document: (
         <svg
-            className="w-8 h-8 text-indigo-500"
+            className="w-8 h-8 text-info"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

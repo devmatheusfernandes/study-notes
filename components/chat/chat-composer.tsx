@@ -86,10 +86,10 @@ export function ChatComposer({
       <div
         className={cn(
           "group relative flex flex-col overflow-hidden rounded-[28px] sm:rounded-[32px] border transition-all duration-200",
-          "bg-[#211f1e]/90 dark:bg-[#1c1a18]/90 backdrop-blur-2xl shadow-[0_12px_36px_rgba(0,0,0,0.5)]",
+          "bg-glass/90 backdrop-blur-2xl shadow-[0_12px_36px_var(--shadow)]",
           disabled
             ? "border-border/40 opacity-60"
-            : "border-white/12 hover:border-white/20 focus-within:border-accent/60 focus-within:shadow-[0_14px_44px_rgba(0,0,0,0.65)] focus-within:ring-2 focus-within:ring-accent/20"
+            : "border-foreground/12 hover:border-foreground/20 focus-within:border-accent/60 focus-within:shadow-[0_14px_44px_var(--shadow-strong)] focus-within:ring-2 focus-within:ring-accent/20"
         )}
       >
         <AnimatePresence initial={false}>
@@ -102,7 +102,7 @@ export function ChatComposer({
               transition={{ duration: 0.24, ease: "easeOut" }}
               className="overflow-hidden"
             >
-              <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 px-4 pb-3 pt-3 text-xs sm:px-5">
+              <div className="flex flex-wrap items-center gap-1.5 border-b border-foreground/10 px-4 pb-3 pt-3 text-xs sm:px-5">
                 <span className="mr-1 font-mono text-[10px] uppercase text-muted-foreground/80">
                   Procurar em:
                 </span>
@@ -118,7 +118,7 @@ export function ChatComposer({
                         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-all",
                         isSelected
                           ? "bg-accent/20 border border-accent/50 text-accent shadow-xs"
-                          : "bg-white/5 border border-white/10 text-muted-foreground hover:bg-white/10 hover:text-foreground"
+                          : "bg-foreground/5 border border-foreground/10 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                       )}
                     >
                       <Icon className="size-3 shrink-0" />
@@ -147,7 +147,7 @@ export function ChatComposer({
           >
             <Sparkles className="size-3.5" />
             {hasNarrowedFilters && !showFilters && (
-              <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-[#211f1e]" />
+              <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-glass" />
             )}
           </Button>
 

@@ -105,7 +105,7 @@ export function FileDropZone({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
-            className="pointer-events-none fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-elevated px-4 py-2 text-[13px] text-foreground shadow-[0_14px_34px_rgba(0,0,0,0.5)]"
+            className="pointer-events-none fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-elevated px-4 py-2 text-[13px] text-foreground shadow-[0_14px_34px_var(--shadow)]"
           >
             <Loader2 className="size-4 animate-spin text-accent" />
             Processando importação…

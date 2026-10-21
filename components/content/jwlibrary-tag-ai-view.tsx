@@ -330,7 +330,7 @@ export function JwlibraryTagAiView() {
           />
 
           <div className="pointer-events-none sticky bottom-4 z-30 mt-2 flex justify-center">
-            <div className="pointer-events-auto flex items-center gap-2 rounded-3xl border border-border bg-surface-elevated px-4 py-2.5 shadow-[0_14px_34px_rgba(0,0,0,0.5)]">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-3xl border border-border bg-surface-elevated px-4 py-2.5 shadow-[0_14px_34px_var(--shadow)]">
               <span className="text-[13px] text-muted-foreground">
                 {plan.operations.length} sugest{plan.operations.length === 1 ? "ão" : "ões"} pendente
                 {plan.operations.length === 1 ? "" : "s"}

@@ -97,7 +97,7 @@ export const notify = {
 };
 
 const Toaster = ({ ...props }: ToasterProps) => {
-    const { theme } = useTheme();
+    const { resolvedTheme } = useTheme();
     const { isStandalone } = useDevice();
     const isMobile = useIsMobile();
 
@@ -142,7 +142,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     return (
         <>
             <Sonner
-                theme={theme as ToasterProps["theme"]}
+                theme={resolvedTheme as ToasterProps["theme"]}
                 className="toaster group"
                 position={sonnerPosition}
                 icons={{
@@ -155,12 +155,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
                 toastOptions={{
                     style: {
                         background: "var(--primary)",
-                        color: "white",
+                        color: "var(--primary-foreground)",
                         border: "1px solid var(--primary)",
                         borderRadius: "var(--radius)",
                     },
                     classNames: {
-                        description: "!text-white",
+                        description: "!text-primary-foreground",
                     },
                 }}
                 {...props}

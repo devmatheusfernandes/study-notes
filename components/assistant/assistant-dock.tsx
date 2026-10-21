@@ -234,7 +234,7 @@ export function AssistantDock({ variant = "floating" }: AssistantDockProps) {
       style={gestureEnabled ? { touchAction: "none" } : undefined}
       className={cn(
         "relative overflow-hidden rounded-3xl border bg-surface-elevated transition-colors",
-        !isPanel && "shadow-[0_14px_34px_rgba(0,0,0,0.5)]",
+        !isPanel && "shadow-[0_14px_34px_var(--shadow)]",
         willCommit ? "border-accent" : armed ? "border-accent/50" : "border-border"
       )}
     >

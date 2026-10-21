@@ -147,7 +147,7 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
           className={cn(
             "mt-1 flex size-6 shrink-0 items-center justify-center rounded-full transition-all",
             isStreaming
-              ? "bg-accent/25 text-accent shadow-[0_0_12px_rgba(246,160,107,0.4)] ring-2 ring-accent/40"
+              ? "bg-accent/25 text-accent shadow-[0_0_12px_color-mix(in_oklab,var(--accent)_40%,transparent)] ring-2 ring-accent/40"
               : "bg-accent/20 text-accent"
           )}
         >
@@ -236,7 +236,7 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
           })()}
 
           {sourcesUncertain && (
-            <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-amber-600 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-400">
+            <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-[11.5px] leading-relaxed text-warning">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>Nenhuma das fontes abaixo respondeu com certeza — revise se alguma é relevante.</span>
             </div>

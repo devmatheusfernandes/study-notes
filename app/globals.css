@@ -1,6 +1,102 @@
 @import "tailwindcss";
 
+/* Theme switching is class-based (next-themes puts `.dark` on <html>, see
+   components/providers/theme-provider.tsx), so Tailwind's `dark:` variant has
+   to follow that class instead of its default prefers-color-scheme media
+   query — otherwise a user who picked "Escuro" on a light OS would get the
+   dark tokens but none of the `dark:` utilities. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Two palettes of the same "Organic" theme. Every text token was checked
+   against every surface it can sit on (background, card, secondary, surface,
+   surface-elevated, popover, sidebar, and its own 15% tint) and clears WCAG AA
+   4.5:1 in both — keep that true when retuning:
+     light: foreground ≥12.6, muted-foreground ≥5.4, primary/accent/success/
+            destructive/warning/info ≥4.8, *-foreground on its fill ≥5.8
+     dark:  foreground ≥11.7, muted-foreground ≥5.1, primary ≥4.75,
+            destructive ≥4.59, the rest ≥5.9
+   Light is the default `:root`; `.dark` overrides it. */
 :root {
+  color-scheme: light;
+
+  --background: #f8f2e9;
+  --foreground: #2b211a;
+
+  --card: #fffbf5;
+  --card-foreground: #2b211a;
+
+  --popover: #fffdf9;
+  --popover-foreground: #2b211a;
+
+  /* Darker than the dark theme's oranges on purpose: on cream, an orange
+     bright enough to read as "orange" is too light for text. */
+  --primary: #9c4a18;
+  --primary-foreground: #fffaf3;
+
+  --secondary: #efe5d7;
+  --secondary-foreground: #2b211a;
+
+  --muted: #efe5d7;
+  --muted-foreground: #66574a;
+
+  --accent: #9e4511;
+  --accent-foreground: #fffaf3;
+
+  --success: #4a682b;
+  --success-foreground: #fffaf3;
+
+  --destructive: #b23818;
+  --destructive-foreground: #fffaf3;
+
+  --warning: #875600;
+  --warning-foreground: #fffaf3;
+
+  --info: #2c6390;
+  --info-foreground: #fffaf3;
+
+  /* File-type tint for .jwpub cards (note-card.tsx). */
+  --publication: #6d3fc4;
+
+  --border: rgba(43, 33, 26, 0.14);
+  --input: rgba(43, 33, 26, 0.18);
+  --ring: #c2662c;
+
+  --surface: #f3ebe0;
+  --surface-elevated: #fffdf9;
+
+  /* App chrome that sits a step apart from the page: the sidebar and the
+     desktop side panels (assistant, jwpub, study panel's sticky headers). */
+  --sidebar: #f1e9dd;
+  /* Frosted floating surfaces (composers, the search suggestions dropdown) —
+     used at /90–/95 with backdrop-blur. */
+  --glass: #fffdf9;
+  /* Drop-shadow colour for floating bars and popovers. A black 50% shadow
+     reads as a smudge on cream, so light mode uses a faint warm brown. */
+  --shadow: rgba(60, 40, 20, 0.16);
+  --shadow-strong: rgba(60, 40, 20, 0.24);
+
+  /* Bible book divisions (/bible grid) — JW Library tints its book tiles by
+     section in shades of one hue; this is the same idea in the Organic
+     palette. Two four-step ramps: a burnt orange for the Hebrew-Aramaic
+     Scriptures, a warmer orange for the Christian Greek Scriptures. Light
+     mode mixes from brighter oranges than --primary/--accent (those are
+     darkened for text) and stops well short of them, so the book names in
+     --foreground stay at 8.4:1 or better on every step. */
+  --bible-pentateuch: color-mix(in oklab, #c2662c 14%, var(--background));
+  --bible-historical: color-mix(in oklab, #c2662c 24%, var(--background));
+  --bible-poetic: color-mix(in oklab, #c2662c 34%, var(--background));
+  --bible-prophetic: color-mix(in oklab, #c2662c 44%, var(--background));
+  --bible-gospels: color-mix(in oklab, #e0874a 16%, var(--background));
+  --bible-acts: color-mix(in oklab, #e0874a 27%, var(--background));
+  --bible-letters: color-mix(in oklab, #e0874a 38%, var(--background));
+  --bible-revelation: color-mix(in oklab, #e0874a 49%, var(--background));
+
+  --radius: 1.25rem;
+}
+
+.dark {
+  color-scheme: dark;
+
   --background: #121110;
   --foreground: #f5ead8;
 
@@ -10,14 +106,15 @@
   --popover: #241f1d;
   --popover-foreground: #f5ead8;
 
-  --primary: #c67139;
+  /* Was #c67139, which fell to 3.9–4.4:1 as text on secondary/surface-elevated. */
+  --primary: #d98048;
   --primary-foreground: #1b1917;
 
   --secondary: #262220;
   --secondary-foreground: #f5ead8;
 
   --muted: #262220;
-  --muted-foreground: #a89a86;
+  --muted-foreground: #ab9d89;
 
   --accent: #f6a06b;
   --accent-foreground: #241a12;
@@ -25,8 +122,17 @@
   --success: #aebf92;
   --success-foreground: #1b1917;
 
-  --destructive: #e0623f;
+  /* Was #e0623f — 3.99:1 on surface-elevated. */
+  --destructive: #ec6e4b;
   --destructive-foreground: #1b1917;
+
+  --warning: #e9b44c;
+  --warning-foreground: #1b1917;
+
+  --info: #7fb2e0;
+  --info-foreground: #1b1917;
+
+  --publication: #a78bfa;
 
   --border: rgba(245, 234, 216, 0.12);
   --input: rgba(245, 234, 216, 0.12);
@@ -35,12 +141,13 @@
   --surface: #211d1b;
   --surface-elevated: #302b28;
 
-  /* Bible book divisions (/bible grid) — JW Library tints its book tiles by
-     section in shades of one hue; this is the same idea in the Organic
-     palette. Two four-step ramps, mixed from the existing tokens rather than
-     picked by hand: --primary for the Hebrew-Aramaic Scriptures, the warmer
-     --accent for the Christian Greek Scriptures. Every step stays at 5.2:1 or
-     better against --foreground, so the book names keep AA contrast. */
+  --sidebar: #161413;
+  --glass: #211f1e;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --shadow-strong: rgba(0, 0, 0, 0.65);
+
+  /* Mixed from the theme's own tokens; every step stays at 5.2:1 or better
+     against --foreground. */
   --bible-pentateuch: color-mix(in oklab, var(--primary) 24%, var(--background));
   --bible-historical: color-mix(in oklab, var(--primary) 38%, var(--background));
   --bible-poetic: color-mix(in oklab, var(--primary) 52%, var(--background));
@@ -49,8 +156,6 @@
   --bible-acts: color-mix(in oklab, var(--accent) 31%, var(--background));
   --bible-letters: color-mix(in oklab, var(--accent) 42%, var(--background));
   --bible-revelation: color-mix(in oklab, var(--accent) 53%, var(--background));
-
-  --radius: 1.25rem;
 }
 
 @theme inline {
@@ -77,6 +182,13 @@
   --color-ring: var(--ring);
   --color-surface: var(--surface);
   --color-surface-elevated: var(--surface-elevated);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-publication: var(--publication);
+  --color-sidebar: var(--sidebar);
+  --color-glass: var(--glass);
 
   --color-bible-pentateuch: var(--bible-pentateuch);
   --color-bible-historical: var(--bible-historical);

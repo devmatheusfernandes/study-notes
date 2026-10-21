@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { ViewModeToggle } from "@/components/content/view-mode-toggle";
+import { ThemeToggle } from "@/components/settings/theme-toggle";
 import { AiUsageCard } from "@/components/settings/ai-usage-card";
 import { VectorQueueCard } from "@/components/settings/vector-queue-card";
 import { GlobalVideoSyncCard } from "@/components/settings/global-video-sync-card";
@@ -153,9 +154,10 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                       <h2 className="font-heading text-base text-foreground">Aparência & Exibição</h2>
                     </div>
                     <p className="text-[12.5px] text-muted-foreground leading-relaxed">
-                      Escolha como suas notas, arquivados e lixeira são organizados na tela principal.
+                      Escolha o tema do app e como suas notas, arquivados e lixeira são organizados na tela principal.
                     </p>
-                    <div className="pt-1">
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <ThemeToggle />
                       <ViewModeToggle />
                     </div>
                   </div>
@@ -239,10 +241,14 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                     <h2 className="font-heading text-base">Aparência & Exibição</h2>
                   </div>
                   <p className="text-[12.5px] text-muted-foreground">
-                    Alterne o formato de grade, lista ou mosaico (masonry) para organizar suas notas.
+                    Escolha o tema claro, escuro ou o do sistema, e o formato de grade ou lista para organizar suas notas.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <span className="text-sm font-medium text-foreground/90">Tema</span>
+                  <ThemeToggle />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="text-sm font-medium text-foreground/90">Modo de Exibição</span>
                   <ViewModeToggle />
                 </div>

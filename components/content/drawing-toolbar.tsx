@@ -26,8 +26,10 @@ import {
   HIGHLIGHT_COLORS,
   INK_COLORS,
   PEN_SIZES,
+  displayInkColor,
   type DrawTool,
 } from "@/lib/drawing/strokes";
+import { useInkAppearance } from "@/hooks/ui/use-ink-appearance";
 import type { RecorderState } from "@/hooks/use-audio-recorder";
 
 interface DrawingToolbarProps {
@@ -96,6 +98,8 @@ export function DrawingToolbar({
 }: DrawingToolbarProps) {
   const [inkOpen, setInkOpen] = useState(false);
   const palette = tool === "highlighter" ? HIGHLIGHT_COLORS : INK_COLORS;
+  // Swatches show the ink as it will actually land on this page.
+  const appearance = useInkAppearance();
 
   return (
     <div
@@ -136,7 +140,7 @@ export function DrawingToolbar({
             >
               <span
                 className="size-5 rounded-full border border-border"
-                style={{ backgroundColor: color }}
+                style={{ backgroundColor: displayInkColor(color, appearance) }}
               />
               <ChevronDown className="size-3 text-muted-foreground" />
             </button>
@@ -155,7 +159,7 @@ export function DrawingToolbar({
                       onColorChange(swatch);
                       setInkOpen(false);
                     }}
-                    style={{ backgroundColor: swatch }}
+                    style={{ backgroundColor: displayInkColor(swatch, appearance) }}
                     className={cn(
                       "size-8 rounded-full border transition-transform",
                       color === swatch
