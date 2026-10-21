@@ -466,41 +466,57 @@ export function JwpubReader({
     ).then((groups) => setBibleHighlights(groups.flat()));
   }, []);
 
+  const showResolvedRef = useCallback((resolved: ResolvedJwpubReference, pid?: string) => {
+    setReferenceOpen(true);
+    setReferenceHtml(null);
+    setIsLoadingReference(true);
+    setUnresolvedPubRef(null);
+    setReferenceTarget({
+      noteId: resolved.noteId,
+      publicationTitle: resolved.publicationTitle,
+      chapterTitle: resolved.chapterTitle,
+      documentId: resolved.documentId,
+      pid,
+    });
+    if (resolved.isGlobal) {
+      setReferenceHtml(resolved.contentHtml ?? null);
+      setIsLoadingReference(false);
+      return;
+    }
+    void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
+      setReferenceHtml(result.html ?? null);
+      setIsLoadingReference(false);
+    });
+  }, []);
+
   const handlePublicationRef = useCallback(
     (mepsDocumentId: number, pid?: string) => {
       const resolved = resolvedPubRefs.get(mepsDocumentId);
-      if (!resolved) {
-        // Not in this user's library — open the same panel with just the id,
-        // so it can offer "Baixar" instead of the click doing nothing.
-        setReferenceOpen(true);
-        setReferenceTarget(null);
-        setReferenceHtml(null);
-        setIsLoadingReference(false);
-        setUnresolvedPubRef(mepsDocumentId);
+      if (resolved) {
+        showResolvedRef(resolved, pid);
         return;
       }
+      // Not prefetched — the batch only covers `data-jwpub-pubref` links on
+      // screen, so an excerpt's "Abrir publicação" always lands here. Ask the
+      // server (which also checks global publications like Perspicaz) before
+      // falling back to the "Baixar" prompt.
       setReferenceOpen(true);
+      setReferenceTarget(null);
       setReferenceHtml(null);
       setIsLoadingReference(true);
       setUnresolvedPubRef(null);
-      setReferenceTarget({
-        noteId: resolved.noteId,
-        publicationTitle: resolved.publicationTitle,
-        chapterTitle: resolved.chapterTitle,
-        documentId: resolved.documentId,
-        pid,
-      });
-      if (resolved.isGlobal) {
-        setReferenceHtml(resolved.contentHtml ?? null);
-        setIsLoadingReference(false);
-        return;
-      }
-      void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
-        setReferenceHtml(result.html ?? null);
-        setIsLoadingReference(false);
+      void resolveJwpubReferences([mepsDocumentId]).then((result) => {
+        const hit = result.resolved[0];
+        if (!hit) {
+          setIsLoadingReference(false);
+          setUnresolvedPubRef(mepsDocumentId);
+          return;
+        }
+        setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, hit));
+        showResolvedRef(hit, pid);
       });
     },
-    [resolvedPubRefs]
+    [resolvedPubRefs, showResolvedRef]
   );
 
   const handleExtract = useCallback(

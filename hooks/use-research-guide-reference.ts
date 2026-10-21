@@ -53,6 +53,28 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
     };
   }, [researchGuideEntries]);
 
+  const showResolved = useCallback((resolved: ResolvedJwpubReference) => {
+    setReferenceOpen(true);
+    setReferenceHtml(null);
+    setIsLoadingReference(true);
+    setUnresolvedPubRef(null);
+    setReferenceTarget({
+      noteId: resolved.noteId,
+      publicationTitle: resolved.publicationTitle,
+      chapterTitle: resolved.chapterTitle,
+      documentId: resolved.documentId,
+    });
+    if (resolved.isGlobal) {
+      setReferenceHtml(resolved.contentHtml ?? null);
+      setIsLoadingReference(false);
+      return;
+    }
+    void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
+      setReferenceHtml(result.html ?? null);
+      setIsLoadingReference(false);
+    });
+  }, []);
+
   const openPublicationRef = useCallback(
     (mepsDocumentId: number) => {
       // The two reference surfaces (this one and the extract panel) are
@@ -61,35 +83,31 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
       // pointer instead — two "Referência"-ish sidebars open side by side.
       setOpenExtractIds(null);
       const resolved = resolvedPubRefs.get(mepsDocumentId);
-      if (!resolved) {
-        setReferenceOpen(true);
-        setReferenceTarget(null);
-        setReferenceHtml(null);
-        setIsLoadingReference(false);
-        setUnresolvedPubRef(mepsDocumentId);
+      if (resolved) {
+        showResolved(resolved);
         return;
       }
+      // Not prefetched — the batch above only covers `data-jwpub-pubref`
+      // links, so an excerpt's "Abrir publicação" (its refMepsDocumentId)
+      // always lands here. Ask the server before offering "Baixar": it also
+      // checks global publications like Perspicaz.
       setReferenceOpen(true);
+      setReferenceTarget(null);
       setReferenceHtml(null);
       setIsLoadingReference(true);
       setUnresolvedPubRef(null);
-      setReferenceTarget({
-        noteId: resolved.noteId,
-        publicationTitle: resolved.publicationTitle,
-        chapterTitle: resolved.chapterTitle,
-        documentId: resolved.documentId,
-      });
-      if (resolved.isGlobal) {
-        setReferenceHtml(resolved.contentHtml ?? null);
-        setIsLoadingReference(false);
-        return;
-      }
-      void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
-        setReferenceHtml(result.html ?? null);
-        setIsLoadingReference(false);
+      void resolveJwpubReferences([mepsDocumentId]).then((result) => {
+        const hit = result.resolved[0];
+        if (!hit) {
+          setIsLoadingReference(false);
+          setUnresolvedPubRef(mepsDocumentId);
+          return;
+        }
+        setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, hit));
+        showResolved(hit);
       });
     },
-    [resolvedPubRefs]
+    [resolvedPubRefs, showResolved]
   );
 
   const openExtract = useCallback((extractIds: number[]) => {
@@ -102,20 +120,9 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
       const resolved = result.resolved[0];
       if (!resolved) return;
       setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, resolved));
-      setUnresolvedPubRef(null);
-      setIsLoadingReference(true);
-      setReferenceTarget({
-        noteId: resolved.noteId,
-        publicationTitle: resolved.publicationTitle,
-        chapterTitle: resolved.chapterTitle,
-        documentId: resolved.documentId,
-      });
-      void getChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
-        setReferenceHtml(chapterResult.html ?? null);
-        setIsLoadingReference(false);
-      });
+      showResolved(resolved);
     });
-  }, []);
+  }, [showResolved]);
 
   return {
     referenceOpen,
