@@ -510,6 +510,8 @@ export interface ResolvedJwpubReference {
    */
   contentHtml?: string;
   isGlobal?: boolean;
+  /** `global_publications.symbol` ("it", "rsg") — set only alongside `isGlobal`, so a caller can open the publication's own page on /bible. */
+  symbol?: string;
 }
 
 /**
@@ -558,7 +560,7 @@ export async function resolveJwpubReferences(
   if (stillUnresolved.length > 0) {
     const { data: globalRows } = await supabase
       .from("global_publication_chapters")
-      .select("meps_document_id, document_id, title, content_html, publication_id, global_publications(title)")
+      .select("meps_document_id, document_id, title, content_html, publication_id, global_publications(title, symbol)")
       .in("meps_document_id", stillUnresolved);
 
     for (const row of globalRows ?? []) {
@@ -574,6 +576,7 @@ export async function resolveJwpubReferences(
         chapterTitle: row.title,
         contentHtml: row.content_html ?? "",
         isGlobal: true,
+        symbol: pub.symbol,
       });
     }
   }

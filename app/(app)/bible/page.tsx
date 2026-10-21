@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { BibleReader } from "@/components/content/bible-reader";
+import { isGlobalPublicationSymbol } from "@/lib/jwpub/global-publication-link";
 
 export const metadata: Metadata = {
   title: "Bíblia — Study Notes",
 };
 
 interface BiblePageProps {
-  searchParams: Promise<{ book?: string; chapter?: string; verse?: string }>;
+  searchParams: Promise<{ book?: string; chapter?: string; verse?: string; pub?: string; doc?: string }>;
 }
 
 export default async function BiblePage({ searchParams }: BiblePageProps) {
@@ -15,6 +16,12 @@ export default async function BiblePage({ searchParams }: BiblePageProps) {
   const initialBookOrder = params.book ? Number(params.book) : null;
   const initialChapter = params.chapter ? Number(params.chapter) : null;
   const initialVerse = params.verse ? Number(params.verse) : null;
+  // ?pub=it&doc=… — a global publication's article, linked from an excerpt's
+  // "Abrir publicação" anywhere outside /bible (see useOpenPublicationSource).
+  const docParam = params.doc ? Number(params.doc) : NaN;
+  const initialPublication = isGlobalPublicationSymbol(params.pub)
+    ? { symbol: params.pub, documentId: Number.isFinite(docParam) ? docParam : null }
+    : null;
 
   // BibleReader owns its whole header (its title changes with the current
   // book/chapter, unlike the shared <Header>'s static title) — so the user's
@@ -31,6 +38,7 @@ export default async function BiblePage({ searchParams }: BiblePageProps) {
       initialBookOrder={initialBookOrder}
       initialChapter={initialChapter}
       initialVerse={initialVerse}
+      initialPublication={initialPublication}
       userEmail={user?.email}
     />
   );

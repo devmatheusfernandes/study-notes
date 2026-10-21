@@ -26,6 +26,7 @@ import {
   useBibleResearchGuide,
 } from "@/hooks/use-bible-study-data";
 import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
+import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
@@ -388,6 +389,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     openExtract: onOpenExtract,
     closeExtract,
   } = useResearchGuideReference(researchGuideEntries);
+  const { openSource, surfaceProps: sourceSurfaceProps } = useOpenPublicationSource();
   const openExtracts = (openExtractIds ?? [])
     .map((id) => researchGuideExtracts[id])
     .filter((extract) => extract !== undefined);
@@ -531,8 +533,13 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
         open={openExtractIds !== null}
         extracts={openExtracts}
         onClose={closeExtract}
-        onOpenSource={openPublicationRef}
+        onOpenSource={(mepsDocumentId) => {
+          closeExtract();
+          openSource(mepsDocumentId);
+        }}
       />
+
+      <JwpubReferenceSurface {...sourceSurfaceProps} />
 
       <JwlibraryNoteEditorVault
         open={editingNote !== null || pendingNoteLocation !== null}

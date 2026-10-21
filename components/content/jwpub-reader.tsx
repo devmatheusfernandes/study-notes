@@ -29,6 +29,7 @@ import {
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { useWakeLock } from "@/hooks/use-wake-lock";
+import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
@@ -465,6 +466,8 @@ export function JwpubReader({
       })
     ).then((groups) => setBibleHighlights(groups.flat()));
   }, []);
+
+  const { openSource, surfaceProps: sourceSurfaceProps } = useOpenPublicationSource();
 
   const showResolvedRef = useCallback((resolved: ResolvedJwpubReference, pid?: string) => {
     setReferenceOpen(true);
@@ -992,8 +995,13 @@ export function JwpubReader({
         extracts={openExtracts ?? []}
         isLoading={isLoadingExtracts}
         onClose={() => setOpenExtracts(null)}
-        onOpenSource={handlePublicationRef}
+        onOpenSource={(mepsDocumentId) => {
+          setOpenExtracts(null);
+          openSource(mepsDocumentId);
+        }}
       />
+
+      <JwpubReferenceSurface {...sourceSurfaceProps} />
 
       <JwlibraryHighlightNotePanel
         open={(highlightNote !== null || highlightMark !== null) && !highlightEditMode}

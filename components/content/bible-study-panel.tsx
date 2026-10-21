@@ -12,6 +12,8 @@ import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import type { ChapterVideo } from "@/app/(app)/bible-search-actions";
 import type { ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
+import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
+import type { GlobalPublicationSymbol } from "./global-publication-reader";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
 import { JwpubExtractSurface } from "./jwpub-extract-surface";
 import { NoteMentionPanel } from "./note-mention-panel";
@@ -133,6 +135,8 @@ interface BibleStudyPanelProps extends Omit<BibleStudyTabsProps, "onOpenPublicat
   onClose: () => void;
   /** Excerpts embedded in the guide itself, keyed by extractId — a `data-jwpub-extract` link resolves here, with nothing to fetch or download. */
   researchGuideExtracts: Record<number, ResearchGuideExtract>;
+  /** An excerpt's "Abrir publicação" landed on a shared global publication — /bible opens its page in place rather than navigating to itself. */
+  onOpenGlobalPublication?: (symbol: GlobalPublicationSymbol, documentId: number) => void;
 }
 
 /**
@@ -1058,6 +1062,7 @@ export function BibleStudyPanel({
   onClose,
   researchGuideEntries,
   researchGuideExtracts,
+  onOpenGlobalPublication,
   ...tabsProps
 }: BibleStudyPanelProps) {
   const [openMention, setOpenMention] = useState<NoteScriptureMention | null>(null);
@@ -1075,6 +1080,9 @@ export function BibleStudyPanel({
     openExtract: onOpenExtract,
     closeExtract,
   } = useResearchGuideReference(researchGuideEntries);
+  const { openSource, surfaceProps: sourceSurfaceProps } = useOpenPublicationSource({
+    onOpenGlobal: onOpenGlobalPublication,
+  });
   const openExtracts = (openExtractIds ?? [])
     .map((id) => researchGuideExtracts[id])
     .filter((extract) => extract !== undefined);
@@ -1110,8 +1118,13 @@ export function BibleStudyPanel({
         open={openExtractIds !== null}
         extracts={openExtracts}
         onClose={closeExtract}
-        onOpenSource={openPublicationRef}
+        onOpenSource={(mepsDocumentId) => {
+          closeExtract();
+          openSource(mepsDocumentId);
+        }}
       />
+
+      <JwpubReferenceSurface {...sourceSurfaceProps} />
     </>
   );
 }

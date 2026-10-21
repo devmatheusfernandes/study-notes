@@ -17,6 +17,7 @@ import {
 } from "@/app/(app)/global-publications-actions";
 import { getChapter, resolveJwpubReferences } from "@/app/(app)/jwpub-actions";
 import { getBibleVersesBatch, type BibleVerseRow } from "@/app/(app)/bible-actions";
+import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import { isResearchGuideIntroduction, isResearchGuideTopic } from "@/lib/bible/research-guide-topics";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { JwpubExtractSurface, type JwpubExtractItem } from "./jwpub-extract-surface";
@@ -71,6 +72,8 @@ interface GlobalPublicationReaderProps {
   /** `null` shows the A–Z index; otherwise that article. */
   documentId: number | null;
   onOpenDocument: (documentId: number | null) => void;
+  /** An excerpt's "Abrir publicação" pointed into a DIFFERENT global publication (e.g. from the Guia into Perspicaz). */
+  onOpenGlobalPublication: (symbol: GlobalPublicationSymbol, documentId: number) => void;
   /** Renders the page header — the host owns it (BibleTopHeader) so search etc. stay in one place. */
   renderHeader: (title: string, onBack: () => void) => ReactNode;
   /** Back from the index itself — leaves the publication. */
@@ -91,6 +94,7 @@ export function GlobalPublicationReader({
   symbol,
   documentId,
   onOpenDocument,
+  onOpenGlobalPublication,
   renderHeader,
   onExit,
   onOpenBibleVerse,
@@ -177,6 +181,12 @@ export function GlobalPublicationReader({
       publicationId={index?.publicationId ?? null}
       documentId={documentId}
       onOpenDocument={openDocument}
+      // An excerpt's "Abrir publicação": another article of this same
+      // publication is just the next page; a different one is the host's call.
+      onOpenGlobal={(targetSymbol, targetDocumentId) => {
+        if (targetSymbol === symbol) openDocument(targetDocumentId);
+        else onOpenGlobalPublication(targetSymbol, targetDocumentId);
+      }}
       onOpenBibleVerse={onOpenBibleVerse}
     />
   );
@@ -323,12 +333,14 @@ function PublicationArticle({
   publicationId,
   documentId,
   onOpenDocument,
+  onOpenGlobal,
   onOpenBibleVerse,
 }: {
   header: ReactNode;
   publicationId: string | null;
   documentId: number;
   onOpenDocument: (documentId: number) => void;
+  onOpenGlobal: (symbol: GlobalPublicationSymbol, documentId: number) => void;
   onOpenBibleVerse: (bookOrder: number, chapter: number, verse: number | null) => void;
 }) {
   const cacheKey = publicationId ? `${publicationId}:${documentId}` : null;
@@ -353,6 +365,8 @@ function PublicationArticle({
       cancelled = true;
     };
   }, [publicationId, documentId, cacheKey]);
+
+  const { openSource, surfaceProps: sourceSurfaceProps } = useOpenPublicationSource({ onOpenGlobal });
 
   const openReference = useCallback(
     (mepsDocumentId: number, pid?: string) => {
@@ -472,8 +486,13 @@ function PublicationArticle({
         extracts={panel?.kind === "extract" ? panel.extracts : []}
         isLoading={panel?.kind === "extract" && panel.loading}
         onClose={closePanel}
-        onOpenSource={(mepsDocumentId) => openReference(mepsDocumentId)}
+        onOpenSource={(mepsDocumentId) => {
+          closePanel();
+          openSource(mepsDocumentId);
+        }}
       />
+
+      <JwpubReferenceSurface {...sourceSurfaceProps} />
 
       <JwpubReferenceSurface
         open={panel?.kind === "reference"}

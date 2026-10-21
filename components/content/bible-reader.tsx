@@ -69,6 +69,8 @@ interface BibleReaderProps {
   initialBookOrder: number | null;
   initialChapter: number | null;
   initialVerse?: number | null;
+  /** From ?pub=/?doc= — a global publication's article to open straight away (an excerpt's "Abrir publicação" elsewhere in the app links here). */
+  initialPublication?: { symbol: GlobalPublicationSymbol; documentId: number | null } | null;
   userEmail?: string;
 }
 
@@ -169,7 +171,13 @@ function BibleTopHeader({
  * (bible-study-panel.tsx) is the one place a highlight or note is viewed,
  * recolored, annotated, or deleted from here.
  */
-export function BibleReader({ initialBookOrder, initialChapter, initialVerse, userEmail }: BibleReaderProps) {
+export function BibleReader({
+  initialBookOrder,
+  initialChapter,
+  initialVerse,
+  initialPublication,
+  userEmail,
+}: BibleReaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -203,11 +211,11 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
     });
   }, []);
   const [publication, setPublication] = useState<{ symbol: GlobalPublicationSymbol; documentId: number | null } | null>(
-    null
+    initialPublication ?? null
   );
 
   const [screen, setScreen] = useState<BibleScreen>(
-    initialBookOrder !== null && initialChapter !== null ? "reading" : "books"
+    initialPublication ? "publication" : initialBookOrder !== null && initialChapter !== null ? "reading" : "books"
   );
   const [bookOrder, setBookOrder] = useState(initialBookOrder ?? 1);
   const [chapter, setChapter] = useState(initialChapter ?? 1);
@@ -280,9 +288,10 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
   );
 
   const openPublication = useCallback(
-    (symbol: GlobalPublicationSymbol) => {
-      setPublication({ symbol, documentId: null });
+    (symbol: GlobalPublicationSymbol, documentId: number | null = null) => {
+      setPublication({ symbol, documentId });
       leaveTo("publication");
+      window.scrollTo(0, 0);
     },
     [leaveTo]
   );
@@ -329,6 +338,9 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       setPendingNoteLocation(null);
       setScreen("reading");
       const params = new URLSearchParams(searchParams.toString());
+      // Left over from arriving via ?pub=/?doc= — reading a chapter is a different screen now.
+      params.delete("pub");
+      params.delete("doc");
       params.set("book", String(nextBookOrder));
       params.set("chapter", String(nextChapter));
       if (verse) params.set("verse", String(verse));
@@ -870,6 +882,7 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
         symbol={publication.symbol}
         documentId={publication.documentId}
         onOpenDocument={(documentId) => setPublication({ symbol: publication.symbol, documentId })}
+        onOpenGlobalPublication={(symbol, documentId) => setPublication({ symbol, documentId })}
         onExit={() => setScreen(returnScreenRef.current)}
         onOpenBibleVerse={(refBookOrder, refChapter, refVerse) => enterReading(refBookOrder, refChapter, refVerse)}
         renderHeader={(title, onBack) => (
@@ -979,6 +992,10 @@ export function BibleReader({ initialBookOrder, initialChapter, initialVerse, us
       </div>
 
       <BibleStudyPanel
+        onOpenGlobalPublication={(symbol, documentId) => {
+          setStudyOpen(false);
+          openPublication(symbol, documentId);
+        }}
         open={studyOpen}
         onClose={() => setStudyOpen(false)}
         tab={studyTab}
