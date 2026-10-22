@@ -7,9 +7,9 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { signIn, signUp, type AuthState } from "./actions";
+import { requestPasswordReset, signIn, signUp, type AuthState } from "./actions";
 
-type Mode = "signin" | "signup";
+type Mode = "signin" | "signup" | "forgot";
 
 const initialState: AuthState = undefined;
 
@@ -28,10 +28,16 @@ export function LoginForm() {
     setSharedDropped(new URLSearchParams(window.location.search).get("shared") === "dropped");
   }, []);
 
+  const [forgotState, forgotAction, forgotPending] = useActionState(
+    requestPasswordReset,
+    initialState,
+  );
+
   const isSignIn = mode === "signin";
-  const state = isSignIn ? signInState : signUpState;
-  const action = isSignIn ? signInAction : signUpAction;
-  const pending = isSignIn ? signInPending : signUpPending;
+  const isForgot = mode === "forgot";
+  const state = isForgot ? forgotState : isSignIn ? signInState : signUpState;
+  const action = isForgot ? forgotAction : isSignIn ? signInAction : signUpAction;
+  const pending = isForgot ? forgotPending : isSignIn ? signInPending : signUpPending;
 
   return (
     <motion.div
@@ -66,10 +72,12 @@ export function LoginForm() {
           >
             <div className="flex flex-col gap-1.5">
               <h1 className="font-heading text-3xl leading-[1.1] tracking-tight">
-                {isSignIn ? "Bem-vindo de volta" : "Crie sua conta"}
+                {isForgot ? "Recuperar senha" : isSignIn ? "Bem-vindo de volta" : "Crie sua conta"}
               </h1>
               <p className="max-w-[34ch] text-sm text-muted-foreground text-pretty">
-                {isSignIn
+                {isForgot
+                  ? "Informe seu e-mail e enviaremos um link para você criar uma nova senha."
+                  : isSignIn
                   ? "Suas notas continuam funcionando offline. A sincronização acontece quando houver conexão."
                   : "Leva menos de um minuto. Suas notas ficam disponíveis offline, sempre."}
               </p>
@@ -96,6 +104,7 @@ export function LoginForm() {
                 />
               </Field>
 
+              {!isForgot && (
               <Field label="Senha">
                 <div className="relative">
                   <Input
@@ -118,11 +127,16 @@ export function LoginForm() {
                   </button>
                 </div>
               </Field>
+              )}
 
               {isSignIn && (
-                <a href="#" className="self-end text-xs text-accent hover:text-accent/80">
+                <button
+                  type="button"
+                  onClick={() => setMode("forgot")}
+                  className="self-end text-xs text-accent hover:text-accent/80"
+                >
                   Esqueci minha senha
-                </a>
+                </button>
               )}
 
               <AnimatePresence mode="wait">
@@ -155,12 +169,12 @@ export function LoginForm() {
               </AnimatePresence>
 
               <Button type="submit" size="lg" fullWidth disabled={pending} isLoading={pending}>
-                {isSignIn ? "Entrar" : "Criar conta"}
+                {isForgot ? "Enviar link" : isSignIn ? "Entrar" : "Criar conta"}
               </Button>
             </form>
 
             <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-              {isSignIn ? "Ainda não tem conta?" : "Já tem uma conta?"}
+              {isForgot ? "Lembrou a senha?" : isSignIn ? "Ainda não tem conta?" : "Já tem uma conta?"}
               <Button
                 type="button"
                 variant="link"
