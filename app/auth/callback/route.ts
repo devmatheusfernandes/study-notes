@@ -5,7 +5,7 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const requestedNext = searchParams.get("next") ?? "/notes";
-  // Only same-origin paths — "//evil.com" would otherwise redirect off-site.
+  // Only same-origin paths â€” "//evil.com" would otherwise redirect off-site.
   const next =
     requestedNext.startsWith("/") && !requestedNext.startsWith("//") ? requestedNext : "/notes";
 
