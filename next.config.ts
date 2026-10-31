@@ -15,7 +15,9 @@ const jwHosts = "https://*.jw.org https://*.jw-cdn.org";
 
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+  // 'wasm-unsafe-eval' lets the browser compile WebAssembly (sql.js reads .jwpub files with it —
+  // lib/jwpub/parser.ts) without allowing JavaScript eval(), which 'unsafe-eval' would.
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   // Images in notes/publications can come from jw.org's CDNs and Supabase; data/blob for pasted and generated ones.
   "img-src 'self' data: blob: https:",

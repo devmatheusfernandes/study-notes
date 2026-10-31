@@ -546,7 +546,9 @@ export function JwlibraryNotesCollection() {
         <div
           className={
             jwlibraryViewMode === "grid"
-              ? "grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3"
+              ? // Masonry, like /notes: cards keep their natural height (CSS columns), so a short
+                // note is short and a long one is long instead of every row being as tall as its tallest.
+                "columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-x-2.5 [&>*]:mb-2.5 [&>*]:break-inside-avoid"
               : "flex flex-col gap-2.5"
           }
         >
@@ -566,7 +568,11 @@ export function JwlibraryNotesCollection() {
                 {note.title && <span className="font-heading text-[15px]">{note.title}</span>}
                 {preview && (
                   <p
-                    className="line-clamp-3 text-[13px] leading-relaxed text-foreground/85"
+                    // The list keeps previews short; the grid lets length set the height, up to a cap.
+                    className={cn(
+                      "text-[13px] leading-relaxed text-foreground/85",
+                      jwlibraryViewMode === "grid" ? "line-clamp-[14]" : "line-clamp-3"
+                    )}
                     dangerouslySetInnerHTML={{ __html: preview }}
                   />
                 )}

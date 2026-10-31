@@ -27,6 +27,10 @@ import {
 } from "@/hooks/use-bible-study-data";
 import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
+import { AppWindow } from "lucide-react";
+import { useIsMobile } from "@/hooks/ui/use-device";
+import { useFloatingWindowsStore } from "@/lib/store/floating-windows-store";
+import { FloatingWindow } from "./floating-window";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
@@ -66,6 +70,43 @@ interface JwpubBibleSurfaceProps {
   /** Imported JW Library highlights/notes for the chapter(s) these verses belong to — see getBibleChapterHighlights in jwlibrary-actions.ts. Highlights for a verse not in `verses` are simply skipped (no matching `[data-verse]` element to draw on). */
   highlights?: BibleVerseHighlight[];
   raiseKey?: number;
+  /** Set when this instance IS a floating window (see FloatingWindowsHost) rather than the reader's side panel. */
+  floating?: { id: string };
+}
+
+/** The same content, either as the reader's side panel or as a floating window. */
+function SurfaceShell({
+  floatingId,
+  open,
+  title,
+  onClose,
+  raiseKey,
+  overlays,
+  children,
+}: {
+  floatingId?: string;
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  raiseKey?: number;
+  overlays: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (floatingId) {
+    return (
+      <FloatingWindow id={floatingId} title={title} onClose={onClose} overlays={overlays}>
+        {children}
+      </FloatingWindow>
+    );
+  }
+  return (
+    <>
+      <JwpubSidePanel open={open} title={title} onClose={onClose} width={380} raiseKey={raiseKey}>
+        {children}
+      </JwpubSidePanel>
+      {overlays}
+    </>
+  );
 }
 
 function reference(verses: BibleVerseRow[]): string {
@@ -262,7 +303,9 @@ function VerseText({
  * panel (fetching the new verse's text + highlights) instead of requiring the
  * host to know about it.
  */
-export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = EMPTY_HIGHLIGHTS, raiseKey }: JwpubBibleSurfaceProps) {
+export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = EMPTY_HIGHLIGHTS, raiseKey, floating }: JwpubBibleSurfaceProps) {
+  // Floating windows are for screens with room for them: desktop and tablet.
+  const canOpenWindow = !useIsMobile();
   const [displayVerses, setDisplayVerses] = useState<BibleVerseRow[] | null>(verses);
   const [displayHighlights, setDisplayHighlights] = useState<BibleVerseHighlight[]>(highlights);
   const [displayLoading, setDisplayLoading] = useState(isLoading);
@@ -438,13 +481,69 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     });
   }, [activeHighlight]);
 
+  // Appendix / citation / excerpt panels the study tabs open. Beside the reader they are
+  // the shared sidebar; inside a floating window they cover that window's body instead.
+  const nested = (
+    <>
+      <BibleAppendixSurface
+        mepsDocumentId={openAppendixId}
+        onClose={() => setOpenAppendixId(null)}
+        onOpenAppendix={setOpenAppendixId}
+        onOpenBibleRef={navigateToVerse}
+      />
+
+      <JwpubReferenceSurface
+        open={referenceOpen}
+        target={referenceTarget}
+        html={referenceHtml}
+        isLoading={isLoadingReference}
+        unresolvedMepsDocumentId={unresolvedPubRef}
+        onResolved={handlePublicationRefResolved}
+        onClose={closeReference}
+      />
+
+      <JwpubExtractSurface
+        open={openExtractIds !== null}
+        extracts={openExtracts}
+        onClose={closeExtract}
+        onOpenSource={(mepsDocumentId) => {
+          closeExtract();
+          openSource(mepsDocumentId);
+        }}
+      />
+
+      <JwpubReferenceSurface {...sourceSurfaceProps} />
+    </>
+  );
+
+  const windowTitle = displayVerses && displayVerses.length > 0 ? reference(displayVerses) || "Referência bíblica" : "Referência bíblica";
+
   return (
     <>
       {/* Was 520 — sized to fit six un-shrunk tabs on one line. Now that the
           tab row scrolls horizontally instead (see BibleStudyTabs), the
           panel itself can go back to the reader's normal side-panel width. */}
-      <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose} width={380} raiseKey={raiseKey}>
+      <SurfaceShell
+        floatingId={floating?.id}
+        open={open}
+        title={floating ? windowTitle : "Referência bíblica"}
+        onClose={onClose}
+        raiseKey={raiseKey}
+        overlays={nested}
+      >
         <div className="flex flex-col gap-4">
+          {!floating && canOpenWindow && displayVerses && displayVerses.length > 0 && (
+            <button
+              type="button"
+              onClick={() => useFloatingWindowsStore.getState().openBibleWindow({ verses: displayVerses, highlights: displayHighlights })}
+              className="-mb-2 flex items-center gap-1.5 self-end rounded-full px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              title="Abrir numa janela flutuante, que fica no lugar enquanto você rola o texto"
+            >
+              <AppWindow className="size-3.5" />
+              Abrir em janela
+            </button>
+          )}
+
           <VerseText
             verses={displayVerses}
             isLoading={displayLoading}
@@ -511,36 +610,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
             />
           )}
         </div>
-      </JwpubSidePanel>
-
-      <BibleAppendixSurface
-        mepsDocumentId={openAppendixId}
-        onClose={() => setOpenAppendixId(null)}
-        onOpenAppendix={setOpenAppendixId}
-        onOpenBibleRef={navigateToVerse}
-      />
-
-      <JwpubReferenceSurface
-        open={referenceOpen}
-        target={referenceTarget}
-        html={referenceHtml}
-        isLoading={isLoadingReference}
-        unresolvedMepsDocumentId={unresolvedPubRef}
-        onResolved={handlePublicationRefResolved}
-        onClose={closeReference}
-      />
-
-      <JwpubExtractSurface
-        open={openExtractIds !== null}
-        extracts={openExtracts}
-        onClose={closeExtract}
-        onOpenSource={(mepsDocumentId) => {
-          closeExtract();
-          openSource(mepsDocumentId);
-        }}
-      />
-
-      <JwpubReferenceSurface {...sourceSurfaceProps} />
+      </SurfaceShell>
 
       <JwlibraryNoteEditorVault
         open={editingNote !== null || pendingNoteLocation !== null}

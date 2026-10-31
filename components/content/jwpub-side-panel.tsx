@@ -6,6 +6,7 @@ import { ChevronLeft, X } from "lucide-react";
 import { useDevice } from "@/hooks/ui/use-device";
 import { Vault, VaultContent, VaultTitle } from "@/components/ui/vault";
 import { useSidePanelSlot } from "./side-panel-stack";
+import { useEmbeddedPanel } from "./embedded-panel-context";
 
 interface JwpubSidePanelProps {
   open: boolean;
@@ -41,14 +42,36 @@ interface JwpubSidePanelProps {
 export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
   const id = useId();
+  // Inside a floating window there is no shared sidebar to join: this panel covers the window's own body.
+  const embedded = useEmbeddedPanel();
   const { isTop, previousTitle, closeAll } = useSidePanelSlot({
     id,
     title,
     open,
     onClose,
-    enabled: !isMobile,
+    enabled: !isMobile && !embedded,
     raiseKey,
   });
+
+  if (embedded) {
+    return open ? (
+      <div className="absolute inset-0 z-10 flex flex-col bg-background">
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Voltar"
+            title="Voltar"
+            className="-ml-1.5 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <span className="mr-auto truncate font-heading text-[14px]">{title}</span>
+        </header>
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
+      </div>
+    ) : null;
+  }
 
   if (isMobile) {
     return (
