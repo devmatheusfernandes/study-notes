@@ -9,6 +9,7 @@ interface JwpubFootnoteSurfaceProps {
   html: string | null;
   isLoading: boolean;
   onClose: () => void;
+  raiseKey?: number;
 }
 
 function Body({ html, isLoading }: { html: string | null; isLoading: boolean }) {
@@ -30,9 +31,9 @@ function Body({ html, isLoading }: { html: string | null; isLoading: boolean }) 
   );
 }
 
-export function JwpubFootnoteSurface({ open, html, isLoading, onClose }: JwpubFootnoteSurfaceProps) {
+export function JwpubFootnoteSurface({ open, html, isLoading, onClose, raiseKey }: JwpubFootnoteSurfaceProps) {
   return (
-    <JwpubSidePanel open={open} title="Nota de rodapé" onClose={onClose}>
+    <JwpubSidePanel open={open} title="Nota de rodapé" onClose={onClose} raiseKey={raiseKey}>
       <Body html={html} isLoading={isLoading} />
     </JwpubSidePanel>
   );

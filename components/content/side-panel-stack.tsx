@@ -13,6 +13,8 @@ interface SidePanelStackValue {
   /** Registers a panel as open, or updates its title in place (never reorders). */
   open: (id: string, title: string) => void;
   close: (id: string) => void;
+  /** Moves an already-open panel to the top of the stack (no-op if it isn't stacked or is already on top). */
+  raise: (id: string) => void;
   setCloser: (id: string, onClose: () => void) => void;
   closeAll: () => void;
 }
@@ -66,6 +68,14 @@ export function SidePanelStackProvider({ children }: { children: React.ReactNode
     setEntries((prev) => (prev.some((entry) => entry.id === id) ? prev.filter((entry) => entry.id !== id) : prev));
   }, []);
 
+  const raise = useCallback((id: string) => {
+    setEntries((prev) => {
+      const index = prev.findIndex((entry) => entry.id === id);
+      if (index === -1 || index === prev.length - 1) return prev;
+      return [...prev.slice(0, index), ...prev.slice(index + 1), prev[index]];
+    });
+  }, []);
+
   const setCloser = useCallback((id: string, onClose: () => void) => {
     closers.current.set(id, onClose);
   }, []);
@@ -77,8 +87,8 @@ export function SidePanelStackProvider({ children }: { children: React.ReactNode
   }, []);
 
   const value = useMemo(
-    () => ({ entries, open, close, setCloser, closeAll }),
-    [entries, open, close, setCloser, closeAll]
+    () => ({ entries, open, close, raise, setCloser, closeAll }),
+    [entries, open, close, raise, setCloser, closeAll]
   );
 
   return <SidePanelStackContext.Provider value={value}>{children}</SidePanelStackContext.Provider>;
@@ -91,6 +101,8 @@ interface SidePanelSlotOptions {
   onClose: () => void;
   /** False on mobile, where panels are Vault sheets and don't share a slot. */
   enabled: boolean;
+  /** Bump this to bring the panel back to the top when its content is asked for again while it is already open (and so already in the stack, possibly underneath another). */
+  raiseKey?: number;
 }
 
 /**
@@ -98,11 +110,12 @@ interface SidePanelSlotOptions {
  * (e.g. the offline shell), it degrades to exactly the old behaviour: always
  * visible, no back button.
  */
-export function useSidePanelSlot({ id, title, open, onClose, enabled }: SidePanelSlotOptions) {
+export function useSidePanelSlot({ id, title, open, onClose, enabled, raiseKey }: SidePanelSlotOptions) {
   const stack = useContext(SidePanelStackContext);
   const register = stack?.open;
   const unregister = stack?.close;
   const setCloser = stack?.setCloser;
+  const raise = stack?.raise;
 
   // Consumers pass inline arrows for `onClose`, so it can't be a registration
   // dependency — it would churn the stack on every render. Kept fresh here
@@ -116,6 +129,13 @@ export function useSidePanelSlot({ id, title, open, onClose, enabled }: SidePane
     if (!enabled || !open || !register) return;
     register(id, title);
   }, [enabled, open, title, id, register]);
+
+  // Declared after the registration effect so a panel that opens and is raised
+  // in the same render lands on top once it is in the stack.
+  useEffect(() => {
+    if (!enabled || !open || !raise || raiseKey === undefined) return;
+    raise(id);
+  }, [enabled, open, raiseKey, id, raise]);
 
   // Deliberately separate from the effect above: this one must NOT re-run when
   // the title changes, or the panel would leave and re-enter the stack.

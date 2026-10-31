@@ -14,6 +14,8 @@ interface JwpubSidePanelProps {
   children: React.ReactNode;
   /** Desktop panel width in px. Defaults to the footnote panel's width. */
   width?: number;
+  /** See useSidePanelSlot's `raiseKey`. */
+  raiseKey?: number;
 }
 
 /**
@@ -36,7 +38,7 @@ interface JwpubSidePanelProps {
  * pops the stack. Panels underneath stay mounted at width 0, so going back
  * restores them with their scroll position and loaded content intact.
  */
-export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: JwpubSidePanelProps) {
+export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
   const id = useId();
   const { isTop, previousTitle, closeAll } = useSidePanelSlot({
@@ -45,6 +47,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380 }: 
     open,
     onClose,
     enabled: !isMobile,
+    raiseKey,
   });
 
   if (isMobile) {

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SIDEBAR_NAV_ITEMS } from "./sidebar-nav-items";
 import { usePendingSyncCount } from "@/lib/store/notes-store";
+import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { useDeviceStore } from "@/hooks/ui/use-device";
 import { ChatList } from "@/components/chat/chat-list";
 import { InstallNudgeCard } from "./install-nudge-card";
@@ -39,7 +40,13 @@ function NavLink({
   const link = (
     <Link
       href={href}
-      onClick={onNavigate}
+      onClick={() => {
+        // "Início" means the root. The open folder lives in a store that outlives
+        // the /notes screen, so coming back from a note or publication inside a
+        // folder would otherwise reopen that folder.
+        if (href === "/notes") useFolderViewStore.getState().setActiveFolder(null);
+        onNavigate?.();
+      }}
       className={cn(
         "flex items-center gap-2.5 rounded-full px-3 py-2 text-[13.5px] transition-colors",
         collapsed && "justify-center px-0 py-2.5",

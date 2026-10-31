@@ -65,6 +65,7 @@ interface JwpubBibleSurfaceProps {
   onClose: () => void;
   /** Imported JW Library highlights/notes for the chapter(s) these verses belong to — see getBibleChapterHighlights in jwlibrary-actions.ts. Highlights for a verse not in `verses` are simply skipped (no matching `[data-verse]` element to draw on). */
   highlights?: BibleVerseHighlight[];
+  raiseKey?: number;
 }
 
 function reference(verses: BibleVerseRow[]): string {
@@ -261,7 +262,7 @@ function VerseText({
  * panel (fetching the new verse's text + highlights) instead of requiring the
  * host to know about it.
  */
-export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = EMPTY_HIGHLIGHTS }: JwpubBibleSurfaceProps) {
+export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, highlights = EMPTY_HIGHLIGHTS, raiseKey }: JwpubBibleSurfaceProps) {
   const [displayVerses, setDisplayVerses] = useState<BibleVerseRow[] | null>(verses);
   const [displayHighlights, setDisplayHighlights] = useState<BibleVerseHighlight[]>(highlights);
   const [displayLoading, setDisplayLoading] = useState(isLoading);
@@ -442,7 +443,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
       {/* Was 520 — sized to fit six un-shrunk tabs on one line. Now that the
           tab row scrolls horizontally instead (see BibleStudyTabs), the
           panel itself can go back to the reader's normal side-panel width. */}
-      <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose} width={380}>
+      <JwpubSidePanel open={open} title="Referência bíblica" onClose={onClose} width={380} raiseKey={raiseKey}>
         <div className="flex flex-col gap-4">
           <VerseText
             verses={displayVerses}

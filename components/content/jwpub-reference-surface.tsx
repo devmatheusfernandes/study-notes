@@ -22,6 +22,8 @@ export interface JwpubReferenceTarget {
 
 interface JwpubReferenceSurfaceProps {
   open: boolean;
+  /** Bump to bring the panel back to the top when it is asked for again while already open. */
+  raiseKey?: number;
   target: JwpubReferenceTarget | null;
   html: string | null;
   isLoading: boolean;
@@ -166,9 +168,15 @@ export function JwpubReferenceSurface({
   unresolvedMepsDocumentId,
   onResolved,
   onClose,
+  raiseKey,
 }: JwpubReferenceSurfaceProps) {
   return (
-    <JwpubSidePanel open={open} title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"} onClose={onClose}>
+    <JwpubSidePanel
+      open={open}
+      title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
+      onClose={onClose}
+      raiseKey={raiseKey}
+    >
       <Body
         target={target}
         html={html}

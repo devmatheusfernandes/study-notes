@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, House } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { hapticTap } from "@/lib/haptics";
@@ -145,6 +145,7 @@ export function NotesCollection({
   const [manageTagsNoteId, setManageTagsNoteId] = useState<string | null>(null);
   const [moveFolderNoteId, setMoveFolderNoteId] = useState<string | null>(null);
   const [isBackDragOver, setIsBackDragOver] = useState(false);
+  const [isHomeDragOver, setIsHomeDragOver] = useState(false);
   const renameFolder = useNotesStore((s) => s.renameFolder);
   const moveFolder = useNotesStore((s) => s.moveFolder);
   const [moveFolderId, setMoveFolderId] = useState<string | null>(null);
@@ -474,6 +475,44 @@ export function NotesCollection({
     <FileDropZone blockJwlibrary>
       <div className="flex flex-1 flex-col gap-7 px-4 py-6 sm:px-6">
         {openFolder && (
+          <div className="flex w-fit items-center gap-2">
+          {/* Deep inside subfolders, "back" only climbs one level — this jumps straight to the root.
+              With a single level open it would duplicate "back", so it only appears below that. */}
+          {openFolder.parentId && (
+            <button
+              type="button"
+              onClick={() => setActiveFolder(null)}
+              aria-label="Ir para a pasta raiz"
+              title="Ir para a pasta raiz"
+              onDragOver={(e) => {
+                if (!hasDraggedNoteIds(e) && !hasDraggedFolderId(e)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setIsHomeDragOver(true);
+              }}
+              onDragLeave={() => setIsHomeDragOver(false)}
+              onDrop={(e) => {
+                if (!hasDraggedNoteIds(e) && !hasDraggedFolderId(e)) return;
+                e.preventDefault();
+                setIsHomeDragOver(false);
+                if (hasDraggedFolderId(e)) {
+                  const draggedFolderId = readDraggedFolderId(e.dataTransfer);
+                  if (draggedFolderId) moveFolder(draggedFolderId, undefined);
+                  return;
+                }
+                const ids = readDraggedNoteIds(e.dataTransfer);
+                if (ids.length > 0) bulkMoveNotes(ids, undefined);
+              }}
+              className={cn(
+                "flex size-8 items-center justify-center rounded-full transition-all",
+                isHomeDragOver
+                  ? "bg-accent/20 text-accent ring-2 ring-accent scale-[1.02]"
+                  : "bg-secondary text-foreground/80 hover:bg-surface"
+              )}
+            >
+              <House className="size-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setActiveFolder(openFolder.parentId ?? null)}
@@ -506,6 +545,7 @@ export function NotesCollection({
             <ChevronLeft className="size-4" />
             {openFolder.name}
           </button>
+          </div>
         )}
 
         {foldersVisible && (

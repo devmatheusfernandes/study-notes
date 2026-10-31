@@ -18,6 +18,7 @@ export interface JwpubExtractItem {
 
 interface JwpubExtractSurfaceProps {
   open: boolean;
+  raiseKey?: number;
   extracts: JwpubExtractItem[];
   isLoading?: boolean;
   onClose: () => void;
@@ -49,11 +50,12 @@ export function JwpubExtractSurface({
   isLoading = false,
   onClose,
   onOpenSource,
+  raiseKey,
 }: JwpubExtractSurfaceProps) {
   const title = extracts.length > 1 ? `${extracts.length} trechos` : (extracts[0]?.refTitle ?? "Trecho");
 
   return (
-    <JwpubSidePanel open={open} title={title} onClose={onClose}>
+    <JwpubSidePanel open={open} title={title} onClose={onClose} raiseKey={raiseKey}>
       {isLoading ? (
         <ReferenceContentSkeleton paragraphs={2} withHeading />
       ) : extracts.length === 0 ? (

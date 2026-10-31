@@ -33,6 +33,8 @@ interface JwlibraryHighlightNotePanelProps {
   onAddNote?: () => void;
   /** Called after the highlight's color was changed (with the new index), so the caller can refresh its highlight list and keep this panel's own color state in sync. */
   onColorChanged?: (colorIndex: number) => void;
+  /** Bump to bring the panel back to the top when another highlight is clicked while it is already open. */
+  raiseKey?: number;
 }
 
 /**
@@ -54,6 +56,7 @@ export function JwlibraryHighlightNotePanel({
   highlightText,
   onAddNote,
   onColorChanged,
+  raiseKey,
 }: JwlibraryHighlightNotePanelProps) {
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [tags, setTags] = useState<JwlibraryTagView[]>([]);
@@ -114,7 +117,7 @@ export function JwlibraryHighlightNotePanel({
 
   return (
     <>
-      <JwpubSidePanel open={open} title={note ? "Nota" : "Destaque"} onClose={onClose}>
+      <JwpubSidePanel open={open} title={note ? "Nota" : "Destaque"} onClose={onClose} raiseKey={raiseKey}>
         {note ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-1.5 self-end">

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ChevronLeft, ChevronRight, List, NotebookPen, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, PanelRightOpen, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -268,6 +268,17 @@ export function JwpubReader({
   // JwpubChapterView opens the note editor pre-anchored to it instead of the
   // normal footnote/bible-ref handling.
   const [pickingParagraph, setPickingParagraph] = useState(false);
+
+  // A panel that is already open sits somewhere in the desktop side-panel stack
+  // (possibly under the highlight's note). Opening it again — a second tap on a
+  // footnote, say — has to bring it back to the top; `raiseKey` does that.
+  const [raised, setRaised] = useState({ footnote: 0, bible: 0, reference: 0, extract: 0, highlight: 0 });
+  const raise = useCallback((panel: keyof typeof raised) => {
+    setRaised((prev) => ({ ...prev, [panel]: prev[panel] + 1 }));
+  }, []);
+  // The reference panel the user last had open, for the header button that brings it back after it was closed.
+  const lastReferencePanel = useRef<"footnote" | "bible" | "reference" | "extract" | null>(null);
+  const lastExtracts = useRef<JwpubExtractRow[]>([]);
   const [pendingNoteLocation, setPendingNoteLocation] = useState<PrefilledJwlibraryLocation | null>(null);
   // Clicking a highlight's margin marker opens a read-only side panel first
   // (JwlibraryHighlightNotePanel); tapping "Editar" inside it sets
@@ -496,6 +507,8 @@ export function JwpubReader({
 
   const showResolvedRef = useCallback((resolved: ResolvedJwpubReference, pid?: string) => {
     setReferenceOpen(true);
+    raise("reference");
+    lastReferencePanel.current = "reference";
     setReferenceHtml(null);
     setIsLoadingReference(true);
     setUnresolvedPubRef(null);
@@ -515,7 +528,7 @@ export function JwpubReader({
       setReferenceHtml(result.html ?? null);
       setIsLoadingReference(false);
     });
-  }, []);
+  }, [raise]);
 
   const handlePublicationRef = useCallback(
     (mepsDocumentId: number, pid?: string) => {
@@ -529,6 +542,8 @@ export function JwpubReader({
       // server (which also checks global publications like Perspicaz) before
       // falling back to the "Baixar" prompt.
       setReferenceOpen(true);
+      raise("reference");
+      lastReferencePanel.current = "reference";
       setReferenceTarget(null);
       setReferenceHtml(null);
       setIsLoadingReference(true);
@@ -550,7 +565,7 @@ export function JwpubReader({
           notify.error("Sem conexão", "Esta referência precisa de internet para abrir.");
         });
     },
-    [resolvedPubRefs, showResolvedRef]
+    [resolvedPubRefs, showResolvedRef, raise]
   );
 
   const handleExtract = useCallback(
@@ -560,14 +575,17 @@ export function JwpubReader({
       // two sidebars open side by side.
       setReferenceOpen(false);
       setOpenExtracts([]);
+      raise("extract");
+      lastReferencePanel.current = "extract";
       setIsLoadingExtracts(true);
       void loadExtracts(publication.id, extractIds).then((result) => {
+        lastExtracts.current = result.extracts ?? [];
         setOpenExtracts(result.extracts ?? []);
         setIsLoadingExtracts(false);
         if (result.error) notify.error("Não foi possível abrir o trecho", result.error);
       });
     },
-    [publication.id]
+    [publication.id, raise]
   );
 
   // A download from inside the panel just ingested this MepsDocumentId's
@@ -597,6 +615,8 @@ export function JwpubReader({
   const handleFootnote = useCallback(
     (footnoteId: number) => {
       setFootnoteOpen(true);
+      raise("footnote");
+      lastReferencePanel.current = "footnote";
       setFootnoteHtml(null);
       setIsLoadingFootnote(true);
       void loadFootnote(publication.id, footnoteId).then((result) => {
@@ -604,12 +624,14 @@ export function JwpubReader({
         setIsLoadingFootnote(false);
       });
     },
-    [publication.id]
+    [publication.id, raise]
   );
 
   const handleBibleRef = useCallback(
     (firstVerseId: number, lastVerseId: number) => {
       setBibleOpen(true);
+      raise("bible");
+      lastReferencePanel.current = "bible";
       setBibleError(null);
 
       const cached = bibleRangeCache.current.get(`${firstVerseId}-${lastVerseId}`);
@@ -636,7 +658,7 @@ export function JwpubReader({
           setIsLoadingBible(false);
         });
     },
-    [loadBibleHighlightsFor]
+    [loadBibleHighlightsFor, raise]
   );
 
   const handlePickParagraph = useCallback(
@@ -782,6 +804,30 @@ export function JwpubReader({
     }
   }
 
+  /** Header button: brings back the reference panel that was last open (footnote, Bible passage, citation or excerpt). */
+  function reopenReferencePanel() {
+    switch (lastReferencePanel.current) {
+      case "footnote":
+        setFootnoteOpen(true);
+        raise("footnote");
+        return;
+      case "bible":
+        setBibleOpen(true);
+        raise("bible");
+        return;
+      case "reference":
+        setReferenceOpen(true);
+        raise("reference");
+        return;
+      case "extract":
+        setOpenExtracts(lastExtracts.current);
+        raise("extract");
+        return;
+      default:
+        notify.info("Nenhuma referência aberta", "Toque numa nota de rodapé ou citação do texto para vê-la aqui.");
+    }
+  }
+
   const failed = publication.status === "failed" || chapters.length === 0;
 
   return (
@@ -834,18 +880,12 @@ export function JwpubReader({
           {chapters.length > 0 && (
             <button
               type="button"
-              onClick={() => setPickingParagraph((v) => !v)}
-              aria-label="Anotar parágrafo"
-              aria-pressed={pickingParagraph}
-              title="Toque num parágrafo pra criar uma nota nele"
-              className={cn(
-                "shrink-0 rounded-full p-2 transition-colors",
-                pickingParagraph
-                  ? "bg-primary/[0.18] text-accent"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
+              onClick={reopenReferencePanel}
+              aria-label="Abrir referências"
+              title="Abrir a última referência consultada"
+              className="shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
-              <NotebookPen className="size-4" />
+              <PanelRightOpen className="size-4" />
             </button>
           )}
 
@@ -904,8 +944,14 @@ export function JwpubReader({
                   onPickParagraphSpan={handlePickParagraphSpan}
                   onCreateHighlight={handleCreateHighlight}
                   highlights={highlights}
-                  onHighlightNote={setHighlightNote}
-                  onHighlightMark={setHighlightMark}
+                  onHighlightNote={(note) => {
+                    setHighlightNote(note);
+                    raise("highlight");
+                  }}
+                  onHighlightMark={(mark) => {
+                    setHighlightMark(mark);
+                    raise("highlight");
+                  }}
                 />
               )}
             </div>
@@ -998,6 +1044,7 @@ export function JwpubReader({
         html={footnoteHtml}
         isLoading={isLoadingFootnote}
         onClose={() => setFootnoteOpen(false)}
+        raiseKey={raised.footnote}
       />
 
       <JwpubBibleSurface
@@ -1007,6 +1054,7 @@ export function JwpubReader({
         isLoading={isLoadingBible}
         onClose={() => setBibleOpen(false)}
         highlights={bibleHighlights}
+        raiseKey={raised.bible}
       />
 
       <JwpubReferenceSurface
@@ -1017,6 +1065,7 @@ export function JwpubReader({
         unresolvedMepsDocumentId={unresolvedPubRef}
         onResolved={handlePublicationRefResolved}
         onClose={() => setReferenceOpen(false)}
+        raiseKey={raised.reference}
       />
 
       <JwpubExtractSurface
@@ -1024,6 +1073,7 @@ export function JwpubReader({
         extracts={openExtracts ?? []}
         isLoading={isLoadingExtracts}
         onClose={() => setOpenExtracts(null)}
+        raiseKey={raised.extract}
         onOpenSource={(mepsDocumentId) => {
           setOpenExtracts(null);
           openSource(mepsDocumentId);
@@ -1042,6 +1092,7 @@ export function JwpubReader({
           setHighlightNote(null);
           setHighlightMark(null);
         }}
+        raiseKey={raised.highlight}
         onEdit={() => setHighlightEditMode(true)}
         onAddNote={handleAddNoteToHighlight}
         onColorChanged={(colorIndex) => {
