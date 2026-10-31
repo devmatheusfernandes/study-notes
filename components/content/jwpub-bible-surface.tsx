@@ -19,6 +19,7 @@ import { notify } from "@/components/ui/toaster";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { wrapTokenRange, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
 import { toPersonalNotes } from "@/lib/bible/personal-notes";
+import { verseRangeOf, type VerseRange } from "@/lib/bible/verse-scope";
 import {
   useBibleCrossReferences,
   useBibleFootnotesAndStudyNotes,
@@ -320,6 +321,8 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
   const [displayLoading, setDisplayLoading] = useState(isLoading);
   const [displayError, setDisplayError] = useState<string | null>(error);
   const [tabSelectedVerse, setTabSelectedVerse] = useState<number | null>(soleVerse(verses));
+  // A passage of several verses scopes the tabs to those verses, not the whole chapter.
+  const [scopeRange, setScopeRange] = useState<VerseRange | null>(verseRangeOf(verses));
   const [studyTab, setStudyTab] = useState<BibleStudyTab>("notas");
   // A floating window shows ONE of: the passage, its study notes, or the user's highlights.
   const [windowTab, setWindowTab] = useState<"texto" | "notas" | "highlights">("texto");
@@ -347,6 +350,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
       setDisplayLoading(isLoading);
       setDisplayError(error);
       setTabSelectedVerse(soleVerse(verses));
+      setScopeRange(verseRangeOf(verses));
     });
   }, [verses, highlights, isLoading, error]);
 
@@ -406,6 +410,8 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
 
   const navigateToVerse = useCallback((bookOrder: number, chapter: number, verse: number) => {
     setOpenAppendixId(null);
+    // Jumping to another verse (a cross reference) leaves the passage this was opened on.
+    setScopeRange(null);
     setDisplayLoading(true);
     setDisplayError(null);
     void Promise.all([
@@ -420,7 +426,12 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     });
   }, []);
 
-  const studyParams = { bookOrder: viewBookOrder, chapter: viewChapter, selectedVerse: tabSelectedVerse };
+  const studyParams = {
+    bookOrder: viewBookOrder,
+    chapter: viewChapter,
+    selectedVerse: tabSelectedVerse,
+    verseRange: scopeRange,
+  };
   const { refs, refsLoading, refsTruncated, refsSource, setRefsSource } = useBibleCrossReferences({
     ...studyParams,
     enabled: tabEnabled("notas"),
@@ -454,7 +465,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     .map((id) => researchGuideExtracts[id])
     .filter((extract) => extract !== undefined);
 
-  const personalNotes = toPersonalNotes(displayHighlights, tabSelectedVerse);
+  const personalNotes = toPersonalNotes(displayHighlights, tabSelectedVerse, scopeRange);
 
   const handleEditPersonalNote = useCallback((note: BiblePersonalNote) => {
     setEditingNote({ id: note.id, title: note.title, content: note.content, userMarkId: note.userMarkId, colorIndex: note.colorIndex });
@@ -613,7 +624,12 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
               bookName={viewBookName}
               chapter={viewChapter}
               selectedVerse={tabSelectedVerse}
-              onClearVerse={() => setTabSelectedVerse(null)}
+              verseRange={scopeRange}
+              // From one verse of a passage back to the passage; from the passage out to the whole chapter.
+              onClearVerse={() => {
+                if (tabSelectedVerse === null) setScopeRange(null);
+                setTabSelectedVerse(null);
+              }}
               onSelectVerse={setTabSelectedVerse}
               refs={refs}
               refsLoading={refsLoading}

@@ -11,6 +11,10 @@ import {
 } from "@/app/(app)/bible-actions";
 import { getChapterVideos, type ChapterVideo } from "@/app/(app)/bible-search-actions";
 import { getChapterResearchGuide, type ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
+import { inVerseScope, type VerseRange } from "@/lib/bible/verse-scope";
+
+/** A range this wide is no longer "a passage" — cross references are then read chapter-wide and filtered instead of one request per verse. */
+const MAX_PER_VERSE_REQUESTS = 30;
 
 /**
  * These four hooks are the data BibleStudyPanel's tabs need, extracted out of
@@ -29,11 +33,15 @@ interface CommonParams {
   chapter: number | null;
   /** `null` means "show the whole chapter" — every dataset below comes back unfiltered. */
   selectedVerse: number | null;
+  /** A passage of several verses. Used when no single verse is selected; with neither, the whole chapter. */
+  verseRange?: VerseRange | null;
   /** Nothing is fetched while this is false. */
   enabled: boolean;
 }
 
-export function useBibleCrossReferences({ bookOrder, chapter, selectedVerse, enabled }: CommonParams) {
+export function useBibleCrossReferences({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
+  const rangeFrom = verseRange?.from ?? null;
+  const rangeTo = verseRange?.to ?? null;
   const [refs, setRefs] = useState<(CrossReference & { verse: number | null })[]>([]);
   const [isLoadingRefs, setIsLoadingRefs] = useState(false);
   const [refsTruncated, setRefsTruncated] = useState(false);
@@ -46,13 +54,23 @@ export function useBibleCrossReferences({ bookOrder, chapter, selectedVerse, ena
       if (!cancelled) setIsLoadingRefs(true);
     });
 
-    const request =
-      selectedVerse === null
-        ? getChapterCrossReferences(bookOrder, chapter, refsSource)
-        : getVerseCrossReferences(bookOrder, chapter, selectedVerse, refsSource).then((result) => ({
-            refs: result.refs?.map((ref) => ({ ...ref, verse: selectedVerse })),
-            truncated: false,
-          }));
+    const perVerse = (verses: number[]) =>
+      Promise.all(verses.map((verse) => getVerseCrossReferences(bookOrder, chapter, verse, refsSource))).then((results) => ({
+        refs: results.flatMap((result, i) => (result.refs ?? []).map((ref) => ({ ...ref, verse: verses[i] }))),
+        truncated: false,
+      }));
+
+    let request;
+    if (selectedVerse !== null) {
+      request = perVerse([selectedVerse]);
+    } else if (rangeFrom !== null && rangeTo !== null && rangeTo - rangeFrom < MAX_PER_VERSE_REQUESTS) {
+      request = perVerse(Array.from({ length: rangeTo - rangeFrom + 1 }, (_, i) => rangeFrom + i));
+    } else {
+      request = getChapterCrossReferences(bookOrder, chapter, refsSource).then((result) => ({
+        ...result,
+        refs: result.refs?.filter((ref) => inVerseScope(ref.verse ?? null, null, verseRange)),
+      }));
+    }
 
     void request.then((result) => {
       if (cancelled) return;
@@ -63,7 +81,8 @@ export function useBibleCrossReferences({ bookOrder, chapter, selectedVerse, ena
     return () => {
       cancelled = true;
     };
-  }, [enabled, selectedVerse, refsSource, bookOrder, chapter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- verseRange is represented by rangeFrom/rangeTo
+  }, [enabled, selectedVerse, rangeFrom, rangeTo, refsSource, bookOrder, chapter]);
 
   return { refs, refsLoading: isLoadingRefs, refsTruncated, refsSource, setRefsSource };
 }
@@ -73,7 +92,9 @@ export function useBibleCrossReferences({ bookOrder, chapter, selectedVerse, ena
  * that has no always-on need for these, unlike bible-reader.tsx's own inline
  * version which fetches unconditionally to feed the reading pane's markers.
  */
-export function useBibleFootnotesAndStudyNotes({ bookOrder, chapter, selectedVerse, enabled }: CommonParams) {
+export function useBibleFootnotesAndStudyNotes({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
+  const rangeFrom = verseRange?.from ?? null;
+  const rangeTo = verseRange?.to ?? null;
   const [chapterVerseNumberById, setChapterVerseNumberById] = useState<Map<number, number | null>>(new Map());
   const [footnotes, setFootnotes] = useState<BibleFootnote[]>([]);
   const [studyNotes, setStudyNotes] = useState<BibleStudyNote[]>([]);
@@ -101,18 +122,21 @@ export function useBibleFootnotesAndStudyNotes({ bookOrder, chapter, selectedVer
 
   const panelFootnotes = useMemo(() => {
     const withVerse = footnotes.map((f) => ({ ...f, verse: chapterVerseNumberById.get(f.verseId) ?? null }));
-    return selectedVerse === null ? withVerse : withVerse.filter((f) => f.verse === selectedVerse);
-  }, [footnotes, chapterVerseNumberById, selectedVerse]);
+    const range = rangeFrom !== null && rangeTo !== null ? { from: rangeFrom, to: rangeTo } : null;
+    return withVerse.filter((f) => inVerseScope(f.verse, selectedVerse, range));
+  }, [footnotes, chapterVerseNumberById, selectedVerse, rangeFrom, rangeTo]);
 
-  const panelStudyNotes = useMemo(
-    () => (selectedVerse === null ? studyNotes : studyNotes.filter((n) => n.verse === selectedVerse)),
-    [studyNotes, selectedVerse]
-  );
+  const panelStudyNotes = useMemo(() => {
+    const range = rangeFrom !== null && rangeTo !== null ? { from: rangeFrom, to: rangeTo } : null;
+    return studyNotes.filter((n) => inVerseScope(n.verse, selectedVerse, range));
+  }, [studyNotes, selectedVerse, rangeFrom, rangeTo]);
 
   return { footnotes: panelFootnotes, studyNotes: panelStudyNotes, studyLoading: isLoadingStudy };
 }
 
-export function useBibleChapterVideos({ bookOrder, chapter, selectedVerse, enabled }: CommonParams) {
+export function useBibleChapterVideos({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
+  const rangeFrom = verseRange?.from ?? null;
+  const rangeTo = verseRange?.to ?? null;
   const [chapterVideos, setChapterVideos] = useState<ChapterVideo[]>([]);
   const [isLoadingChapterVideos, setIsLoadingChapterVideos] = useState(false);
 
@@ -133,14 +157,19 @@ export function useBibleChapterVideos({ bookOrder, chapter, selectedVerse, enabl
   }, [enabled, bookOrder, chapter]);
 
   const panelVideos = useMemo(() => {
-    if (selectedVerse === null) return chapterVideos;
-    return chapterVideos.filter((video) => video.verses.length === 0 || video.verses.includes(selectedVerse));
-  }, [chapterVideos, selectedVerse]);
+    const range = rangeFrom !== null && rangeTo !== null ? { from: rangeFrom, to: rangeTo } : null;
+    if (selectedVerse === null && !range) return chapterVideos;
+    return chapterVideos.filter(
+      (video) => video.verses.length === 0 || video.verses.some((verse) => inVerseScope(verse, selectedVerse, range))
+    );
+  }, [chapterVideos, selectedVerse, rangeFrom, rangeTo]);
 
   return { videos: panelVideos, videosLoading: isLoadingChapterVideos };
 }
 
-export function useBibleResearchGuide({ bookOrder, chapter, selectedVerse, enabled }: CommonParams) {
+export function useBibleResearchGuide({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
+  const rangeFrom = verseRange?.from ?? null;
+  const rangeTo = verseRange?.to ?? null;
   const [researchGuideEntries, setResearchGuideEntries] = useState<{ verse: number | null; contentHtml: string }[]>(
     []
   );
@@ -165,9 +194,9 @@ export function useBibleResearchGuide({ bookOrder, chapter, selectedVerse, enabl
   }, [enabled, bookOrder, chapter]);
 
   const panelResearchGuide = useMemo(() => {
-    if (selectedVerse === null) return researchGuideEntries;
-    return researchGuideEntries.filter((entry) => entry.verse === selectedVerse);
-  }, [researchGuideEntries, selectedVerse]);
+    const range = rangeFrom !== null && rangeTo !== null ? { from: rangeFrom, to: rangeTo } : null;
+    return researchGuideEntries.filter((entry) => inVerseScope(entry.verse, selectedVerse, range));
+  }, [researchGuideEntries, selectedVerse, rangeFrom, rangeTo]);
 
   return {
     researchGuideEntries: panelResearchGuide,

@@ -1,5 +1,6 @@
 import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import type { BiblePersonalNote } from "@/components/content/bible-study-panel";
+import { inVerseScope, type VerseRange } from "@/lib/bible/verse-scope";
 
 /**
  * Reshapes the chapter's highlights (see getBibleChapterHighlights) into the
@@ -10,7 +11,8 @@ import type { BiblePersonalNote } from "@/components/content/bible-study-panel";
  */
 export function toPersonalNotes(
   highlights: BibleVerseHighlight[],
-  selectedVerse: number | null
+  selectedVerse: number | null,
+  verseRange: VerseRange | null = null
 ): (BiblePersonalNote & { verse: number | null })[] {
   const withNotes = highlights
     .filter((h): h is typeof h & { note: NonNullable<(typeof h)["note"]> } => h.note !== null)
@@ -22,5 +24,5 @@ export function toPersonalNotes(
       colorIndex: h.colorIndex,
       verse: h.verse,
     }));
-  return selectedVerse === null ? withNotes : withNotes.filter((n) => n.verse === selectedVerse);
+  return withNotes.filter((n) => inVerseScope(n.verse, selectedVerse, verseRange));
 }

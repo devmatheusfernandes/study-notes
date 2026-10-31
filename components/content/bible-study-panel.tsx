@@ -5,6 +5,7 @@ import DOMPurify from "dompurify";
 import { BookMarked, ChevronDown, Film, Gem, NotebookPen, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { VerseRange } from "@/lib/bible/verse-scope";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { bodyToPlainText } from "@/lib/note-preview";
@@ -64,6 +65,8 @@ interface BibleStudyTabsProps {
   chapter: number;
   /** `null` means "nothing tapped yet" — the panel then shows the whole chapter instead of an empty state. */
   selectedVerse: number | null;
+  /** The passage of several verses the tabs are scoped to when no single verse is selected; with neither, the whole chapter. */
+  verseRange?: VerseRange | null;
   /** Clears the verse filter and goes back to the whole-chapter view. */
   onClearVerse: () => void;
   /** Narrows the panel to one verse — the whole-chapter view's headings. */
@@ -340,6 +343,7 @@ export function BibleStudyTabs({
   bookName,
   chapter,
   selectedVerse,
+  verseRange = null,
   onClearVerse,
   onSelectVerse,
   refs,
@@ -462,8 +466,15 @@ export function BibleStudyTabs({
     return () => container.removeEventListener("click", handleClick);
   }, [onOpenBibleRef, onOpenAppendix, onOpenExtract, onOpenPublicationRef]);
 
-  const whole = selectedVerse === null;
-  const scopeLabel = whole ? `${bookName} ${chapter}` : `${bookName} ${chapter}:${selectedVerse}`;
+  const whole = selectedVerse === null && !verseRange;
+  const scopeLabel =
+    selectedVerse !== null
+      ? `${bookName} ${chapter}:${selectedVerse}`
+      : verseRange
+        ? `${bookName} ${chapter}:${verseRange.from}-${verseRange.to}`
+        : `${bookName} ${chapter}`;
+  // Narrowed to one verse of a passage, "back" returns to the passage rather than jumping to the chapter.
+  const clearLabel = selectedVerse !== null && verseRange ? "ver passagem" : "ver capítulo";
 
   const refGroups = useMemo(() => groupByVerse(refs), [refs]);
   const footnoteGroups = useMemo(() => groupByVerse(footnotes), [footnotes]);
@@ -486,11 +497,16 @@ export function BibleStudyTabs({
   // a range covering that verse still counts.
   const visibleMentions = useMemo(() => {
     const all = noteMentions ?? [];
-    if (selectedVerse === null) return all;
-    return all.filter(
-      (m) => m.verse === null || (selectedVerse >= m.verse && selectedVerse <= (m.endVerse ?? m.verse))
-    );
-  }, [noteMentions, selectedVerse]);
+    if (selectedVerse !== null) {
+      return all.filter(
+        (m) => m.verse === null || (selectedVerse >= m.verse && selectedVerse <= (m.endVerse ?? m.verse))
+      );
+    }
+    if (verseRange) {
+      return all.filter((m) => m.verse === null || (m.verse <= verseRange.to && (m.endVerse ?? m.verse) >= verseRange.from));
+    }
+    return all;
+  }, [noteMentions, selectedVerse, verseRange]);
   const mentionGroups = useMemo(() => groupByVerse(visibleMentions), [visibleMentions]);
 
   const personalNoteGroups = useMemo(() => groupByVerse(personalNotes), [personalNotes]);
@@ -539,7 +555,7 @@ export function BibleStudyTabs({
               onClick={onClearVerse}
               className="rounded-full bg-secondary px-2 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             >
-              ver capítulo
+              {clearLabel}
             </button>
           )}
         </div>
@@ -807,7 +823,7 @@ export function BibleStudyTabs({
                   // versículo remonte a lista e volte a mostrá-la recolhida —
                   // sem precisar de um efeito só para zerar esse estado.
                   <MentionList
-                    key={`${bookName}-${chapter}-${selectedVerse ?? "all"}`}
+                    key={`${bookName}-${chapter}-${selectedVerse ?? (verseRange ? `${verseRange.from}-${verseRange.to}` : "all")}`}
                     videos={mentionVideos}
                     chapter={chapter}
                     openVideoId={openVideoId}
