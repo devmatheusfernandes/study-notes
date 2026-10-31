@@ -141,7 +141,10 @@ function VerseText({
   highlights,
   expandedNoteId,
   onToggleNote,
+  headerAction,
 }: {
+  /** Sits on the same row as the reference label, at its right edge. */
+  headerAction?: React.ReactNode;
   verses: BibleVerseRow[] | null;
   isLoading: boolean;
   error: string | null;
@@ -239,9 +242,10 @@ function VerseText({
 
   return (
     <div className="flex flex-col gap-3">
-      <span className="font-mono text-[11px] tracking-[0.06em] text-accent">
-        {reference(verses)}
-      </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[11px] tracking-[0.06em] text-accent">{reference(verses)}</span>
+        {headerAction}
+      </div>
       <div ref={containerRef} className="text-[14.5px] leading-relaxed text-foreground/90">
         {/* whitespace-pre-line: see the comment in bible-chapter-view.tsx — verse text carries real `\n` for poetry. */}
         {verses.map((v) => {
@@ -573,18 +577,6 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
         toolbar={windowToolbar}
       >
         <div className="flex flex-col gap-4">
-          {!floating && canOpenWindow && displayVerses && displayVerses.length > 0 && (
-            <button
-              type="button"
-              onClick={() => useFloatingWindowsStore.getState().openBibleWindow({ verses: displayVerses, highlights: displayHighlights })}
-              className="-mb-2 flex items-center gap-1.5 self-end rounded-full px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title="Abrir numa janela flutuante, que fica no lugar enquanto você rola o texto"
-            >
-              <AppWindow className="size-3.5" />
-              Abrir em janela
-            </button>
-          )}
-
           {(!floating || windowTab === "texto") && (
             <VerseText
               verses={displayVerses}
@@ -592,6 +584,21 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
               error={displayError}
               highlights={displayHighlights}
               expandedNoteId={expandedNoteId}
+              headerAction={
+                !floating && canOpenWindow && displayVerses && displayVerses.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      useFloatingWindowsStore.getState().openBibleWindow({ verses: displayVerses, highlights: displayHighlights })
+                    }
+                    className="flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    title="Abrir numa janela flutuante, que fica no lugar enquanto você rola o texto"
+                  >
+                    <AppWindow className="size-3.5" />
+                    Abrir em janela
+                  </button>
+                ) : undefined
+              }
               onToggleNote={(noteId) => {
                 setExpandedNoteId((prev) => (prev === noteId ? null : noteId));
                 // The note itself is read and edited under Highlights.
