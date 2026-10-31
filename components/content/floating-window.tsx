@@ -27,6 +27,8 @@ interface FloatingWindowProps {
   id: string;
   title: string;
   onClose: () => void;
+  /** Fixed strip under the title bar (tabs), outside the scrolling body. */
+  toolbar?: React.ReactNode;
   /** The scrolling body. */
   children: React.ReactNode;
   /** Panels that cover the body (see EmbeddedPanelProvider) — kept outside the scroller so they don't scroll with it. */
@@ -41,7 +43,7 @@ interface FloatingWindowProps {
  * Pointer events with capture (not mouse events) so a stylus or finger drags it
  * too; the title bar and the handles opt out of touch scrolling for the same reason.
  */
-export function FloatingWindow({ id, title, onClose, children, overlays }: FloatingWindowProps) {
+export function FloatingWindow({ id, title, onClose, toolbar, children, overlays }: FloatingWindowProps) {
   const win = useFloatingWindowsStore((s) => s.windows.find((w) => w.id === id));
   const focus = useFloatingWindowsStore((s) => s.focus);
   const setRect = useFloatingWindowsStore((s) => s.setRect);
@@ -130,6 +132,8 @@ export function FloatingWindow({ id, title, onClose, children, overlays }: Float
             <X className="size-4" />
           </button>
         </header>
+
+        {toolbar}
 
         <div className="relative min-h-0 flex-1">
           <div className="absolute inset-0 overflow-y-auto overscroll-contain p-4">{children}</div>

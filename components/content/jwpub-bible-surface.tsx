@@ -36,6 +36,8 @@ import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
 import { JwpubExtractSurface } from "./jwpub-extract-surface";
 import { BibleStudyTabs, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import {
   JwlibraryNoteEditorVault,
   type EditableJwlibraryNote,
@@ -82,6 +84,7 @@ function SurfaceShell({
   onClose,
   raiseKey,
   overlays,
+  toolbar,
   children,
 }: {
   floatingId?: string;
@@ -90,11 +93,13 @@ function SurfaceShell({
   onClose: () => void;
   raiseKey?: number;
   overlays: React.ReactNode;
+  /** Tab bar for the floating window; the side panel has its own inside BibleStudyTabs. */
+  toolbar?: React.ReactNode;
   children: React.ReactNode;
 }) {
   if (floatingId) {
     return (
-      <FloatingWindow id={floatingId} title={title} onClose={onClose} overlays={overlays}>
+      <FloatingWindow id={floatingId} title={title} onClose={onClose} overlays={overlays} toolbar={toolbar}>
         {children}
       </FloatingWindow>
     );
@@ -312,6 +317,13 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
   const [displayError, setDisplayError] = useState<string | null>(error);
   const [tabSelectedVerse, setTabSelectedVerse] = useState<number | null>(soleVerse(verses));
   const [studyTab, setStudyTab] = useState<BibleStudyTab>("notas");
+  // A floating window shows ONE of: the passage, its study notes, or the user's highlights.
+  const [windowTab, setWindowTab] = useState<"texto" | "notas" | "highlights">("texto");
+  const selectWindowTab = (next: "texto" | "notas" | "highlights") => {
+    setWindowTab(next);
+    // Study data loads per tab (see visitedTabs below), so the shared tab follows the window's.
+    if (next !== "texto") setStudyTab(next);
+  };
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [openAppendixId, setOpenAppendixId] = useState<number | null>(null);
   const [editingNote, setEditingNote] = useState<EditableJwlibraryNote | null>(null);
@@ -516,6 +528,34 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
     </>
   );
 
+  const studyNoteCount = refs.length + studyNotes.length + footnotes.length;
+  const windowTabPill = (value: string) =>
+    cn(
+      "rounded-full",
+      windowTab === value ? "data-active:bg-primary/[0.18] data-active:text-accent" : "bg-secondary text-muted-foreground"
+    );
+  const windowToolbar = floating ? (
+    <div className="shrink-0 border-b border-border px-4 py-2">
+      <Tabs value={windowTab} onValueChange={(value) => selectWindowTab(value as "texto" | "notas" | "highlights")}>
+        <TabsList className="w-full justify-start gap-1.5 bg-transparent p-0 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:gap-1.5 [&_[data-slot=tabs-trigger]]:px-3">
+          <TabsTrigger value="texto" className={windowTabPill("texto")}>
+            Texto
+          </TabsTrigger>
+          <TabsTrigger value="notas" className={windowTabPill("notas")}>
+            Notas
+            {studyNoteCount > 0 && <span className="ml-1 font-mono text-[10px] text-accent">{studyNoteCount}</span>}
+          </TabsTrigger>
+          <TabsTrigger value="highlights" className={windowTabPill("highlights")}>
+            Highlights
+            {personalNotes.length > 0 && (
+              <span className="ml-1 font-mono text-[10px] text-accent">{personalNotes.length}</span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+    </div>
+  ) : null;
+
   const windowTitle = displayVerses && displayVerses.length > 0 ? reference(displayVerses) || "Referência bíblica" : "Referência bíblica";
 
   return (
@@ -530,6 +570,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
         onClose={onClose}
         raiseKey={raiseKey}
         overlays={nested}
+        toolbar={windowToolbar}
       >
         <div className="flex flex-col gap-4">
           {!floating && canOpenWindow && displayVerses && displayVerses.length > 0 && (
@@ -544,17 +585,24 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
             </button>
           )}
 
-          <VerseText
-            verses={displayVerses}
-            isLoading={displayLoading}
-            error={displayError}
-            highlights={displayHighlights}
-            expandedNoteId={expandedNoteId}
-            onToggleNote={(noteId) => setExpandedNoteId((prev) => (prev === noteId ? null : noteId))}
-          />
+          {(!floating || windowTab === "texto") && (
+            <VerseText
+              verses={displayVerses}
+              isLoading={displayLoading}
+              error={displayError}
+              highlights={displayHighlights}
+              expandedNoteId={expandedNoteId}
+              onToggleNote={(noteId) => {
+                setExpandedNoteId((prev) => (prev === noteId ? null : noteId));
+                // The note itself is read and edited under Highlights.
+                if (floating) selectWindowTab("highlights");
+              }}
+            />
+          )}
 
-          {viewBookOrder !== null && viewChapter !== null && (
+          {viewBookOrder !== null && viewChapter !== null && (!floating || windowTab !== "texto") && (
             <BibleStudyTabs
+              hideTabBar={!!floating}
               bookName={viewBookName}
               chapter={viewChapter}
               selectedVerse={tabSelectedVerse}

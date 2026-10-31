@@ -112,7 +112,7 @@
   These are *non-blocking* movable/resizable windows (`components/content/floating-window.tsx`: a `position: fixed` portal, pointer-event drag, eight resize handles, several open at once; state in `lib/store/floating-windows-store.ts`; rendered by `FloatingWindowsHost`, mounted in the `(app)` layout so they survive navigation).
   They are not modal dialogs, so the "no modal dialogs" rule above still stands: nothing behind them is blocked, and confirmations/editors opened from inside them still go through a Vault (z-50, above the windows' z-30+).
   The window IS `JwpubBibleSurface` with `floating={{ id }}` — same verse text, study tabs and highlights — swapped from `JwpubSidePanel` to `FloatingWindow` by `SurfaceShell`. A `JwpubSidePanel` opened from inside a window (appendix, citation, excerpt) can't use the reader's shared sidebar, so `EmbeddedPanelContext` turns it into an overlay covering that window's body.
-  Asking for a passage that is already open surfaces its window instead of opening a twin; a window keeps the snapshot of verses/highlights it was opened with.
+  A window shows one thing at a time through its own tab bar — **Texto · Notas · Highlights** (`windowTab` in `JwpubBibleSurface`; `BibleStudyTabs` is told `hideTabBar` and renders only the selected tab; Vídeos/Guia are side-panel only). Tapping a note marker in the text jumps to Highlights, where that note is read and edited. Asking for a passage that is already open surfaces its window instead of opening a twin; a window keeps the snapshot of verses/highlights it was opened with.
 
 # PWA / offline
 

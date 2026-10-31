@@ -121,6 +121,8 @@ interface BibleStudyTabsProps {
 
   tab: BibleStudyTab;
   onTabChange: (tab: BibleStudyTab) => void;
+  /** The host draws its own tab bar (the floating window does) — only the selected tab's content is rendered here. */
+  hideTabBar?: boolean;
 }
 
 /**
@@ -372,6 +374,7 @@ export function BibleStudyTabs({
   onOpenNote,
   tab,
   onTabChange,
+  hideTabBar = false,
 }: BibleStudyTabsProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -563,6 +566,7 @@ export function BibleStudyTabs({
               `flex-1` from fighting the scroll — a scrollbar never renders
               (globals.css hides them globally), so this just reads as a
               plain swipeable row. */}
+          {!hideTabBar && (
           <div className="min-w-0 overflow-x-auto">
             <TabsList className="w-max justify-start gap-1.5 bg-transparent p-0 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:shrink-0 [&_[data-slot=tabs-trigger]]:gap-1.5 [&_[data-slot=tabs-trigger]]:px-3">
               <TabsTrigger value="notas" className={tabPillClass("notas")}>
@@ -605,6 +609,7 @@ export function BibleStudyTabs({
               )}
             </TabsList>
           </div>
+          )}
 
           <TabsContent value="notas" className="flex flex-col gap-3">
             {(() => {
