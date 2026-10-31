@@ -20,3 +20,14 @@ export function readDraggedNoteIds(dataTransfer: DataTransfer): string[] {
 export function hasDraggedNoteIds(event: React.DragEvent) {
   return Array.from(event.dataTransfer.types).includes(NOTE_DRAG_MIME);
 }
+
+/** Same idea as NOTE_DRAG_MIME, for dragging a folder card onto another folder to nest it. */
+export const FOLDER_DRAG_MIME = "application/x-folder-id";
+
+export function readDraggedFolderId(dataTransfer: DataTransfer): string | null {
+  return dataTransfer.getData(FOLDER_DRAG_MIME) || null;
+}
+
+export function hasDraggedFolderId(event: React.DragEvent) {
+  return Array.from(event.dataTransfer.types).includes(FOLDER_DRAG_MIME);
+}

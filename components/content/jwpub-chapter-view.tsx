@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { NotebookPen } from "lucide-react";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
-import { saveAnswer } from "@/app/(app)/jwpub-actions";
+import { queueSaveAnswer } from "@/lib/offline/jwlibrary-mutations";
 import type { ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { wrapTokenRange, getTokenRangeForSelection, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
@@ -332,9 +332,11 @@ export function JwpubChapterView({
 
       let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-      async function persist() {
-        const result = await saveAnswer(publicationId, documentId, key, textarea!.value);
-        textarea!.className = `${ANSWER_BASE_CLASS} ${result.error ? ANSWER_TYPING_CLASS : ANSWER_SAVED_CLASS}`;
+      // Queued in the offline outbox, so an answer written without internet is
+      // kept and sent later; it reads as saved because it is safely stored.
+      function persist() {
+        queueSaveAnswer(publicationId, documentId, key, textarea!.value);
+        textarea!.className = `${ANSWER_BASE_CLASS} ${ANSWER_SAVED_CLASS}`;
       }
 
       if (legacyValue !== undefined && !answers[`${documentId}:${key}`]) {

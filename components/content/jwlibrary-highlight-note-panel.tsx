@@ -4,12 +4,9 @@ import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
-import { notify } from "@/components/ui/toaster";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { queueDeleteHighlight, queueDeleteNote, queueSetHighlightColor } from "@/lib/offline/jwlibrary-mutations";
 import {
-  deleteJwlibraryNote,
-  deleteJwlibraryHighlight,
-  updateJwlibraryHighlightColor,
   listOwnJwlibraryTags,
   getJwlibraryNoteTagIds,
   type JwlibraryTagView,
@@ -70,11 +67,15 @@ export function JwlibraryHighlightNotePanel({
       return;
     }
     let cancelled = false;
-    void Promise.all([listOwnJwlibraryTags(), getJwlibraryNoteTagIds(note.id)]).then(([allTags, noteTags]) => {
-      if (cancelled) return;
-      const tagIds = new Set(noteTags.tagIds ?? []);
-      setTags((allTags.tags ?? []).filter((t) => tagIds.has(t.id)));
-    });
+    void Promise.all([listOwnJwlibraryTags(), getJwlibraryNoteTagIds(note.id)])
+      .then(([allTags, noteTags]) => {
+        if (cancelled) return;
+        const tagIds = new Set(noteTags.tagIds ?? []);
+        setTags((allTags.tags ?? []).filter((t) => tagIds.has(t.id)));
+      })
+      .catch(() => {
+        // Offline: the note shows without its tags.
+      });
     return () => {
       cancelled = true;
     };
@@ -83,22 +84,19 @@ export function JwlibraryHighlightNotePanel({
   // Optimistic, same rationale as handleColorChange below: the caller drops
   // the highlight/note and closes the panel immediately instead of waiting
   // on the round trip (which was the main source of the "demora muito para
-  // atualizar" delay) — the request still goes out, a failure just surfaces
-  // a toast instead of leaving the panel open while the user waits.
+  // atualizar" delay). The write goes through the offline outbox (see
+  // lib/offline/jwlibrary-mutations.ts), which sends it now or once the
+  // connection is back, and toasts if the server turns it down.
   function handleDelete() {
     setConfirmDeleteOpen(false);
     if (note) {
       const noteId = note.id;
       onDeleted();
-      void deleteJwlibraryNote(noteId).then((result) => {
-        if (result.error) notify.error("Não foi possível excluir a nota", result.error);
-      });
+      queueDeleteNote(noteId);
     } else if (highlightId) {
       const id = highlightId;
       onDeleted();
-      void deleteJwlibraryHighlight(id).then((result) => {
-        if (result.error) notify.error("Não foi possível excluir o destaque", result.error);
-      });
+      queueDeleteHighlight(id);
     }
   }
 
@@ -111,9 +109,7 @@ export function JwlibraryHighlightNotePanel({
   function handleColorChange(index: number) {
     if (!highlightId) return;
     onColorChanged?.(index);
-    void updateJwlibraryHighlightColor(highlightId, index).then((result) => {
-      if (result.error) notify.error("Não foi possível trocar a cor", result.error);
-    });
+    queueSetHighlightColor(highlightId, index);
   }
 
   return (

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useDeviceStore, type BeforeInstallPromptEvent } from "@/hooks/ui/use-device";
 import { useNotesStore, usePendingSyncCount } from "@/lib/store/notes-store";
+import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 
 const MOBILE_QUERY = "(max-width: 767px)";
 const STANDALONE_QUERY = "(display-mode: standalone)";
@@ -36,6 +37,7 @@ export function DeviceListener() {
     const goOnline = () => {
       setIsOnline(true);
       void useNotesStore.getState().syncPendingOps();
+      void useJwOutbox.getState().sync();
     };
     const goOffline = () => setIsOnline(false);
     // Fallback for the (rare, but real — e.g. some mobile browsers, and some
@@ -48,6 +50,7 @@ export function DeviceListener() {
     setIsOnline(navigator.onLine);
     // Catches drafts left queued from a previous session (tab closed while offline).
     if (navigator.onLine) void useNotesStore.getState().syncPendingOps();
+    if (navigator.onLine) void useJwOutbox.getState().sync();
 
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
@@ -62,6 +65,7 @@ export function DeviceListener() {
       if (navigator.onLine && Object.keys(useNotesStore.getState().pendingOps).length > 0) {
         void useNotesStore.getState().syncPendingOps();
       }
+      if (navigator.onLine && useJwOutbox.getState().ops.length > 0) void useJwOutbox.getState().sync();
     }, 5000);
 
     return () => {

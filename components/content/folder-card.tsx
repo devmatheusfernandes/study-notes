@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Folder, Lock, LockOpen, MoreHorizontal, Upload } from "lucide-react";
+import { Folder, FolderInput, Lock, LockOpen, MoreHorizontal, Upload } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,9 +10,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { extractDiscoveredItems, type DiscoveredFile } from "@/lib/import-notes";
-import { hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
+import {
+  FOLDER_DRAG_MIME,
+  hasDraggedFolderId,
+  hasDraggedNoteIds,
+  readDraggedFolderId,
+  readDraggedNoteIds,
+} from "@/lib/note-drag";
 
 export interface FolderCardProps {
+  /** Identifies this card as a drag source / drop target for folder-into-folder moves. */
+  folderId?: string;
   name: string;
   itemCount: number;
   onOpen?: () => void;
@@ -26,9 +34,14 @@ export interface FolderCardProps {
   onDropItems?: (items: DiscoveredFile[]) => void;
   /** Called with the dragged note/file ids when they're dropped here to move them into this folder. */
   onDropNoteIds?: (ids: string[]) => void;
+  /** Opens the "move to…" picker for this folder (the touch-friendly path; dragging does the same on desktop). */
+  onMove?: () => void;
+  /** Called with the dragged folder's id when it's dropped here to nest it inside this folder. */
+  onDropFolderId?: (id: string) => void;
 }
 
 export function FolderCard({
+  folderId,
   name,
   itemCount,
   onOpen,
@@ -39,6 +52,8 @@ export function FolderCard({
   onToggleLock,
   onDropItems,
   onDropNoteIds,
+  onMove,
+  onDropFolderId,
 }: FolderCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -57,12 +72,31 @@ export function FolderCard({
     return Array.from(event.dataTransfer.types).includes("Files");
   }
 
+  /** A folder being dragged over itself is never a valid target. */
+  function isOwnFolder(event: React.DragEvent) {
+    return (
+      hasDraggedFolderId(event) &&
+      !!folderId &&
+      Array.from(event.dataTransfer.types).includes(`${FOLDER_DRAG_MIME}:${folderId}`.toLowerCase())
+    );
+  }
+
   function isDraggable(event: React.DragEvent) {
+    if (hasDraggedFolderId(event)) return !!onDropFolderId && !isOwnFolder(event);
     return hasFiles(event) || hasDraggedNoteIds(event);
   }
 
   return (
     <div
+      draggable={!!folderId && !!onDropFolderId && !editing && !masked}
+      onDragStart={(e) => {
+        if (!folderId) return;
+        e.dataTransfer.setData(FOLDER_DRAG_MIME, folderId);
+        // The id rides in the type list too: dataTransfer.getData is blocked during dragover, and
+        // this is how a card tells it is being dragged over itself.
+        e.dataTransfer.setData(`${FOLDER_DRAG_MIME}:${folderId}`, "1");
+        e.dataTransfer.effectAllowed = "move";
+      }}
       className={`relative cursor-pointer flex items-center gap-3 rounded-3xl p-4 text-left transition-all duration-200 ${
         isDragOver
           ? "bg-accent/20 ring-2 ring-accent scale-[1.02] shadow-lg"
@@ -79,7 +113,7 @@ export function FolderCard({
         if (!isDraggable(e)) return;
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = hasDraggedNoteIds(e) ? "move" : "copy";
+        e.dataTransfer.dropEffect = hasDraggedNoteIds(e) || hasDraggedFolderId(e) ? "move" : "copy";
       }}
       onDragLeave={(e) => {
         if (!isDraggable(e)) return;
@@ -97,6 +131,12 @@ export function FolderCard({
         e.stopPropagation();
         dragDepth.current = 0;
         setIsDragOver(false);
+
+        if (hasDraggedFolderId(e)) {
+          const id = readDraggedFolderId(e.dataTransfer);
+          if (id && id !== folderId) onDropFolderId?.(id);
+          return;
+        }
 
         if (hasDraggedNoteIds(e)) {
           const ids = readDraggedNoteIds(e.dataTransfer);
@@ -176,6 +216,12 @@ export function FolderCard({
               }}
             >
               Renomear
+            </DropdownMenuItem>
+          )}
+          {onMove && !masked && (
+            <DropdownMenuItem onSelect={onMove}>
+              <FolderInput className="size-4" />
+              Mover para…
             </DropdownMenuItem>
           )}
           {onDelete && (

@@ -73,12 +73,24 @@ const noteImagesCaching: RuntimeCaching = {
   }),
 };
 
+// Illustrations of publications downloaded for offline reading live in their own
+// cache (lib/offline/jwpub-offline.ts writes it; the name is repeated here because
+// this file is bundled on its own). It has no expiration — the cache below drops
+// entries after 200, which would silently strip images out of a download — so it is
+// consulted first and everything else still goes through the regular CacheFirst.
+const OFFLINE_MEDIA_CACHE = "jwpub-offline-media";
+
+const supabaseMediaStrategy = new CacheFirst({
+  cacheName: "supabase-public-media",
+  plugins: [new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 })],
+});
+
 const supabaseMediaCaching: RuntimeCaching = {
   matcher: ({ url }) => url.hostname.endsWith(".supabase.co") && url.pathname.includes("/storage/v1/object/public/"),
-  handler: new CacheFirst({
-    cacheName: "supabase-public-media",
-    plugins: [new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 })],
-  }),
+  handler: async (options) => {
+    const downloaded = await caches.match(options.request, { cacheName: OFFLINE_MEDIA_CACHE });
+    return downloaded ?? supabaseMediaStrategy.handle(options);
+  },
 };
 
 // defaultCache has no dedicated rule for `.wasm` (no font/image/script/style

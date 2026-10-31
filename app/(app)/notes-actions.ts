@@ -10,6 +10,7 @@ import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
 import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
 import { syncNoteScriptureRefs } from "@/lib/bible/note-scripture-sync";
+import { wouldCreateFolderCycle } from "@/lib/folders";
 
 export interface NoteRow {
   id: string;
@@ -359,6 +360,23 @@ export async function renameFolderRow(id: string, name: string): Promise<{ error
 
   const { error } = await supabase.from("folders").update({ name }).eq("id", id);
   return error ? { error: "Não foi possível renomear a pasta." } : {};
+}
+
+/** Moves a folder under another one (or to the root with `null`). Refuses a move that would put a folder inside itself. */
+export async function setFolderParentRow(id: string, parentId: string | null): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  if (parentId) {
+    // RLS scopes this to the caller's own folders, so a parent that isn't theirs simply isn't found.
+    const { data: folders } = await supabase.from("folders").select("id, parent_id");
+    const nodes = (folders ?? []).map((f) => ({ id: f.id as string, parentId: f.parent_id as string | null }));
+    if (!nodes.some((f) => f.id === parentId)) return { error: "Pasta de destino não encontrada." };
+    if (wouldCreateFolderCycle(nodes, id, parentId)) return { error: "Não é possível mover uma pasta para dentro dela mesma." };
+  }
+
+  const { error } = await supabase.from("folders").update({ parent_id: parentId }).eq("id", id);
+  return error ? { error: "Não foi possível mover a pasta." } : {};
 }
 
 /** Deleting a folder promotes its notes and any nested subfolders to its own parent — nothing inside is deleted. */

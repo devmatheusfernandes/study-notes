@@ -31,6 +31,7 @@ import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { PrivacyLockCard } from "@/components/settings/privacy-lock-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
+import { OfflinePublicationsCard } from "@/components/settings/offline-publications-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 
 interface SettingsViewProps {
@@ -213,6 +214,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               {/* Row 5: Full Width JW Library Backups Card */}
               <BackupsCard />
 
+              {/* Row 5b: publications downloaded for offline reading */}
+              <OfflinePublicationsCard />
+
               {/* Row 6: Full Width Backup Export Card */}
               <PrivacyLockCard />
 
@@ -295,6 +299,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
               <BackupExportCard />
             </div>
+
+            <OfflinePublicationsCard />
 
             <DangerZoneCard />
             </div>

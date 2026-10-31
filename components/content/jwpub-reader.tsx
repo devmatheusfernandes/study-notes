@@ -8,11 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
 import {
-  getChapter,
-  getFootnote,
   getPublication,
-  getAnswers,
-  getExtracts,
   resolveJwpubReferences,
   type ResolvedJwpubReference,
   type JwpubExtractRow,
@@ -20,13 +16,15 @@ import {
 import { getBibleVerses, getBibleVersesBatch, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import {
-  getChapterHighlights,
   getBibleChapterHighlights,
-  createJwlibraryHighlight,
   type ParagraphHighlight,
   type BibleVerseHighlight,
 } from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
+import { loadAnswers, loadChapter, loadChapterHighlights, loadExtracts, loadFootnote } from "@/lib/offline/jwpub-data";
+import { queueCreateHighlight } from "@/lib/offline/jwlibrary-mutations";
+import { JW_MARKS_CHANGED_EVENT, useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
+import { getOfflinePublication, refreshOfflineUserData } from "@/lib/offline/jwpub-offline";
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
@@ -43,6 +41,7 @@ import {
   type EditableJwlibraryNote,
 } from "./jwlibrary-note-editor-vault";
 import { JwlibraryHighlightNotePanel } from "./jwlibrary-highlight-note-panel";
+import { JwpubOfflineButton } from "./jwpub-offline-button";
 
 interface JwpubReaderProps {
   noteId: string;
@@ -284,8 +283,8 @@ export function JwpubReader({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
-    void getAnswers(publication.id).then((result) => {
-      if (!cancelled) setAnswers(result.answers ?? {});
+    void loadAnswers(publication.id).then((result) => {
+      if (!cancelled && result.answers) setAnswers(result.answers);
     });
     return () => {
       cancelled = true;
@@ -308,29 +307,46 @@ export function JwpubReader({
   const [highlights, setHighlights] = useState<ParagraphHighlight[]>([]);
   const refreshHighlights = useCallback(() => {
     if (!activeChapter) return;
-    void getChapterHighlights(
-      publication.symbol,
-      publication.mepsLanguageIndex,
-      publication.issueTagNumber,
-      activeChapter.mepsDocumentId
-    ).then((result) => setHighlights(result.highlights ?? []));
-  }, [publication.symbol, publication.mepsLanguageIndex, publication.issueTagNumber, activeChapter]);
+    void loadChapterHighlights(publication, activeChapter.mepsDocumentId).then((result) => {
+      if (result.highlights) setHighlights(result.highlights);
+    });
+  }, [publication, activeChapter]);
 
   useEffect(() => {
     if (!activeChapter) return;
     let cancelled = false;
-    void getChapterHighlights(
-      publication.symbol,
-      publication.mepsLanguageIndex,
-      publication.issueTagNumber,
-      activeChapter.mepsDocumentId
-    ).then((result) => {
-      if (!cancelled) setHighlights(result.highlights ?? []);
+    void loadChapterHighlights(publication, activeChapter.mepsDocumentId).then((result) => {
+      if (!cancelled && result.highlights) setHighlights(result.highlights);
     });
     return () => {
       cancelled = true;
     };
-  }, [publication.symbol, publication.mepsLanguageIndex, publication.issueTagNumber, activeChapter]);
+  }, [publication, activeChapter]);
+
+  // The outbox finished replaying (or the server turned one of its writes down):
+  // what is actually saved may differ from what this screen drew optimistically.
+  useEffect(() => {
+    window.addEventListener(JW_MARKS_CHANGED_EVENT, refreshHighlights);
+    return () => window.removeEventListener(JW_MARKS_CHANGED_EVENT, refreshHighlights);
+  }, [refreshHighlights]);
+
+  // A downloaded copy answers from the device, so bring its highlights, notes and
+  // answers up to date with whatever was done on another device since — but never
+  // over edits still waiting in the outbox.
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    let cancelled = false;
+    void (async () => {
+      if (!(await getOfflinePublication(noteId))) return;
+      await useJwOutbox.getState().sync();
+      if (cancelled || useJwOutbox.getState().ops.length > 0) return;
+      await refreshOfflineUserData();
+      if (!cancelled) window.dispatchEvent(new Event(JW_MARKS_CHANGED_EVENT));
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [noteId]);
 
   useEffect(() => {
     if (!activeChapter) return;
@@ -348,10 +364,11 @@ export function JwpubReader({
       if (!cancelled) setIsLoadingChapter(true);
     });
 
-    void getChapter(publication.id, activeChapter.documentId).then((result) => {
+    void loadChapter(publication.id, activeChapter.documentId).then((result) => {
       if (cancelled) return;
       const chapterHtml = result.html ?? "";
-      chapterHtmlCache.current.set(activeChapter.documentId, chapterHtml);
+      // A failed load (offline, not downloaded) must not be cached as an empty chapter.
+      if (!result.error) chapterHtmlCache.current.set(activeChapter.documentId, chapterHtml);
       setHtml(chapterHtml);
       setIsLoadingChapter(false);
       if (result.error) notify.error("Não foi possível abrir o capítulo", result.error);
@@ -369,8 +386,8 @@ export function JwpubReader({
     const nextChapter = chapters[activeIndex + 1];
     if (!nextChapter || chapterHtmlCache.current.has(nextChapter.documentId)) return;
     let cancelled = false;
-    void getChapter(publication.id, nextChapter.documentId).then((result) => {
-      if (!cancelled) chapterHtmlCache.current.set(nextChapter.documentId, result.html ?? "");
+    void loadChapter(publication.id, nextChapter.documentId).then((result) => {
+      if (!cancelled && !result.error) chapterHtmlCache.current.set(nextChapter.documentId, result.html ?? "");
     });
     return () => {
       cancelled = true;
@@ -394,10 +411,14 @@ export function JwpubReader({
       };
     }
 
-    void resolveJwpubReferences(ids).then((result) => {
-      if (cancelled) return;
-      setResolvedPubRefs(new Map(result.resolved.map((r) => [r.mepsDocumentId, r])));
-    });
+    void resolveJwpubReferences(ids)
+      .then((result) => {
+        if (cancelled) return;
+        setResolvedPubRefs(new Map(result.resolved.map((r) => [r.mepsDocumentId, r])));
+      })
+      .catch(() => {
+        // Offline: cross-references to other publications simply aren't resolved.
+      });
     return () => {
       cancelled = true;
     };
@@ -439,10 +460,14 @@ export function JwpubReader({
       }
 
       for (const [key, { bookOrder, chapter }] of chapterKeys) {
-        void getBibleChapterHighlights(bookOrder, chapter).then((r) => {
-          if (!cancelled) bibleHighlightCache.current.set(key, r.highlights ?? []);
-        });
+        void getBibleChapterHighlights(bookOrder, chapter)
+          .then((r) => {
+            if (!cancelled) bibleHighlightCache.current.set(key, r.highlights ?? []);
+          })
+          .catch(() => {});
       }
+    }).catch(() => {
+      // Offline: Bible citations just open on demand (and say so if they can't).
     });
     return () => {
       cancelled = true;
@@ -486,7 +511,7 @@ export function JwpubReader({
       setIsLoadingReference(false);
       return;
     }
-    void getChapter(resolved.publicationId, resolved.documentId).then((result) => {
+    void loadChapter(resolved.publicationId, resolved.documentId).then((result) => {
       setReferenceHtml(result.html ?? null);
       setIsLoadingReference(false);
     });
@@ -508,16 +533,22 @@ export function JwpubReader({
       setReferenceHtml(null);
       setIsLoadingReference(true);
       setUnresolvedPubRef(null);
-      void resolveJwpubReferences([mepsDocumentId]).then((result) => {
-        const hit = result.resolved[0];
-        if (!hit) {
+      void resolveJwpubReferences([mepsDocumentId])
+        .then((result) => {
+          const hit = result.resolved[0];
+          if (!hit) {
+            setIsLoadingReference(false);
+            setUnresolvedPubRef(mepsDocumentId);
+            return;
+          }
+          setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, hit));
+          showResolvedRef(hit, pid);
+        })
+        .catch(() => {
+          setReferenceOpen(false);
           setIsLoadingReference(false);
-          setUnresolvedPubRef(mepsDocumentId);
-          return;
-        }
-        setResolvedPubRefs((prev) => new Map(prev).set(mepsDocumentId, hit));
-        showResolvedRef(hit, pid);
-      });
+          notify.error("Sem conexão", "Esta referência precisa de internet para abrir.");
+        });
     },
     [resolvedPubRefs, showResolvedRef]
   );
@@ -530,7 +561,7 @@ export function JwpubReader({
       setReferenceOpen(false);
       setOpenExtracts([]);
       setIsLoadingExtracts(true);
-      void getExtracts(publication.id, extractIds).then((result) => {
+      void loadExtracts(publication.id, extractIds).then((result) => {
         setOpenExtracts(result.extracts ?? []);
         setIsLoadingExtracts(false);
         if (result.error) notify.error("Não foi possível abrir o trecho", result.error);
@@ -556,7 +587,7 @@ export function JwpubReader({
         chapterTitle: resolved.chapterTitle,
         documentId: resolved.documentId,
       });
-      void getChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
+      void loadChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
         setReferenceHtml(chapterResult.html ?? null);
         setIsLoadingReference(false);
       });
@@ -568,7 +599,7 @@ export function JwpubReader({
       setFootnoteOpen(true);
       setFootnoteHtml(null);
       setIsLoadingFootnote(true);
-      void getFootnote(publication.id, footnoteId).then((result) => {
+      void loadFootnote(publication.id, footnoteId).then((result) => {
         setFootnoteHtml(result.html ?? null);
         setIsLoadingFootnote(false);
       });
@@ -593,12 +624,17 @@ export function JwpubReader({
 
       setBibleVerses(null);
       setIsLoadingBible(true);
-      void getBibleVerses(firstVerseId, lastVerseId).then((result) => {
-        setBibleVerses(result.verses ?? null);
-        setBibleError(result.error ?? null);
-        setIsLoadingBible(false);
-        if (result.verses) loadBibleHighlightsFor(result.verses);
-      });
+      void getBibleVerses(firstVerseId, lastVerseId)
+        .then((result) => {
+          setBibleVerses(result.verses ?? null);
+          setBibleError(result.error ?? null);
+          setIsLoadingBible(false);
+          if (result.verses) loadBibleHighlightsFor(result.verses);
+        })
+        .catch(() => {
+          setBibleError("A Bíblia só está disponível com conexão.");
+          setIsLoadingBible(false);
+        });
     },
     [loadBibleHighlightsFor]
   );
@@ -659,10 +695,12 @@ export function JwpubReader({
   // catch rolls it back on failure.
   const handleCreateHighlight = useCallback(
     (pid: string, startToken: number, endToken: number, colorIndex: number) => {
-      const tempId = `optimistic:${crypto.randomUUID()}`;
-      setHighlights((prev) => [...prev, { id: tempId, pid, colorIndex, startToken, endToken, note: null }]);
-
-      void createJwlibraryHighlight({
+      // The id is chosen here and goes through the offline outbox (see
+      // lib/offline/jwlibrary-mutations.ts), so the mark is a real, clickable
+      // highlight the moment it appears — no temporary id to swap later. If the
+      // server turns the write down the outbox announces it and the reader
+      // reloads what is really saved.
+      const id = queueCreateHighlight({
         blockType: 1,
         blockIdentifier: Number(pid),
         location: {
@@ -678,21 +716,8 @@ export function JwpubReader({
         colorIndex,
         startToken,
         endToken,
-      }).then((result) => {
-        if (result.error || !result.id) {
-          setHighlights((prev) => prev.filter((h) => h.id !== tempId));
-          notify.error("Não foi possível criar o destaque", result.error);
-          return;
-        }
-        // Patches the optimistic entry's id in place with the real one
-        // instead of a second round trip (refreshHighlights) to fetch the
-        // same data again — createJwlibraryHighlight already returns it.
-        // Shortens the window where the mark's own click handler still has
-        // to ignore it (see jwpub-chapter-view.tsx's optimistic-id guard)
-        // to a single request instead of two back to back.
-        const realId = result.id;
-        setHighlights((prev) => prev.map((h) => (h.id === tempId ? { ...h, id: realId } : h)));
       });
+      setHighlights((prev) => [...prev, { id, pid, colorIndex, startToken, endToken, note: null }]);
     },
     [publication, activeChapter]
   );
@@ -788,6 +813,10 @@ export function JwpubReader({
               </span>
             )}
           </div>
+
+          {!failed && (
+            <JwpubOfflineButton noteId={noteId} publication={publication} chapters={chapters} />
+          )}
 
           {!failed && (
             <button
@@ -1024,9 +1053,17 @@ export function JwpubReader({
           if (id) setHighlights((prev) => prev.map((h) => (h.id === id ? { ...h, colorIndex } : h)));
         }}
         onDeleted={() => {
+          // Patched in place rather than refetched: the delete is still in the
+          // outbox, so the server would hand the deleted entry straight back.
+          const noteId = highlightNote?.id;
+          const markId = highlightMark?.id;
+          setHighlights((prev) =>
+            noteId
+              ? prev.flatMap((h) => (h.note?.id !== noteId ? [h] : h.colorIndex === null ? [] : [{ ...h, note: null }]))
+              : prev.filter((h) => h.id !== markId)
+          );
           setHighlightNote(null);
           setHighlightMark(null);
-          void refreshHighlights();
         }}
       />
 

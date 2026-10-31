@@ -3,6 +3,8 @@
 import { signOut } from "@/app/login/actions";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useLockStore } from "@/lib/store/lock-store";
+import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
+import { deleteOfflineDatabase } from "@/lib/offline/idb";
 
 const SYNC_GRACE_MS = 4000;
 
@@ -16,8 +18,12 @@ const SYNC_GRACE_MS = 4000;
 export async function signOutAndWipeLocalData() {
   try {
     const { pendingOps, syncPendingOps } = useNotesStore.getState();
-    if (Object.keys(pendingOps ?? {}).length > 0) {
-      await Promise.race([syncPendingOps(), new Promise((r) => setTimeout(r, SYNC_GRACE_MS))]);
+    const { sync: syncPublicationEdits, ops: publicationEdits } = useJwOutbox.getState();
+    if (Object.keys(pendingOps ?? {}).length > 0 || publicationEdits.length > 0) {
+      await Promise.race([
+        Promise.all([syncPendingOps(), syncPublicationEdits()]),
+        new Promise((r) => setTimeout(r, SYNC_GRACE_MS)),
+      ]);
     }
   } catch {
     // Offline or failing — sign out anyway; the wipe below is the point.
@@ -26,6 +32,7 @@ export async function signOutAndWipeLocalData() {
   // The in-memory store survives a client-side redirect (no reload), and the next
   // account to sign in would merge with it — empty it before wiping storage.
   useNotesStore.setState({ notes: [], folders: [], pendingOps: {} });
+  useJwOutbox.setState({ ops: [] });
   useLockStore.getState().lock();
 
   try {
@@ -36,6 +43,9 @@ export async function signOutAndWipeLocalData() {
   } catch {
     // Storage blocked — nothing to wipe.
   }
+
+  // Downloaded publications (and the highlights and notes kept with them) belong to this account.
+  await deleteOfflineDatabase();
 
   try {
     if ("caches" in window) {

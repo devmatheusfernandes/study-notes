@@ -308,6 +308,104 @@ export async function getExtracts(
   return { extracts: ids.map((id) => byId.get(id)).filter((row): row is JwpubExtractRow => row !== undefined) };
 }
 
+/**
+ * The offline download reads a whole publication through these, in slices: a
+ * Server Action response is capped (about 4.5 MB on Vercel), and one chapter —
+ * let alone all of them — can outweigh that. Each slice stops once it has
+ * roughly this many characters, always returning at least one row so a single
+ * big row can't stall the download.
+ */
+const OFFLINE_SLICE_CHARS = 1_500_000;
+
+function takeWithinBudget<T>(rows: T[], size: (row: T) => number): T[] {
+  const taken: T[] = [];
+  let used = 0;
+  for (const row of rows) {
+    const rowSize = size(row);
+    if (taken.length > 0 && used + rowSize > OFFLINE_SLICE_CHARS) break;
+    taken.push(row);
+    used += rowSize;
+  }
+  return taken;
+}
+
+/** The HTML of the requested chapters, as many as fit one slice — the caller asks again for whichever it didn't get back. */
+export async function getOfflineChapters(
+  publicationId: string,
+  documentIds: number[]
+): Promise<{ chapters?: { documentId: number; html: string }[]; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  const ids = documentIds.filter((id) => Number.isFinite(id)).slice(0, 8);
+  if (ids.length === 0) return { chapters: [] };
+
+  const { data, error } = await supabase
+    .from("jwpub_chapters")
+    .select("document_id, content_html")
+    .eq("publication_id", publicationId)
+    .in("document_id", ids);
+  if (error) return { error: "Não foi possível baixar os capítulos." };
+
+  const byId = new Map((data ?? []).map((row) => [row.document_id as number, (row.content_html as string | null) ?? ""]));
+  const ordered = ids.filter((id) => byId.has(id)).map((id) => ({ documentId: id, html: byId.get(id) ?? "" }));
+  return { chapters: takeWithinBudget(ordered, (c) => c.html.length) };
+}
+
+/** Footnotes after `afterFootnoteId`, one slice at a time; `nextCursor` is null once there are no more. */
+export async function getOfflineFootnotes(
+  publicationId: string,
+  afterFootnoteId: number
+): Promise<{ footnotes?: { footnoteId: number; html: string }[]; nextCursor?: number | null; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const PAGE = 500;
+  const { data, error } = await supabase
+    .from("jwpub_footnotes")
+    .select("footnote_id, content_html")
+    .eq("publication_id", publicationId)
+    .gt("footnote_id", afterFootnoteId)
+    .order("footnote_id", { ascending: true })
+    .limit(PAGE);
+  if (error) return { error: "Não foi possível baixar as notas de rodapé." };
+
+  const rows = (data ?? []).map((row) => ({ footnoteId: row.footnote_id as number, html: (row.content_html as string) ?? "" }));
+  const taken = takeWithinBudget(rows, (r) => r.html.length);
+  const exhausted = taken.length === rows.length && rows.length < PAGE;
+  return { footnotes: taken, nextCursor: exhausted ? null : taken[taken.length - 1].footnoteId };
+}
+
+/** Embedded excerpts after `afterExtractId`, one slice at a time; `nextCursor` is null once there are no more. */
+export async function getOfflineExtracts(
+  publicationId: string,
+  afterExtractId: number
+): Promise<{ extracts?: JwpubExtractRow[]; nextCursor?: number | null; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const PAGE = 100;
+  const { data, error } = await supabase
+    .from("jwpub_extracts")
+    .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
+    .eq("publication_id", publicationId)
+    .gt("extract_id", afterExtractId)
+    .order("extract_id", { ascending: true })
+    .limit(PAGE);
+  if (error) return { error: "Não foi possível baixar os trechos citados." };
+
+  const rows: JwpubExtractRow[] = (data ?? []).map((row) => ({
+    extractId: row.extract_id,
+    html: row.content_html,
+    caption: row.caption,
+    refTitle: row.ref_title,
+    refSymbol: row.ref_symbol,
+    refMepsDocumentId: row.ref_meps_document_id,
+  }));
+  const taken = takeWithinBudget(rows, (r) => r.html.length + (r.caption?.length ?? 0));
+  const exhausted = taken.length === rows.length && rows.length < PAGE;
+  return { extracts: taken, nextCursor: exhausted ? null : taken[taken.length - 1].extractId };
+}
+
 export async function markPublicationFailed(noteId: string): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };

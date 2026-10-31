@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { FileQuestion } from "lucide-react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { useHydrated } from "@/components/providers/store-hydration";
 import { NoteEditor } from "./note-editor";
+import { JwpubReader } from "./jwpub-reader";
+import { getOfflinePublication, type OfflinePublication } from "@/lib/offline/jwpub-offline";
 import { LockGate } from "@/components/lock/lock-gate";
 
 /**
@@ -33,6 +35,21 @@ export function OfflineNoteView() {
   const notes = useNotesStore((s) => s.notes);
   const note = noteId ? notes.find((n) => n.id === noteId) : undefined;
 
+  // A publication downloaded for offline reading is kept in IndexedDB, not in the notes store.
+  // undefined: not looked up yet. null: nothing downloaded.
+  const [downloaded, setDownloaded] = useState<OfflinePublication | null | undefined>(undefined);
+  const isPublication = note?.type === "jwpub";
+  useEffect(() => {
+    if (!noteId || !isPublication) return;
+    let cancelled = false;
+    void getOfflinePublication(noteId).then((found) => {
+      if (!cancelled) setDownloaded(found ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [noteId, isPublication]);
+
   // Undefined noteId: still waiting on the location.pathname effect (or the
   // store rehydrating). Keeps the server/first-client render empty, matching
   // what was actually baked into the precached HTML — anything else here
@@ -52,6 +69,27 @@ export function OfflineNoteView() {
     );
   }
 
+  if (isPublication && downloaded === undefined) {
+    return <div className="flex flex-1" />;
+  }
+
+  if (note && downloaded) {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      <LockGate noteId={note.id} initialLocked={false}>
+        <Suspense fallback={null}>
+          <JwpubReader
+            noteId={note.id}
+            initialPublication={downloaded.publication}
+            initialChapters={downloaded.chapters}
+            initialChapterParam={params.get("chapter") ?? undefined}
+            initialDocParam={params.get("doc") ?? undefined}
+          />
+        </Suspense>
+      </LockGate>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
       <div className="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
@@ -60,7 +98,9 @@ export function OfflineNoteView() {
       <h1 className="font-heading text-xl">Nota não disponível offline</h1>
       <p className="max-w-sm text-sm text-muted-foreground">
         {note
-          ? "Arquivos e publicações precisam de conexão para abrir."
+          ? isPublication
+            ? "Esta publicação não foi baixada. Abra-a com internet e use o botão de download para lê-la offline."
+            : "Arquivos precisam de conexão para abrir."
           : "Essa nota ainda não foi salva neste dispositivo."}
       </p>
       <a href="/notes" className="text-sm font-medium text-accent underline underline-offset-4">

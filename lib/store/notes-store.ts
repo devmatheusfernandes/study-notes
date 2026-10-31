@@ -19,6 +19,7 @@ import {
   bulkDeleteNotesPermanently as bulkDeleteNoteRowsPermanently,
   createFolderRow,
   renameFolderRow,
+  setFolderParentRow,
   deleteFolderRow,
   deleteAllFoldersRows,
   createTagRow,
@@ -36,6 +37,8 @@ import { toggleChecklistItemInHtml } from "@/lib/note-preview";
 import { removedNoteImagePaths } from "@/lib/note-images";
 import { deleteNoteImages } from "@/app/(app)/note-images-actions";
 import { saveDrawing } from "@/app/(app)/drawing-actions";
+import { wouldCreateFolderCycle } from "@/lib/folders";
+import { useJwOutboxCount } from "@/lib/offline/jwlibrary-outbox";
 
 export type { NoteType };
 export type NoteStatus = "active" | "archived" | "trashed";
@@ -129,6 +132,7 @@ type PendingOp =
   | { key: string; entityId: string; kind: "saveDrawing"; payload: { id: string; strokes: string } }
   | { key: string; entityId: string; kind: "createFolder"; payload: { id: string; name: string; parentId?: string } }
   | { key: string; entityId: string; kind: "renameFolder"; payload: { id: string; name: string } }
+  | { key: string; entityId: string; kind: "setFolderParent"; payload: { id: string; parentId?: string } }
   | { key: string; entityId: string; kind: "deleteFolder"; payload: { id: string } }
   | { key: string; entityId: string; kind: "createTag"; payload: { id: string; name: string; color: string } }
   | { key: string; entityId: string; kind: "updateTag"; payload: { id: string; patch: { name?: string; color?: string } } }
@@ -151,6 +155,8 @@ interface NotesStore {
 
   createFolder: (name: string, parentId?: string) => string;
   renameFolder: (id: string, name: string) => void;
+  /** Moves a folder under another (or to the root). Refuses a move that would nest a folder inside itself. */
+  moveFolder: (id: string, parentId?: string) => void;
   deleteFolder: (id: string) => void;
   /** Settings "danger zone" — removes every folder and moves their notes to the root. */
   deleteAllFolders: () => void;
@@ -230,6 +236,20 @@ async function runOrQueue(
 function enqueueOp(set: SetFn, op: PendingOp) {
   set((s) => {
     const next = { ...s.pendingOps };
+    // A rename/move of a folder that hasn't reached the server yet folds into
+    // its queued create — a separate op would either overwrite the create (same
+    // slot) or run against a row that doesn't exist yet.
+    if (op.kind === "renameFolder" || op.kind === "setFolderParent") {
+      const createKey = Object.keys(next).find((k) => next[k].kind === "createFolder" && next[k].entityId === op.entityId);
+      const queued = createKey ? next[createKey] : undefined;
+      if (createKey && queued?.kind === "createFolder") {
+        next[createKey] =
+          op.kind === "renameFolder"
+            ? { ...queued, payload: { ...queued.payload, name: op.payload.name } }
+            : { ...queued, payload: { ...queued.payload, parentId: op.payload.parentId } };
+        return { pendingOps: next };
+      }
+    }
     if (op.kind === "deleteNote" || op.kind === "deleteFolder" || op.kind === "deleteTag") {
       const createKind = op.kind === "deleteNote" ? "createNote" : op.kind === "deleteFolder" ? "createFolder" : "createTag";
       const hadUnsyncedCreate = Object.values(next).some((p) => p.kind === createKind && p.entityId === op.entityId);
@@ -267,6 +287,8 @@ function opAction(op: PendingOp): () => Promise<{ error?: string }> {
       return () => createFolderRow(op.payload);
     case "renameFolder":
       return () => renameFolderRow(op.payload.id, op.payload.name);
+    case "setFolderParent":
+      return () => setFolderParentRow(op.payload.id, op.payload.parentId ?? null);
     case "deleteFolder":
       return () => deleteFolderRow(op.payload.id);
     case "createTag":
@@ -375,6 +397,26 @@ export const useNotesStore = create<NotesStore>()(
           if (outcome === "rejected" && previous !== undefined) {
             set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, name: previous } : f)) }));
             notify.error("Não foi possível renomear a pasta");
+          }
+        });
+      },
+
+      moveFolder: (id, parentId) => {
+        const folder = get().folders.find((f) => f.id === id);
+        if (!folder || folder.parentId === parentId) return;
+        if (wouldCreateFolderCycle(get().folders, id, parentId)) {
+          notify.error("Não é possível mover uma pasta para dentro dela mesma");
+          return;
+        }
+
+        const previous = folder.parentId;
+        set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, parentId } : f)) }));
+
+        const op: PendingOp = { key: `folder-parent:${id}`, entityId: id, kind: "setFolderParent", payload: { id, parentId } };
+        void runOrQueue(set, get, op, opAction(op)).then((outcome) => {
+          if (outcome === "rejected") {
+            set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, parentId: previous } : f)) }));
+            notify.error("Não foi possível mover a pasta");
           }
         });
       },
@@ -961,5 +1003,8 @@ export function selectByStatus(notes: Note[], status: NoteStatus, folderScope?: 
 
 /** Count of mutations waiting for a connection — drives the sidebar's offline-status card. */
 export function usePendingSyncCount() {
-  return useNotesStore((s) => Object.keys(s.pendingOps).length);
+  const notesCount = useNotesStore((s) => Object.keys(s.pendingOps).length);
+  // Highlights, notes and answers on publications wait in their own outbox (lib/offline/jwlibrary-outbox.ts).
+  const publicationsCount = useJwOutboxCount();
+  return notesCount + publicationsCount;
 }

@@ -25,7 +25,13 @@ import { useFileUpload } from "@/hooks/use-file-upload";
 import { getFileUrl } from "@/app/(app)/files-actions";
 import { searchJwpubContent, type JwpubSearchMatch } from "@/app/(app)/jwpub-actions";
 import { extractMatchSnippet, type MatchSnippet } from "@/lib/note-preview";
-import { NOTE_DRAG_MIME, hasDraggedNoteIds, readDraggedNoteIds } from "@/lib/note-drag";
+import {
+  NOTE_DRAG_MIME,
+  hasDraggedFolderId,
+  hasDraggedNoteIds,
+  readDraggedFolderId,
+  readDraggedNoteIds,
+} from "@/lib/note-drag";
 import { useHiddenFolderIds, useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
 import { lockItem, unlockItem } from "@/lib/lock/toggle-lock";
 import { useLockStore } from "@/lib/store/lock-store";
@@ -140,6 +146,8 @@ export function NotesCollection({
   const [moveFolderNoteId, setMoveFolderNoteId] = useState<string | null>(null);
   const [isBackDragOver, setIsBackDragOver] = useState(false);
   const renameFolder = useNotesStore((s) => s.renameFolder);
+  const moveFolder = useNotesStore((s) => s.moveFolder);
+  const [moveFolderId, setMoveFolderId] = useState<string | null>(null);
   const deleteFolder = useNotesStore((s) => s.deleteFolder);
   const bulkMoveNotes = useNotesStore((s) => s.bulkMoveNotes);
   const togglePin = useNotesStore((s) => s.togglePin);
@@ -470,16 +478,21 @@ export function NotesCollection({
             type="button"
             onClick={() => setActiveFolder(openFolder.parentId ?? null)}
             onDragOver={(e) => {
-              if (!hasDraggedNoteIds(e)) return;
+              if (!hasDraggedNoteIds(e) && !hasDraggedFolderId(e)) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               setIsBackDragOver(true);
             }}
             onDragLeave={() => setIsBackDragOver(false)}
             onDrop={(e) => {
-              if (!hasDraggedNoteIds(e)) return;
+              if (!hasDraggedNoteIds(e) && !hasDraggedFolderId(e)) return;
               e.preventDefault();
               setIsBackDragOver(false);
+              if (hasDraggedFolderId(e)) {
+                const draggedFolderId = readDraggedFolderId(e.dataTransfer);
+                if (draggedFolderId) moveFolder(draggedFolderId, openFolder.parentId);
+                return;
+              }
               const ids = readDraggedNoteIds(e.dataTransfer);
               if (ids.length > 0) bulkMoveNotes(ids, openFolder.parentId);
             }}
@@ -504,6 +517,7 @@ export function NotesCollection({
               {childFolders.map((folder) => (
                 <FolderCard
                   key={folder.id}
+                  folderId={folder.id}
                   name={folder.name}
                   masked={hiddenFolderIds.has(folder.id)}
                   lockedDirectly={folder.locked === true}
@@ -528,6 +542,8 @@ export function NotesCollection({
                   onDelete={() => deleteFolder(folder.id)}
                   onDropItems={(items) => void processDiscoveredItems(items, folder.id)}
                   onDropNoteIds={(ids) => bulkMoveNotes(ids, folder.id)}
+                  onMove={() => setMoveFolderId(folder.id)}
+                  onDropFolderId={(id) => moveFolder(id, folder.id)}
                 />
               ))}
             </div>
@@ -575,6 +591,15 @@ export function NotesCollection({
         }}
         noteIds={moveFolderNoteId ? [moveFolderNoteId] : []}
         currentFolderId={notes.find((n) => n.id === moveFolderNoteId)?.folderId}
+      />
+    )}
+    {showFolders && (
+      <FolderPickerVault
+        open={moveFolderId !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveFolderId(null);
+        }}
+        folderId={moveFolderId ?? undefined}
       />
     )}
     </>

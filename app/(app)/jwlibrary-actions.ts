@@ -496,6 +496,10 @@ export interface CreateJwlibraryNoteInput {
   highlight?: { colorIndex: number; startToken: number; endToken: number } | null;
   /** Set when attaching this note to a highlight that already exists (created standalone via createJwlibraryHighlight) — links to it instead of creating a new UserMark. Mutually exclusive with `highlight`. */
   attachToUserMarkId?: string | null;
+  /** Row id chosen by the client (a real UUID), so an offline outbox can refer to the note before the server has seen it. A replay with an id that already exists is a no-op that returns it. */
+  id?: string;
+  /** Same idea for the UserMark that `highlight` creates. */
+  userMarkId?: string;
 }
 
 /**
@@ -524,45 +528,64 @@ export async function createJwlibraryNote(
   // location columns instead of trusting this snapshot — see
   // listJwlibraryContent), but worth keeping in parity with import so the
   // stored columns mean what their name says.
+  // A replayed create (the first response was lost offline) must not duplicate.
+  const clientNoteId = input.id && isRealUserMarkId(input.id) ? input.id : null;
+  if (clientNoteId) {
+    const { data: existing } = await supabase.from("jwlibrary_notes").select("id").eq("id", clientNoteId).maybeSingle();
+    if (existing) return { id: existing.id };
+  }
+
   const index = await buildPublicationIndex(supabase);
   const resolved = index.resolve(input.location);
 
   let userMarkId: string | null =
     input.attachToUserMarkId && isRealUserMarkId(input.attachToUserMarkId) ? input.attachToUserMarkId : null;
   if (!userMarkId && input.highlight) {
-    const { data: mark, error: markError } = await supabase
-      .from("jwlibrary_usermarks")
-      .insert({
-        user_id: user.id,
-        backup_id: null,
-        source_guid: randomUUID(),
-        color_index: input.highlight.colorIndex,
-        style_index: 0,
-        version: 1,
-        ...locationColumns(input.location),
-        resolved_publication_id: resolved.publicationId,
-        resolved_chapter_id: resolved.chapterId,
-      })
-      .select("id")
-      .single();
-    if (markError || !mark) return { error: "Não foi possível criar o destaque." };
-    userMarkId = mark.id;
+    const clientMarkId = input.userMarkId && isRealUserMarkId(input.userMarkId) ? input.userMarkId : null;
+    const { data: existingMark } = clientMarkId
+      ? await supabase.from("jwlibrary_usermarks").select("id").eq("id", clientMarkId).maybeSingle()
+      : { data: null };
 
-    const { error: rangeError } = await supabase.from("jwlibrary_blockranges").insert({
-      user_id: user.id,
-      usermark_id: userMarkId,
-      block_type: input.blockType,
-      identifier: input.blockIdentifier,
-      start_token: input.highlight.startToken,
-      end_token: input.highlight.endToken,
-    });
-    if (rangeError) return { error: "Não foi possível criar o destaque." };
+    if (existingMark) {
+      // The mark (and its range) landed on an earlier attempt that died before the note did.
+      userMarkId = existingMark.id;
+    } else {
+      const { data: mark, error: markError } = await supabase
+        .from("jwlibrary_usermarks")
+        .insert({
+          ...(clientMarkId ? { id: clientMarkId } : {}),
+          user_id: user.id,
+          backup_id: null,
+          source_guid: randomUUID(),
+          color_index: input.highlight.colorIndex,
+          style_index: 0,
+          version: 1,
+          ...locationColumns(input.location),
+          resolved_publication_id: resolved.publicationId,
+          resolved_chapter_id: resolved.chapterId,
+        })
+        .select("id")
+        .single();
+      if (markError || !mark) return { error: "Não foi possível criar o destaque." };
+      userMarkId = mark.id;
+
+      const { error: rangeError } = await supabase.from("jwlibrary_blockranges").insert({
+        user_id: user.id,
+        usermark_id: userMarkId,
+        block_type: input.blockType,
+        identifier: input.blockIdentifier,
+        start_token: input.highlight.startToken,
+        end_token: input.highlight.endToken,
+      });
+      if (rangeError) return { error: "Não foi possível criar o destaque." };
+    }
   }
 
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("jwlibrary_notes")
     .insert({
+      ...(clientNoteId ? { id: clientNoteId } : {}),
       user_id: user.id,
       backup_id: null,
       source_guid: randomUUID(),
@@ -593,6 +616,8 @@ export interface CreateJwlibraryHighlightInput {
   colorIndex: number;
   startToken: number;
   endToken: number;
+  /** Row id chosen by the client (a real UUID) — see CreateJwlibraryNoteInput.id. */
+  id?: string;
 }
 
 /**
@@ -607,6 +632,12 @@ export async function createJwlibraryHighlight(
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
+  const clientId = input.id && isRealUserMarkId(input.id) ? input.id : null;
+  if (clientId) {
+    const { data: existing } = await supabase.from("jwlibrary_usermarks").select("id").eq("id", clientId).maybeSingle();
+    if (existing) return { id: existing.id };
+  }
+
   // See the identical comment in createJwlibraryNote — same parity fix.
   const index = await buildPublicationIndex(supabase);
   const resolved = index.resolve(input.location);
@@ -614,6 +645,7 @@ export async function createJwlibraryHighlight(
   const { data: mark, error: markError } = await supabase
     .from("jwlibrary_usermarks")
     .insert({
+      ...(clientId ? { id: clientId } : {}),
       user_id: user.id,
       backup_id: null,
       source_guid: randomUUID(),
@@ -809,6 +841,126 @@ export async function getChapterHighlights(
       ...looseNoteHighlights,
     ],
   };
+}
+
+export interface PublicationHighlight extends ParagraphHighlight {
+  /** The chapter this belongs to (`jwpub_chapters.meps_document_id`) — getChapterHighlights filters by it per call; here it's what lets one fetch cover the whole publication. */
+  mepsDocumentId: number;
+}
+
+const PAGE_SIZE = 1000;
+
+/** PostgREST caps a response at 1000 rows, so anything that can plausibly pass that is read in pages. */
+async function selectAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[] | null> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) return null;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) return rows;
+  }
+}
+
+/**
+ * Every paragraph highlight and note the user has on one publication, for ALL
+ * its chapters at once — what "download for offline" snapshots. Same shape as
+ * getChapterHighlights (see it for the loose-note convention), plus the chapter
+ * each entry belongs to.
+ */
+export async function getPublicationHighlights(
+  symbol: string,
+  mepsLanguage: number | null,
+  issueTagNumber: number | null
+): Promise<{ highlights?: PublicationHighlight[]; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+
+  const fail = { error: "Não foi possível carregar as marcações." };
+
+  const marks = await selectAllRows<{ id: string; color_index: number; meps_document_id: number | null }>((from, to) => {
+    let q = supabase
+      .from("jwlibrary_usermarks")
+      .select("id, color_index, meps_document_id")
+      .eq("key_symbol", symbol)
+      .not("meps_document_id", "is", null);
+    q = mepsLanguage === null ? q.is("meps_language", null) : q.eq("meps_language", mepsLanguage);
+    q = issueTagNumber === null ? q.is("issue_tag_number", null) : q.eq("issue_tag_number", issueTagNumber);
+    return q.order("id").range(from, to);
+  });
+
+  const looseNotes = await selectAllRows<{
+    id: string;
+    block_identifier: number | null;
+    meps_document_id: number | null;
+    title: string;
+    content: string;
+  }>((from, to) => {
+    let q = supabase
+      .from("jwlibrary_notes")
+      .select("id, block_identifier, meps_document_id, title, content")
+      .eq("key_symbol", symbol)
+      .eq("block_type", 1)
+      .is("user_mark_id", null)
+      .not("meps_document_id", "is", null);
+    q = mepsLanguage === null ? q.is("meps_language", null) : q.eq("meps_language", mepsLanguage);
+    q = issueTagNumber === null ? q.is("issue_tag_number", null) : q.eq("issue_tag_number", issueTagNumber);
+    return q.order("id").range(from, to);
+  });
+  if (!marks || !looseNotes) return fail;
+
+  const result: PublicationHighlight[] = looseNotes
+    .filter((n) => n.block_identifier !== null && n.meps_document_id !== null)
+    .map((n) => ({
+      id: `note:${n.id}`,
+      pid: String(n.block_identifier),
+      colorIndex: null,
+      startToken: null,
+      endToken: null,
+      note: { id: n.id, title: decryptText(n.title) ?? "", content: decryptText(n.content) ?? "" },
+      mepsDocumentId: n.meps_document_id as number,
+    }));
+
+  // Kept in chunks: a query string with hundreds of uuids overflows what PostgREST will accept.
+  const CHUNK = 100;
+  for (let i = 0; i < marks.length; i += CHUNK) {
+    const chunk = marks.slice(i, i + CHUNK);
+    const ids = chunk.map((m) => m.id);
+    const [{ data: ranges, error: rangesError }, { data: notes, error: notesError }] = await Promise.all([
+      supabase
+        .from("jwlibrary_blockranges")
+        .select("usermark_id, identifier, start_token, end_token")
+        .in("usermark_id", ids)
+        .eq("block_type", 1),
+      supabase.from("jwlibrary_notes").select("id, user_mark_id, title, content").in("user_mark_id", ids),
+    ]);
+    if (rangesError || notesError) return fail;
+
+    const markById = new Map(chunk.map((m) => [m.id, m]));
+    const noteByMark = new Map(
+      (notes ?? []).map((n) => [
+        n.user_mark_id as string,
+        { id: n.id as string, title: decryptText(n.title) ?? "", content: decryptText(n.content) ?? "" },
+      ])
+    );
+    for (const r of ranges ?? []) {
+      if (r.start_token === null || r.end_token === null) continue;
+      const mark = markById.get(r.usermark_id as string);
+      if (!mark || mark.meps_document_id === null) continue;
+      result.push({
+        id: r.usermark_id as string,
+        pid: String(r.identifier),
+        colorIndex: mark.color_index,
+        startToken: r.start_token as number,
+        endToken: r.end_token as number,
+        note: noteByMark.get(r.usermark_id as string) ?? null,
+        mepsDocumentId: mark.meps_document_id,
+      });
+    }
+  }
+
+  return { highlights: result };
 }
 
 export interface BibleVerseHighlight {

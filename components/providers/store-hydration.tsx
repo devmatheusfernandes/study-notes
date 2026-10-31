@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
+import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import type { NoteRow, FolderRow, TagRow } from "@/app/(app)/notes-actions";
 import type { UserPreferencesData } from "@/app/(app)/preferences-actions";
 
@@ -42,6 +43,8 @@ export function StoreHydration({
       });
     }
     void usePreferencesStore.persist.rehydrate();
+    // Highlights, notes and answers written offline in a previous session.
+    void Promise.resolve(useJwOutbox.persist.rehydrate()).then(() => useJwOutbox.getState().sync());
   }, [initialNotes, initialFolders, initialTags, initialPreferences]);
 
   return null;

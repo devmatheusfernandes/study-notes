@@ -11,10 +11,9 @@ import { RichTextEditor } from "@/components/content/rich-text-editor";
 import { BibleReferencePicker, type BibleReferenceValue } from "./bible-reference-picker";
 import { JwlibraryTagChip } from "./jwlibrary-tag-chip";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { queueCreateNote, queueSetHighlightColor, queueUpdateNote } from "@/lib/offline/jwlibrary-mutations";
+import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import {
-  createJwlibraryNote,
-  updateJwlibraryNote,
-  updateJwlibraryHighlightColor,
   listOwnPublications,
   listOwnJwlibraryTags,
   getJwlibraryNoteTagIds,
@@ -85,7 +84,9 @@ export function JwlibraryNoteEditorVault({
   // either a highlight a note is being attached to, or one an existing note
   // already carries. Null when there's no highlight yet to recolor (a brand
   // new span hasn't been turned into one until this note/highlight saves).
-  const activeUserMarkId = prefilledLocation?.existingUserMarkId ?? (isEdit ? (note?.userMarkId ?? null) : null);
+  const [createdUserMarkId, setCreatedUserMarkId] = useState<string | null>(null);
+  const activeUserMarkId =
+    prefilledLocation?.existingUserMarkId ?? (isEdit ? (note?.userMarkId ?? null) : createdUserMarkId);
   // Whether there's any highlight to show/edit a color for — either a fresh
   // span just selected (not a highlight yet) or an already-existing one.
   const showColorPicker = Boolean(prefilledLocation?.tokenRange) || Boolean(activeUserMarkId);
@@ -119,6 +120,7 @@ export function JwlibraryNoteEditorVault({
       setTitle(note?.title ?? "");
       setContent(note?.content ?? "");
       setCreatedId(note?.id ?? null);
+      setCreatedUserMarkId(null);
       setMode("publication");
       setPublicationId("");
       setBibleRef(EMPTY_BIBLE_REF);
@@ -174,9 +176,12 @@ export function JwlibraryNoteEditorVault({
   useEffect(() => {
     if (!createdId || isEdit || flushedTagsRef.current) return;
     flushedTagsRef.current = true;
-    for (const tagId of noteTagIds) {
-      void addTagToJwlibraryNote(createdId, tagId);
-    }
+    // The note may still be in the offline outbox — tags need it to exist on the server first.
+    void useJwOutbox
+      .getState()
+      .sync()
+      .then(() => Promise.all(noteTagIds.map((tagId) => addTagToJwlibraryNote(createdId, tagId))))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- flush once with whatever was staged at that moment, not on every noteTagIds change
   }, [createdId, isEdit]);
 
@@ -193,8 +198,11 @@ export function JwlibraryNoteEditorVault({
     const wasActive = noteTagIds.includes(tagId);
     setNoteTagIds((prev) => (wasActive ? prev.filter((t) => t !== tagId) : [...prev, tagId]));
     if (!createdId) return;
-    if (wasActive) void removeTagFromJwlibraryNote(createdId, tagId);
-    else void addTagToJwlibraryNote(createdId, tagId);
+    void useJwOutbox
+      .getState()
+      .sync()
+      .then(() => (wasActive ? removeTagFromJwlibraryNote(createdId, tagId) : addTagToJwlibraryNote(createdId, tagId)))
+      .catch(() => {});
   }
 
   async function handleCreateAndAssignTag() {
@@ -207,7 +215,13 @@ export function JwlibraryNoteEditorVault({
     setTags(refreshed.tags ?? []);
     const tagId = result.id;
     setNoteTagIds((prev) => [...prev, tagId]);
-    if (createdId) void addTagToJwlibraryNote(createdId, tagId);
+    if (createdId) {
+      void useJwOutbox
+        .getState()
+        .sync()
+        .then(() => addTagToJwlibraryNote(createdId, tagId))
+        .catch(() => {});
+    }
   }
 
   const locationReady =
@@ -279,19 +293,22 @@ export function JwlibraryNoteEditorVault({
   // it immediately instead of just cancelling it — see handleClose below.
   const pendingSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Saves go through the offline outbox (see lib/offline/jwlibrary-mutations.ts):
+  // the note gets its id here, immediately, and the write reaches the server now
+  // or when the connection returns. Awaiting sync() before onSaved() keeps the
+  // old order for a caller that refetches — the write has been tried by then.
   async function performSave() {
     if (createdId) {
-      const result = await updateJwlibraryNote(createdId, { title, content });
-      if (!result.error) onSaved();
+      queueUpdateNote(createdId, { title, content });
     } else {
       const input = buildCreateInput();
       if (!input) return;
-      const result = await createJwlibraryNote(input);
-      if (result.id) {
-        setCreatedId(result.id);
-        onSaved();
-      }
+      const { noteId, userMarkId } = queueCreateNote(input);
+      setCreatedId(noteId);
+      setCreatedUserMarkId(userMarkId ?? null);
     }
+    await useJwOutbox.getState().sync();
+    onSaved();
   }
 
   // Debounced autosave — same 600ms shape as note-editor.tsx's, just calling
@@ -345,12 +362,10 @@ export function JwlibraryNoteEditorVault({
     setHighlightColor(index);
     if (!activeUserMarkId || index === null) return;
 
-    if (onHighlightColorChanged) {
-      onHighlightColorChanged(activeUserMarkId, index);
-      const result = await updateJwlibraryHighlightColor(activeUserMarkId, index);
-      if (result.error) onSaved();
-    } else {
-      await updateJwlibraryHighlightColor(activeUserMarkId, index);
+    onHighlightColorChanged?.(activeUserMarkId, index);
+    queueSetHighlightColor(activeUserMarkId, index);
+    if (!onHighlightColorChanged) {
+      await useJwOutbox.getState().sync();
       onSaved();
     }
   }
