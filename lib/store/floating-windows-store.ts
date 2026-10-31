@@ -26,6 +26,8 @@ export interface FloatingBibleWindow extends FloatingRect {
   highlights: BibleVerseHighlight[];
   /** Stacking order — higher is in front. */
   z: number;
+  /** Until the user resizes it, the window is as tall as its content (capped to the screen) — `h` is only a placeholder. */
+  autoHeight: boolean;
 }
 
 export const MIN_WINDOW_WIDTH = 300;
@@ -42,6 +44,8 @@ interface FloatingWindowsStore {
   close: (id: string) => void;
   focus: (id: string) => void;
   setRect: (id: string, rect: Partial<FloatingRect>) => void;
+  /** Freezes an auto-height window at the height its content turned out to need. */
+  fitHeight: (id: string, h: number) => void;
 }
 
 function passageKey(verses: BibleVerseRow[]): string {
@@ -91,7 +95,10 @@ export const useFloatingWindowsStore = create<FloatingWindowsStore>((set, get) =
       // Past the cap the oldest window makes room — a stack of eight is already more than fits on screen.
       const kept = s.windows.length >= MAX_WINDOWS ? s.windows.slice(1) : s.windows;
       return {
-        windows: [...kept, { id: crypto.randomUUID(), passageKey: key, verses, highlights, ...rect, z: s.nextZ }],
+        windows: [
+          ...kept,
+          { id: crypto.randomUUID(), passageKey: key, verses, highlights, ...rect, z: s.nextZ, autoHeight: true },
+        ],
         nextZ: s.nextZ + 1,
       };
     });
@@ -108,6 +115,22 @@ export const useFloatingWindowsStore = create<FloatingWindowsStore>((set, get) =
 
   setRect: (id, rect) =>
     set((s) => ({
-      windows: s.windows.map((w) => (w.id === id ? { ...w, ...clampRect({ ...w, ...rect }, viewport()) } : w)),
+      windows: s.windows.map((w) =>
+        w.id === id
+          ? {
+              ...w,
+              ...clampRect({ ...w, ...rect }, viewport()),
+              // Dragging the window keeps it content-sized; resizing it is the user choosing a height.
+              autoHeight: w.autoHeight && rect.h === undefined,
+            }
+          : w
+      ),
+    })),
+
+  fitHeight: (id, h) =>
+    set((s) => ({
+      windows: s.windows.map((w) =>
+        w.id === id && w.autoHeight ? { ...w, ...clampRect({ ...w, h }, viewport()), autoHeight: false } : w
+      ),
     })),
 }));

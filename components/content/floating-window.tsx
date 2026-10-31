@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,26 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
   const win = useFloatingWindowsStore((s) => s.windows.find((w) => w.id === id));
   const focus = useFloatingWindowsStore((s) => s.focus);
   const setRect = useFloatingWindowsStore((s) => s.setRect);
+  const fitHeight = useFloatingWindowsStore((s) => s.fitHeight);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  // A new window opens as tall as its content and then keeps that height, so switching tabs
+  // doesn't make it jump around. Measured after paint, once the verse text is laid out.
+  const autoHeight = win?.autoHeight ?? false;
+  useEffect(() => {
+    if (!autoHeight) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        const height = sectionRef.current?.offsetHeight;
+        if (height) fitHeight(id, height);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [autoHeight, fitHeight, id]);
 
   const gesture = useRef<{ kind: "move" | Edge; pointerId: number; startX: number; startY: number; origin: FloatingRect } | null>(null);
 
@@ -61,7 +81,7 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        origin: { x: win.x, y: win.y, w: win.w, h: win.h },
+        origin: { x: win.x, y: win.y, w: win.w, h: sectionRef.current?.offsetHeight ?? win.h },
       };
       focus(id);
     },
@@ -108,11 +128,20 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
   return createPortal(
     <EmbeddedPanelProvider value={true}>
       <section
+        ref={sectionRef}
         role="dialog"
         aria-modal="false"
         aria-label={title}
         onPointerDownCapture={() => focus(id)}
-        style={{ left: win.x, top: win.y, width: win.w, height: win.h, zIndex: BASE_Z + win.z }}
+        style={{
+          left: win.x,
+          top: win.y,
+          width: win.w,
+          zIndex: BASE_Z + win.z,
+          ...(win.autoHeight
+            ? { height: "auto", minHeight: MIN_WINDOW_HEIGHT + 40, maxHeight: Math.max(MIN_WINDOW_HEIGHT, window.innerHeight - win.y - 16) }
+            : { height: win.h }),
+        }}
         className="fixed flex flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-[0_12px_36px_var(--shadow-strong)]"
       >
         <header
@@ -135,8 +164,10 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
 
         {toolbar}
 
-        <div className="relative min-h-0 flex-1">
-          <div className="absolute inset-0 overflow-y-auto overscroll-contain p-4">{children}</div>
+        {/* The scroller is in normal flow (so an auto-height window can size to it); overlays sit over this
+            wrapper rather than inside the scroller, so they don't scroll with the content. */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
           {overlays}
         </div>
 
