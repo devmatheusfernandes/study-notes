@@ -125,7 +125,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const current = SECTIONS.find((s) => s.id === active) ?? SECTIONS[0];
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+    <div className="flex w-full flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
       {/* Navigation: horizontal chips on small screens, a sticky list on desktop */}
       <nav
         aria-label="Seções das configurações"

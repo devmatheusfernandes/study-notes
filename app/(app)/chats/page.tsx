@@ -24,9 +24,7 @@ export default async function ChatsPage() {
       <ChatHydration conversations={conversations} />
       <Header variant="title" title="Chats" />
       <main className="flex flex-1 flex-col px-4 pt-6 pb-28 sm:px-6">
-        <div className="mx-auto w-full max-w-2xl">
-          <ChatList />
-        </div>
+        <ChatList />
       </main>
       <ChatsDock />
     </>
