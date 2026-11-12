@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import {
+  BookOpen,
+  DatabaseBackup,
+  HardDriveDownload,
+  Library,
+  Lock,
   LogOut,
   Palette,
-  ShieldCheck,
   Sparkles,
   User,
-  Sliders,
-  CheckCircle2,
-  Lock,
-  BookOpen,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { signOutAndWipeLocalData } from "@/lib/sign-out-client";
@@ -32,283 +32,259 @@ import { PrivacyLockCard } from "@/components/settings/privacy-lock-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
 import { OfflinePublicationsCard } from "@/components/settings/offline-publications-card";
+import { OfflineBibleCard } from "@/components/settings/offline-bible-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 
 interface SettingsViewProps {
   userEmail: string;
 }
 
-type SettingsSection = "all" | "ai" | "appearance" | "account";
+type SectionId = "account" | "appearance" | "offline" | "ai" | "library" | "data";
+
+interface SectionMeta {
+  id: SectionId;
+  label: string;
+  /** One line under the label in the desktop sidebar — says what's inside without opening it. */
+  hint: string;
+  icon: ComponentType<{ className?: string }>;
+}
+
+/**
+ * Ordered by how often people come here: who I am and how it looks first,
+ * then what's on this device, then the heavier machinery (AI, shared content)
+ * and finally the data/danger zone at the bottom.
+ */
+const SECTIONS: SectionMeta[] = [
+  { id: "account", label: "Conta", hint: "E-mail, bloqueio, sair", icon: User },
+  { id: "appearance", label: "Aparência", hint: "Tema, exibição e etiquetas", icon: Palette },
+  { id: "offline", label: "Offline", hint: "Bíblia e publicações no aparelho", icon: HardDriveDownload },
+  { id: "ai", label: "Inteligência artificial", hint: "Uso e indexação das notas", icon: Sparkles },
+  { id: "library", label: "Biblioteca", hint: "Vídeos, Guia e Perspicaz", icon: Library },
+  { id: "data", label: "Dados e backup", hint: "Importar, exportar, apagar", icon: DatabaseBackup },
+];
+
+const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
+
+function SectionIntro({ title, description }: { title: string; description: string }) {
+  return (
+    <header className="flex flex-col gap-1">
+      <h2 className="font-heading text-xl text-foreground">{title}</h2>
+      <p className="max-w-2xl text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+    </header>
+  );
+}
+
+/** Plain titled group inside a section, for settings that are a row or two rather than a full card. */
+function Panel({ icon, title, description, children }: { icon: ReactNode; title: string; description?: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-4 rounded-3xl border border-border bg-card p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="font-heading text-base text-foreground">{title}</h3>
+        </div>
+        {description && <p className="text-[12.5px] leading-relaxed text-muted-foreground">{description}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium text-foreground/90">{label}</span>
+        {hint && <span className="text-[12px] text-muted-foreground">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 export function SettingsView({ userEmail }: SettingsViewProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("all");
+  const [active, setActive] = useState<SectionId>("account");
   const [confirmSignOut, setConfirmSignOut] = useState(false);
 
-  const filterTabs = [
-    { id: "all", label: "Visão Geral", icon: Sliders },
-    { id: "ai", label: "IA", icon: Sparkles },
-    { id: "appearance", label: "Aparência", icon: Palette },
-    { id: "account", label: "Conta & Segurança", icon: User },
-  ] as const;
+  // Deep link: /settings#offline opens that section. Read after mount (not in
+  // the initial state) so the server and first client render agree.
+  useEffect(() => {
+    queueMicrotask(() => {
+      const hash = window.location.hash.slice(1);
+      if (SECTION_IDS.has(hash)) setActive(hash as SectionId);
+    });
+  }, []);
+
+  function select(id: SectionId) {
+    setActive(id);
+    // replaceState, not router.replace: no navigation, no RSC round trip, and
+    // no entry added to history for every tab switch.
+    window.history.replaceState(null, "", `#${id}`);
+  }
+
+  const current = SECTIONS.find((s) => s.id === active) ?? SECTIONS[0];
 
   return (
-    <div className="flex w-full flex-col gap-6">
-      {/* Profile Bento Hero Header */}
-      <section className="relative overflow-hidden rounded-3xl border border-border bg-gradient-to-r from-card via-card to-secondary/30 p-5 sm:p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0">
-            <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent font-heading text-xl text-primary-foreground shadow-lg">
-              {userEmail?.[0]?.toUpperCase() ?? "U"}
-            </span>
-            <div className="flex min-w-0 flex-col gap-1">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="truncate text-base font-semibold text-foreground">
-                  {userEmail}
-                </span>
-              </div>
-              <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
-                <Lock className="size-3.5 text-success" />
-                Sessão criptografada via Supabase Auth & RLS
-              </span>
-            </div>
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<LogOut className="size-3.5 text-destructive" />}
-            onClick={() => setConfirmSignOut(true)}
-            className="rounded-full text-[12.5px] max-sm:w-full"
-          >
-            Sair da conta
-          </Button>
-        </div>
-      </section>
-
-      {/* Docs — deliberately not in the sidebar, only reachable from here */}
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-border bg-card p-4 sm:p-5 shadow-sm">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent">
-            <BookOpen className="size-4" />
-          </span>
-          <div className="flex min-w-0 flex-col">
-            <span className="text-sm font-medium text-foreground">Documentação</span>
-            <span className="truncate text-[12.5px] text-muted-foreground">
-              Como usar as telas do app e decisões técnicas do funcionamento offline.
-            </span>
-          </div>
-        </div>
-        <Button variant="outline" size="sm" render={<Link href="/docs" />} className="rounded-full text-[12.5px] max-sm:w-full">
-          Ver documentação
-        </Button>
-      </section>
-
-      {/* Tabs Navigation */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-        {filterTabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeSection === tab.id;
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+      {/* Navigation: horizontal chips on small screens, a sticky list on desktop */}
+      <nav
+        aria-label="Seções das configurações"
+        className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none sm:-mx-6 sm:px-6 lg:sticky lg:top-6 lg:mx-0 lg:w-64 lg:shrink-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0"
+      >
+        {SECTIONS.map((section) => {
+          const Icon = section.icon;
+          const isActive = section.id === active;
           return (
             <button
-              key={tab.id}
+              key={section.id}
               type="button"
-              onClick={() => setActiveSection(tab.id)}
+              onClick={() => select(section.id)}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[13px] font-medium transition-all",
+                "flex shrink-0 items-center gap-2.5 rounded-full px-4 py-2 text-left text-[13px] font-medium transition-colors lg:w-full lg:rounded-2xl lg:px-3.5 lg:py-2.5",
                 isActive
                   ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-secondary/70 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                  : "bg-secondary/70 text-muted-foreground hover:bg-secondary hover:text-foreground lg:bg-transparent"
               )}
             >
-              <Icon className={cn("size-3.5", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-              <span>{tab.label}</span>
+              <Icon className="size-4 shrink-0" />
+              <span className="flex min-w-0 flex-col">
+                <span>{section.label}</span>
+                <span
+                  className={cn(
+                    "hidden text-[11.5px] font-normal lg:block",
+                    isActive ? "text-primary-foreground/80" : "text-muted-foreground"
+                  )}
+                >
+                  {section.hint}
+                </span>
+              </span>
             </button>
           );
         })}
+      </nav>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={active}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="flex flex-col gap-5"
+          >
+            {active === "account" && (
+              <>
+                <SectionIntro title={current.label} description="Quem está conectado e como proteger o acesso às suas notas." />
+
+                <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-border bg-gradient-to-r from-card via-card to-secondary/30 p-5 shadow-sm sm:p-6">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-accent font-heading text-xl text-primary-foreground shadow-lg">
+                      {userEmail?.[0]?.toUpperCase() ?? "U"}
+                    </span>
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <span className="truncate text-base font-semibold text-foreground">{userEmail}</span>
+                      <span className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+                        <Lock className="size-3.5 text-success" />
+                        Suas notas só podem ser lidas por você
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<LogOut className="size-3.5 text-destructive" />}
+                    onClick={() => setConfirmSignOut(true)}
+                    className="rounded-full text-[12.5px] max-sm:w-full"
+                  >
+                    Sair da conta
+                  </Button>
+                </section>
+
+                <PrivacyLockCard />
+
+                <Panel
+                  icon={<BookOpen className="size-4 text-accent" />}
+                  title="Documentação"
+                  description="Como usar cada tela do app e as decisões técnicas por trás do funcionamento offline."
+                >
+                  <div>
+                    <Button variant="outline" size="sm" render={<Link href="/docs" />} className="rounded-full text-[12.5px]">
+                      Ver documentação
+                    </Button>
+                  </div>
+                </Panel>
+              </>
+            )}
+
+            {active === "appearance" && (
+              <>
+                <SectionIntro title={current.label} description="Como o app parece e como suas notas são organizadas na tela." />
+                <Panel icon={<Palette className="size-4 text-accent" />} title="Exibição">
+                  <SettingRow label="Tema" hint="Claro, escuro ou o mesmo do sistema. Vale só neste aparelho.">
+                    <ThemeToggle />
+                  </SettingRow>
+                  <hr className="border-border/50" />
+                  <SettingRow label="Modo de exibição" hint="Grade ou lista, nas notas, arquivados e lixeira.">
+                    <ViewModeToggle />
+                  </SettingRow>
+                </Panel>
+                <TagsSettingsCard />
+              </>
+            )}
+
+            {active === "offline" && (
+              <>
+                <SectionIntro
+                  title={current.label}
+                  description="O que fica salvo neste aparelho para abrir na hora e sem internet. Tudo some ao sair da conta."
+                />
+                <OfflineBibleCard />
+                <OfflinePublicationsCard />
+              </>
+            )}
+
+            {active === "ai" && (
+              <>
+                <SectionIntro
+                  title={current.label}
+                  description="Quanto da IA você usou e o andamento da indexação das suas notas para a busca inteligente."
+                />
+                <AiUsageCard />
+                <VectorQueueCard />
+              </>
+            )}
+
+            {active === "library" && (
+              <>
+                <SectionIntro
+                  title={current.label}
+                  description="Conteúdo compartilhado: o que você importa aqui fica disponível para todos os usuários do app, não só para você."
+                />
+                <GlobalVideoSyncCard />
+                <VideoScriptureIndexCard />
+                <ResearchGuideUploadCard />
+                <ResearchGuideTopicsUploadCard />
+                <InsightUploadCard />
+              </>
+            )}
+
+            {active === "data" && (
+              <>
+                <SectionIntro
+                  title={current.label}
+                  description="Traga dados do JW Library, leve uma cópia das suas notas ou apague tudo."
+                />
+                <BackupsCard />
+                <BackupExportCard />
+                <DangerZoneCard />
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      {/* Bento Grid Content Container */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeSection}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.2 }}
-        >
-          {activeSection === "all" && (
-            /* Balanced Bento Grid Layout (Full Width) */
-            <div className="flex flex-col gap-5">
-              {/* Row 1: AI Stats & Appearance/Security Side by Side */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
-                {/* Column 1: AI Usage Card */}
-                <div className="flex">
-                  <AiUsageCard />
-                </div>
-
-                {/* Column 2: Combined Appearance & Security Card */}
-                <div className="flex flex-col justify-between rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm gap-5">
-                  {/* Appearance Section */}
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-center gap-2">
-                      <Palette className="size-4 text-accent" />
-                      <h2 className="font-heading text-base text-foreground">Aparência & Exibição</h2>
-                    </div>
-                    <p className="text-[12.5px] text-muted-foreground leading-relaxed">
-                      Escolha o tema do app e como suas notas, arquivados e lixeira são organizados na tela principal.
-                    </p>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <ThemeToggle />
-                      <ViewModeToggle />
-                    </div>
-                  </div>
-
-                  <hr className="border-border/50" />
-
-                  {/* Security Section */}
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="size-4 text-success" />
-                      <h2 className="font-heading text-base text-foreground">Segurança & RLS</h2>
-                    </div>
-                    <div className="flex flex-col gap-2 rounded-2xl bg-secondary/50 p-3.5 border border-border/50">
-                      <div className="flex items-center justify-between text-[12px]">
-                        <span className="text-muted-foreground">E-mail:</span>
-                        <span className="font-mono font-medium text-foreground truncate max-w-[180px]">
-                          {userEmail}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-[12px]">
-                        <span className="text-muted-foreground">Proteção de dados:</span>
-                        <span className="flex items-center gap-1 font-mono text-success text-[11px]">
-                          <CheckCircle2 className="size-3" />
-                          RLS Ativado (Owner Only)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 2: Full Width Vector Queue Card */}
-              <VectorQueueCard />
-
-              {/* Row 3: Full Width Global Video Sync Card */}
-              <GlobalVideoSyncCard />
-
-              {/* Row 3b: Bible references extracted from those videos */}
-              <VideoScriptureIndexCard />
-
-              {/* Row 3c: Research Guide (Guia de Pesquisa) upload */}
-              <ResearchGuideUploadCard />
-
-              {/* Row 3c': 2026 Guia de Pesquisa A–Z topics — shared global content */}
-              <ResearchGuideTopicsUploadCard />
-
-              {/* Row 3d: Perspicaz (Insight) upload — shared global content */}
-              <InsightUploadCard />
-
-              {/* Row 4: Full Width Tags Card */}
-              <TagsSettingsCard />
-
-              {/* Row 5: Full Width JW Library Backups Card */}
-              <BackupsCard />
-
-              {/* Row 5b: publications downloaded for offline reading */}
-              <OfflinePublicationsCard />
-
-              {/* Row 6: Full Width Backup Export Card */}
-              <PrivacyLockCard />
-
-              <BackupExportCard />
-
-              {/* Row 7: Full Width Danger Zone Card */}
-              <DangerZoneCard />
-            </div>
-          )}
-
-          {activeSection === "ai" && (
-            <div className="flex flex-col gap-5">
-              <AiUsageCard />
-              <VectorQueueCard />
-              <GlobalVideoSyncCard />
-              <VideoScriptureIndexCard />
-            </div>
-          )}
-
-          {activeSection === "appearance" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
-              <section className="flex flex-col gap-4 rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <Palette className="size-4 text-accent" />
-                    <h2 className="font-heading text-base">Aparência & Exibição</h2>
-                  </div>
-                  <p className="text-[12.5px] text-muted-foreground">
-                    Escolha o tema claro, escuro ou o do sistema, e o formato de grade ou lista para organizar suas notas.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                  <span className="text-sm font-medium text-foreground/90">Tema</span>
-                  <ThemeToggle />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-foreground/90">Modo de Exibição</span>
-                  <ViewModeToggle />
-                </div>
-              </section>
-
-              <TagsSettingsCard />
-            </div>
-          )}
-
-          {activeSection === "account" && (
-            <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
-              <section className="flex flex-col gap-5 rounded-3xl border border-border bg-card p-5 sm:p-6 shadow-sm justify-between">
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="size-4 text-success" />
-                    <h2 className="font-heading text-base">Segurança & Conta</h2>
-                  </div>
-                  <p className="text-[12.5px] text-muted-foreground">
-                    Suas notas e embeddings de IA são protegidos via Supabase Row Level Security (RLS).
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-2.5 rounded-2xl bg-secondary/50 p-4 border border-border/50">
-                  <div className="flex items-center justify-between text-[13px]">
-                    <span className="text-muted-foreground">E-mail cadastrado:</span>
-                    <span className="font-mono font-medium text-foreground">{userEmail}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[13px]">
-                    <span className="text-muted-foreground">Autenticação:</span>
-                    <span className="font-mono text-foreground">Supabase Auth</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[13px]">
-                    <span className="text-muted-foreground">Proteção de dados:</span>
-                    <span className="flex items-center gap-1 font-mono text-success">
-                      <CheckCircle2 className="size-3.5" />
-                      RLS Ativado (Owner Only)
-                    </span>
-                  </div>
-                </div>
-              </section>
-
-              <PrivacyLockCard />
-
-              <BackupExportCard />
-            </div>
-
-            <OfflinePublicationsCard />
-
-            <DangerZoneCard />
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
-
-      {/* Confirmation Vault for Sign Out */}
       <ConfirmVault
         open={confirmSignOut}
         onOpenChange={setConfirmSignOut}
