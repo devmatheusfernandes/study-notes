@@ -58,6 +58,48 @@ export async function getBibleVerses(
   };
 }
 
+/**
+ * One slice of the whole Bible, for the "download to this device" feature
+ * (lib/offline/bible-offline.ts). Keyset-paginated on `id` rather than offset:
+ * PostgREST caps a response at 1000 rows by default, so the client loops
+ * `afterId = lastId` until `done`. ~31k verses → ~32 small requests, each well
+ * under a Server Action's response cap.
+ */
+export async function getBibleDownloadSlice(
+  afterId: number
+): Promise<{ verses?: BibleVerseRow[]; done?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+  if (!Number.isFinite(afterId) || afterId < 0) return { error: "Posição inválida." };
+
+  const PAGE = 1000;
+  const { data, error } = await supabase
+    .from("bible_verses")
+    .select("id, book, book_order, chapter, verse, text, is_superscription")
+    .gt("id", afterId)
+    .order("id", { ascending: true })
+    .limit(PAGE);
+
+  if (error) return { error: "Não foi possível baixar a Bíblia." };
+
+  const rows = data ?? [];
+  return {
+    done: rows.length < PAGE,
+    verses: rows.map((row) => ({
+      id: row.id,
+      book: row.book,
+      bookOrder: row.book_order,
+      chapter: row.chapter,
+      verse: row.verse,
+      text: row.text,
+      isSuperscription: row.is_superscription,
+    })),
+  };
+}
+
 const MAX_BATCH_RANGES = 100; // a heavily cross-referenced chapter still stays well under this
 
 /**

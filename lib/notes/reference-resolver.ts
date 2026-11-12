@@ -20,6 +20,7 @@ import { getBibleChapterVerses, getBibleVerseRange, type BibleVerseRow } from "@
 import { resolvePublicationChapterById, resolvePublicationReference } from "@/app/(app)/jwpub-actions";
 import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
 import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
+import { readOfflineBibleChapter, readOfflineBibleRange } from "@/lib/offline/bible-offline";
 
 /** A publication chapter, in the shape JwpubReferenceSurface's `target` wants. */
 export interface ResolvedPublicationTarget {
@@ -73,6 +74,13 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
   if (reference.kind === "note") return EMPTY; // read straight from the notes store, never fetched
 
   if (reference.kind === "bible") {
+    // Downloaded Bible → answer from the device, no Server Action, no queue.
+    const local =
+      reference.startVerse === null
+        ? await readOfflineBibleChapter(reference.bookOrder, reference.chapter)
+        : await readOfflineBibleRange(reference.bookOrder, reference.chapter, reference.startVerse, reference.endVerse);
+    if (local) return { ...EMPTY, verses: local };
+
     const result =
       reference.startVerse === null
         ? await getBibleChapterVerses(reference.bookOrder, reference.chapter)

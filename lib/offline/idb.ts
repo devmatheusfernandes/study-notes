@@ -5,7 +5,7 @@
  */
 
 export const OFFLINE_DB_NAME = "study-notes-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 /** One object store per kind of thing a downloaded publication needs. */
 export const STORES = {
@@ -17,6 +17,12 @@ export const STORES = {
   answers: { keyPath: "publicationId" },
   /** The user's highlights and notes, one row per publication location (see marksKey). */
   marks: { keyPath: "key" },
+  /** The whole Bible, one row per chapter (see lib/offline/bible-offline.ts). */
+  bibleChapters: { keyPath: ["bookOrder", "chapter"] },
+  /** Single-row bookkeeping for the Bible download ("complete" marker). */
+  bibleMeta: { keyPath: "key" },
+  /** The "@" menu's chapter/video title index (lib/notes/reference-title-index.ts). One row, key "index". */
+  referenceIndex: { keyPath: "key" },
 } as const;
 
 export type StoreName = keyof typeof STORES;
@@ -116,6 +122,13 @@ export async function idbDeleteByPrefix(stores: StoreName[], prefix: IDBValidKey
   const db = await openDb();
   const tx = db.transaction(stores, "readwrite");
   for (const store of stores) tx.objectStore(store).delete(prefixRange(prefix));
+  await finished(tx);
+}
+
+export async function idbClear(stores: StoreName[]): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(stores, "readwrite");
+  for (const store of stores) tx.objectStore(store).clear();
   await finished(tx);
 }
 

@@ -57,7 +57,7 @@ import {
 } from "@/lib/notes/note-reference";
 import { prefetchNoteReference } from "@/lib/notes/reference-resolver";
 import { ReferenceSuggestionMenu } from "@/components/content/reference-suggestion-menu";
-import { searchNoteReferenceCandidates } from "@/app/(app)/note-reference-search-actions";
+import { isReferenceTitleIndexReady, searchReferenceTitles, warmReferenceTitleIndex } from "@/lib/notes/reference-title-index";
 
 const REFERENCE_SEARCH_DEBOUNCE_MS = 250;
 const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
@@ -213,11 +213,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       return;
     }
 
-    queueMicrotask(() => {
-      if (searchRequestRef.current === requestId) setIsSearching(true);
-    });
+    // With the title index on the device the search is a few milliseconds of
+    // filtering: no debounce, and no "buscando…" row flashing for one frame.
+    const local = isReferenceTitleIndexReady();
+    if (!local) {
+      queueMicrotask(() => {
+        if (searchRequestRef.current === requestId) setIsSearching(true);
+      });
+    }
     const timer = setTimeout(() => {
-      void searchNoteReferenceCandidates(namePart, scope ? { publicationSymbol: scope.symbol } : undefined).then(
+      void searchReferenceTitles(namePart, scope ? { publicationSymbol: scope.symbol } : undefined).then(
         (result) => {
           // A later keystroke may have started a newer search — a slow response
           // to a stale query must not overwrite results for what's typed now.
@@ -226,7 +231,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           setIsSearching(false);
         }
       );
-    }, REFERENCE_SEARCH_DEBOUNCE_MS);
+    }, local ? 0 : REFERENCE_SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
   }, [suggestion]);
@@ -250,6 +255,23 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       }),
     []
   );
+
+  // Load/refresh the local title index as soon as a note is open, so the very
+  // first "@" already searches on the device instead of the server.
+  useEffect(() => {
+    warmReferenceTitleIndex();
+  }, []);
+
+  // Warm the highlighted row's content while the menu is still open, so by the
+  // time Enter lands (and the reference is clicked afterwards) the text is in
+  // the resolver's cache. Short delay: arrowing/typing past a row shouldn't
+  // queue a Server Action for every one it touches.
+  const activeItem = items[activeIndex];
+  useEffect(() => {
+    if (!activeItem || activeItem.type !== "insert") return;
+    const timer = setTimeout(() => prefetchNoteReference(activeItem.reference), 120);
+    return () => clearTimeout(timer);
+  }, [activeItem]);
 
   const itemsRef = useRef(items);
   const activeIndexRef = useRef(activeIndex);
@@ -276,6 +298,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         .run();
       return;
     }
+
+    // Also on commit: covers a row chosen by click/tap (no hover on touch).
+    prefetchNoteReference(item.reference);
 
     const end = active.from + item.text.length;
     editor

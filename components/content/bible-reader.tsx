@@ -11,10 +11,10 @@ import { SidebarToggleButton } from "@/components/layout/sidebar-toggle-button";
 import { UserMenuClient } from "@/components/layout/user-menu-client";
 import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
+import { loadBibleChapterVerses } from "@/lib/offline/bible-offline";
 import {
   listBibleBooks,
   getBibleChapterCount,
-  getBibleChapterVerses,
   getChapterStudyContent,
   listBibleAppendixHeaders,
   type BibleBook,
@@ -435,7 +435,7 @@ export function BibleReader({
     queueMicrotask(() => {
       if (!cancelled) setIsLoadingChapter(true);
     });
-    void getBibleChapterVerses(bookOrder, chapter).then((result) => {
+    void loadBibleChapterVerses(bookOrder, chapter).then((result) => {
       if (cancelled) return;
       const chapterVerses = result.verses ?? [];
       chapterVerseCache.current.set(key, chapterVerses);
@@ -457,8 +457,8 @@ export function BibleReader({
     const key = `${bookOrder}-${chapter + 1}`;
     if (chapterVerseCache.current.has(key)) return;
     let cancelled = false;
-    void getBibleChapterVerses(bookOrder, chapter + 1).then((result) => {
-      if (!cancelled) chapterVerseCache.current.set(key, result.verses ?? []);
+    void loadBibleChapterVerses(bookOrder, chapter + 1).then((result) => {
+      if (!cancelled && result.verses) chapterVerseCache.current.set(key, result.verses);
     });
     return () => {
       cancelled = true;
