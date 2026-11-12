@@ -24,6 +24,17 @@ export interface MatchResult {
     partOf?: string;
     /** ISO publication date of a video, filled by applyPublishPeriod so the model can judge "recente"/"este mês" instead of guessing. */
     publishedAt?: string;
+    /** Where this passage starts in the video ("12:34"), located in its subtitles by lib/vector/retrieve.ts. */
+    startTime?: string;
+    /** The subtitle line the passage starts on — what InlineVideoCard matches to seek the player there. */
+    seekSnippet?: string;
+    /** Where the source opens, for the kinds that have no note/video id of their own (global publications, Research Guide). */
+    href?: string;
+    bookOrder?: number;
+    chapter?: number;
+    firstVerse?: number | null;
+    /** The program a video belongs to ("Adoração Matinal", "Cântico original"), when the search filtered by it. */
+    category?: string;
   };
   similarity: number;
 }
@@ -178,6 +189,14 @@ export async function rerankMatches(
   let reranked: MatchResult[] = [];
 
   for (const m of matches) {
+    // "Boletim 6 de 2026", "o Broadcasting de agosto de 2026": the year and the
+    // edition number identify a VIDEO. Applied to everything, any note or
+    // workbook page that happens to contain "2026" was lifted by +0.4 into the
+    // near-exact range, right beside the video actually asked for.
+    if (m.source_type !== "video") {
+      reranked.push(m);
+      continue;
+    }
     const metaStr = typeof m.metadata === "string" ? m.metadata : JSON.stringify(m.metadata ?? {});
     const textToSearch = `${m.content} ${metaStr}`.toLowerCase();
     const itemConstraints = parseQueryConstraints(textToSearch);
@@ -372,7 +391,7 @@ export function buildRagSystemPrompt(
   matchRows: MatchResult[],
   sourcesLabel: string,
   notice?: string | null,
-  options?: { citeSources?: boolean }
+  options?: { citeSources?: boolean; catalog?: string | null }
 ): string {
   return (
     `Data de hoje: ${formatTodayPt()}. Use-a para qualquer julgamento de tempo ("recente", "último", "este mês"): ` +
@@ -382,9 +401,60 @@ export function buildRagSystemPrompt(
     (notice ? `AVISO DO SISTEMA DE BUSCA (fato verificado): ${notice}
 
 ` : "") +
-    buildRagSystemPromptBody(matchRows, sourcesLabel, options?.citeSources ?? false)
+    (options?.catalog
+      ? buildCatalogPrompt(options.catalog)
+      : buildRagSystemPromptBody(matchRows, sourcesLabel, options?.citeSources ?? false))
   );
 }
+
+/**
+ * "Quantas adorações matinais saíram em 2026?" / "quais discursos do X
+ * existem?" are questions about the CATALOG, not about what some transcript
+ * says: answered from retrieved passages the model counted the passages (it
+ * said 1; there were 43). The count and the titles come from a real query
+ * (lib/vector/retrieve.ts' catalog lookup) and are handed over as facts.
+ */
+function buildCatalogPrompt(catalog: string): string {
+  return (
+    `Você é o assistente inteligente do Study Notes. A pergunta do usuário é sobre QUAIS ou QUANTOS vídeos existem. ` +
+    `O sistema consultou o catálogo de vídeos diretamente; o resultado abaixo é um FATO verificado e completo — ` +
+    `use exatamente o total informado, nunca conte itens por conta própria nem diga que não encontrou. ` +
+    `Responda em português, de forma direta: diga o total e liste os títulos com a data (se a lista for longa, ` +
+    `mostre os mais recentes e diga quantos ficaram de fora). Não descreva o conteúdo dos vídeos.\n\n` +
+    catalog
+  );
+}
+
+const SOURCE_KIND_LABEL: Record<string, string> = {
+  video: "VÍDEO",
+  biblia: "BÍBLIA",
+  publicacao: "PUBLICAÇÃO",
+  jwpub: "PUBLICAÇÃO DA SUA BIBLIOTECA",
+  pdf: "ARQUIVO SEU",
+  nota: "NOTA SUA",
+  estudo_pessoal: "ESTUDO PESSOAL",
+};
+
+function sourceKind(m: MatchResult): string {
+  return SOURCE_KIND_LABEL[(m.metadata?.type as string | undefined) ?? m.source_type] ?? SOURCE_KIND_LABEL[m.source_type] ?? "CONTEÚDO";
+}
+
+/** How to use the labelled sources — shared by the cautious and the assertive prompt. */
+const SOURCE_USAGE_RULES =
+  `Cada fonte traz o seu tipo no cabeçalho (VÍDEO, BÍBLIA, PUBLICAÇÃO, NOTA SUA…). ` +
+  `Quando o usuário pedir vídeos, indique os vídeos das fontes pelo título exato; quando o cabeçalho de um vídeo disser "começa em MM:SS", ` +
+  `informe esse momento, e quando o texto de um vídeo trouxer marcadores [MM:SS] use o marcador mais próximo antes do trecho — ` +
+  `nunca informe um minuto que não esteja escrito na fonte, e se nenhuma fonte trouxer o tempo diga que não foi possível localizar o minuto. ` +
+  `Um tempo escrito com "~" é uma estimativa: apresente-o como "por volta de". ` +
+  `Ao usar uma publicação, diga o nome dela e do artigo. Ao citar a Bíblia, dê livro, capítulo e versículo. ` +
+  `Se o usuário pedir vários tipos de material (vídeos, textos, publicações), separe a resposta por tipo usando as fontes de cada um. ` +
+  `Se as fontes respondem só uma parte da pergunta, responda essa parte e diga o que não foi encontrado. ` +
+  `Só atribua algo a uma publicação ou vídeo que esteja entre as fontes: se o usuário perguntou o que diz uma publicação específica e ela não está nas fontes, ` +
+  `diga que essa publicação não foi encontrada antes de responder com o que as outras fontes dizem. ` +
+  `Nunca escreva links ou endereços (URLs): a interface já mostra o link de cada fonte. ` +
+  `Copie datas, números, nomes e títulos EXATAMENTE como estão na fonte; nunca os ajuste para combinar com a pergunta. ` +
+  `A Sentinela (edição de estudo) é publicada cerca de dois meses antes das semanas que ela traz: a edição de "novembro de 2026" contém os estudos de janeiro de 2027, ` +
+  `e a de setembro, os de novembro. Quando perguntarem pelos artigos de uma edição, informe as datas de estudo que a fonte traz, nunca o mês da capa.`;
 
 function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string, citeSources: boolean): string {
   if (matchRows.length === 0) {
@@ -417,16 +487,34 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
   const CONTEXT_CHAR_BUDGET = 48_000;
   const MAX_CONTEXT_SOURCES = 15;
   const contextRows = matchRows.slice(0, MAX_CONTEXT_SOURCES);
-  const perSourceCap = Math.max(1_200, Math.floor(CONTEXT_CHAR_BUDGET / contextRows.length));
+  // Short passages take what they need; what is left is shared among the long
+  // ones. An even split gave a one-hour program's transcript the same 4k
+  // characters as a 400-character verse — cutting it off before the part the
+  // question was about, with most of the budget unused.
+  const caps = new Map<MatchResult, number>();
+  {
+    let remaining = CONTEXT_CHAR_BUDGET;
+    const byLength = [...contextRows].sort((a, b) => a.content.length - b.content.length);
+    byLength.forEach((m, i) => {
+      const share = Math.max(1_200, Math.floor(remaining / (byLength.length - i)));
+      const take = Math.min(m.content.length, share);
+      caps.set(m, take);
+      remaining = Math.max(0, remaining - take);
+    });
+  }
   const contextText = contextRows
     .map((m, idx) => {
-      const label = m.metadata?.chapterTitle
-        ? `${m.metadata.title} — ${m.metadata.chapterTitle}`
-        : m.metadata?.title || "Conteúdo";
+      const perSourceCap = caps.get(m) ?? 1_200;
+      const label =
+        `${sourceKind(m)} — ` +
+        (m.metadata?.chapterTitle ? `${m.metadata.title} — ${m.metadata.chapterTitle}` : m.metadata?.title || "Conteúdo");
       const published =
         (m.metadata?.publishedAt
           ? ` — publicado em ${new Date(m.metadata.publishedAt).toLocaleDateString("pt-BR", { timeZone: "UTC" })}`
-          : "") + (m.metadata?.partOf ? ` — trecho de «${m.metadata.partOf}»` : "");
+          : "") +
+        (m.metadata?.category ? ` — categoria: ${m.metadata.category}` : "") +
+        (m.metadata?.partOf ? ` — trecho de «${m.metadata.partOf}»` : "") +
+        (m.metadata?.startTime ? ` — este trecho começa em ${m.metadata.startTime} do vídeo` : "");
       const body = m.content.length > perSourceCap ? `${m.content.slice(0, perSourceCap)}…` : m.content;
       return `[Fonte ${idx + 1}: ${label}${published}]\n${body}`;
     })
@@ -437,13 +525,14 @@ function buildRagSystemPromptBody(matchRows: MatchResult[], sourcesLabel: string
   // title + date up front gives it the facts without digging through the text.
   const sourceIndex =
     contextRows.length > 1
-      ? `ÍNDICE DAS FONTES (título — data de publicação, fatos verificados):\n` +
+      ? `ÍNDICE DAS FONTES (tipo, título e, nos vídeos, data de publicação — fatos verificados):\n` +
         contextRows
           .map((m, idx) => {
             const date = m.metadata?.publishedAt
               ? new Date(m.metadata.publishedAt).toLocaleDateString("pt-BR", { timeZone: "UTC" })
               : "data não informada";
-            return `${idx + 1}. ${m.metadata?.title || "Conteúdo"} — ${date}`;
+            const name = m.metadata?.chapterTitle ? `${m.metadata.title} — ${m.metadata.chapterTitle}` : m.metadata?.title || "Conteúdo";
+            return `${idx + 1}. [${sourceKind(m)}] ${name}${m.source_type === "video" ? ` — ${date}` : ""}`;
           })
           .join("\n") +
         "\n\n"
@@ -482,12 +571,14 @@ AO FINAL da resposta, em uma última linha separada, escreva exatamente <<FONTES
         `o sistema de busca já confirmou que esse é o conteúdo certo, incluindo quando um trecho começa com uma anotação entre colchetes ` +
         `(como "[Este é o vídeo mais recente sobre o tema pedido, publicado em ...]"): isso é um FATO já verificado, não uma suposição sua. ` +
         `Responda diretamente a pergunta do usuário usando esse conteúdo, em português, de forma clara e concisa, usando Markdown quando apropriado. ` +
-        `Não invente detalhes que não estejam no trecho, mas TAMBÉM não diga que a informação não foi encontrada — ela foi.\n\n` +
+        `Não invente detalhes que não estejam no trecho, mas TAMBÉM não diga que a informação não foi encontrada — ela foi. ` +
+        `${SOURCE_USAGE_RULES}\n\n` +
         `${sourceIndex}CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`
     : `Você é o assistente inteligente do Study Notes. Responda APENAS com base nos trechos de contexto fornecidos abaixo, ` +
         `extraídos de ${sourcesLabel}. NÃO invente informações que não estejam nos trechos. ` +
         `Se os trechos não contiverem a resposta exata para a pergunta, diga especificamente que a informação não foi encontrada em ${sourcesLabel}. ` +
-        `Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado.\n\n` +
+        `Responda de forma clara, prestativa e concisa em português. Use formatação Markdown quando apropriado. ` +
+        `${SOURCE_USAGE_RULES}\n\n` +
         `${sourceIndex}CONTEXTO DOS CONTEÚDOS SELECIONADOS (${sourcesLabel.toUpperCase()}):\n\n${contextText}`) + citeInstruction;
 }
 
@@ -501,28 +592,31 @@ AO FINAL da resposta, em uma última linha separada, escreva exatamente <<FONTES
  * follow-up question the way "boletim" can, so a bare mention (no year or
  * "ultima") is still specific enough to justify filtering by it.
  */
-const CATEGORY_KEYWORDS: { pattern: RegExp; categoryKey: string }[] = [
-  { pattern: /adorac(?:ao|oes) matina(?:l|is)/, categoryKey: "VODPgmEvtMorningWorship" },
-  { pattern: /formaturas? de gilead/, categoryKey: "VODPgmEvtGilead" },
-  { pattern: /\bbroadcasting\b/, categoryKey: "StudioMonthlyPrograms" },
+const CATEGORY_KEYWORDS: { pattern: RegExp; categoryKey: string; label: string }[] = [
+  { pattern: /adorac(?:ao|oes) matina(?:l|is)/, categoryKey: "VODPgmEvtMorningWorship", label: "Adoração Matinal" },
+  { pattern: /formaturas? de gilead/, categoryKey: "VODPgmEvtGilead", label: "Formatura de Gileade" },
+  { pattern: /\bbroadcasting\b/, categoryKey: "StudioMonthlyPrograms", label: "JW Broadcasting" },
+  { pattern: /canticos? origina(?:l|is)/, categoryKey: "VODOriginalSongs", label: "Cântico original" },
 ];
 
 /** Accent-strips and lowercases a single word for stopword/exclusion comparisons -- kept separate from tokenizing a whole query (see `extractTitleKeywords`) since callers here only ever need to normalize one already-isolated word at a time. */
-function stripAccentsLower(word: string): string {
+export function stripAccentsLower(word: string): string {
   return word.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
 interface CategoryMatch {
   categoryKey: string;
+  /** The program's name as shown to the model — a song's lyrics don't say "this is an original song". */
+  label: string;
   /** Accent-stripped words making up the matched phrase (e.g. {"adoracoes","matinais"}) -- see the exclusion in fetchExactMetadataMatches below. */
   matchedWords: Set<string>;
 }
 
-function detectCategoryKey(normalizedAccentStrippedQuery: string): CategoryMatch | null {
-  for (const { pattern, categoryKey } of CATEGORY_KEYWORDS) {
+export function detectCategoryKey(normalizedAccentStrippedQuery: string): CategoryMatch | null {
+  for (const { pattern, categoryKey, label } of CATEGORY_KEYWORDS) {
     const match = pattern.exec(normalizedAccentStrippedQuery);
     if (match) {
-      return { categoryKey, matchedWords: new Set(match[0].split(/\s+/).filter(Boolean)) };
+      return { categoryKey, label, matchedWords: new Set(match[0].split(/\s+/).filter(Boolean)) };
     }
   }
   return null;
@@ -587,6 +681,15 @@ const TITLE_SEARCH_STOPWORDS = new Set([
   "boletim", "boletins", "numero", "numeros", "banco", "base", "dados",
   "existem", "existir", "existia", "ele", "ela", "eles", "elas", "de", "ja", "agora",
   "vez", "mesmo", "pelo", "pela",
+  // What a question is asked WITH, never what it is about. As search words
+  // they matched everything: "o que significa a palavra resgate na Bíblia"
+  // ranked Perspicaz's article "Bíblia" above the one called "Resgate".
+  "biblia", "biblico", "biblica", "biblicos", "biblicas", "palavra", "palavras", "significa", "significado",
+  "explique", "explica", "explicar", "explicam", "explicou", "diz", "dizem", "liste", "listar", "lista",
+  "quantos", "quantas", "quanto", "vida", "texto", "textos", "trecho", "trechos", "publicacoes", "livro",
+  "artigo", "artigos", "assunto", "tema", "parte", "minuto", "comeca", "foram", "publicados", "publicadas",
+  "publicado", "publicada", "jeova", "deus", "fazer", "faz", "outra", "outro", "outras", "outros", "vamos",
+  "estudar", "meio", "semana", "desta", "nesta", "vem", "passada", "proxima", "programacao", "reuniao", "curto", "curta",
 ]);
 
 /**
@@ -608,7 +711,7 @@ const TITLE_SEARCH_STOPWORDS = new Set([
  * making the whole exact-match fallback a no-op for any query containing an
  * accented Portuguese word, which is most of them.
  */
-function extractTitleKeywords(query: string): string[] {
+export function extractTitleKeywords(query: string): string[] {
   const rawWords = query
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
@@ -625,6 +728,11 @@ function extractTitleKeywords(query: string): string[] {
   return result;
 }
 
+/** Planner keywords minus the generic words it still lets through now and then ("vídeo", "discursos"). */
+export function withoutStopwords(words: string[]): string[] {
+  return words.filter((w) => !TITLE_SEARCH_STOPWORDS.has(stripAccentsLower(w)));
+}
+
 export interface PublishPeriod {
   /** Inclusive YYYY-MM-DD bounds. */
   from: string;
@@ -632,7 +740,7 @@ export interface PublishPeriod {
 }
 
 /** The day after an inclusive YYYY-MM-DD bound, so `< dayAfter(to)` includes the whole last day. */
-function dayAfter(isoDay: string): string {
+export function dayAfter(isoDay: string): string {
   const d = new Date(`${isoDay}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
@@ -775,7 +883,7 @@ export async function fetchExactMetadataMatches(
   const categoryMatch = detectCategoryKey(normStripped);
   const categoryKey = categoryMatch?.categoryKey ?? null;
   const period = plan?.period;
-  const titleKeywords = plan?.keywords ?? extractTitleKeywords(norm);
+  const titleKeywords = plan?.keywords ? withoutStopwords(plan.keywords) : extractTitleKeywords(norm);
   // When a category phrase matched ("adorações matinais" -> category_key
   // filter below), its own words describe the PROGRAM, not the talk -- a
   // Morning Worship talk's transcript essentially never repeats "adorações
@@ -859,6 +967,7 @@ export async function fetchExactMetadataMatches(
           durationFormatted: v.duration_formatted,
           subtitlesUrl: v.subtitles_url,
           matchedByTitleKeyword: false,
+          ...(categoryMatch ? { category: categoryMatch.label } : {}),
         },
       });
     }
@@ -922,7 +1031,13 @@ export async function fetchExactMetadataMatches(
       if (error) console.error("Video title search failed:", error.message);
       vids = data;
     }
-    if (!vids || vids.length === 0) {
+    // Transcripts are searched by full-text now (chat_search_videos, see
+    // lib/vector/retrieve.ts). The ILIKE scan below reads every transcript it
+    // is pointed at, so it only runs when a category, the "Boletim" title, a
+    // period or a year has already cut the catalog down to a few dozen rows —
+    // unscoped it scanned all 16 MB per word and hit the statement timeout.
+    const scoped = Boolean(categoryKey || isBoletimSearch || period || targetYear !== null);
+    if (scoped && (!vids || vids.length === 0)) {
       let videoQuery = baseVideoQuery();
       for (const word of videoContentKeywords) videoQuery = withWordFilter(videoQuery, word);
       const { data, error } = await videoQuery.order("first_published", { ascending: false, nullsFirst: false }).limit(30);
@@ -937,7 +1052,7 @@ export async function fetchExactMetadataMatches(
     // just the two longest keywords, on the theory that the actual
     // identifying words (a name, a distinctive term) are rarely the shortest
     // ones in the sentence.
-    if ((!vids || vids.length === 0) && videoContentKeywords.length >= 3) {
+    if (scoped && (!vids || vids.length === 0) && videoContentKeywords.length >= 3) {
       const longestTwo = [...videoContentKeywords].sort((a, b) => b.length - a.length).slice(0, 2);
       let retryQuery = baseVideoQuery();
       for (const word of longestTwo) retryQuery = withWordFilter(retryQuery, word);
@@ -990,6 +1105,7 @@ export async function fetchExactMetadataMatches(
               durationFormatted: v.duration_formatted,
               subtitlesUrl: v.subtitles_url,
               matchedByTitleKeyword: hasVideoKeywordSignal,
+              ...(categoryMatch ? { category: categoryMatch.label } : {}),
             },
           });
         }
@@ -1061,7 +1177,11 @@ export async function fetchExactMetadataMatches(
         // by how many of the significant words actually hit, floored at the
         // rerank/RAG_THRESHOLD cutoff (0.35) so a bare-minimum match still
         // clears it rather than getting silently dropped later.
-        similarity: Math.max(0.4, Math.min(0.95, hits / noteKeywords.length)),
+        // …and capped by how many words there were to match: a note that
+        // merely contains the ONE word of a one-word search ("humildade") is a
+        // candidate, not a near-certain answer — at 0.95 a dozen such notes
+        // outranked the passages that were actually about the subject.
+        similarity: Math.max(0.4, Math.min(noteKeywords.length === 1 ? 0.6 : noteKeywords.length === 2 ? 0.8 : 0.95, hits / noteKeywords.length)),
         metadata: {
           title: meta.title as string | undefined,
           type,

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { AlertTriangle, BookMarked, FileText, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
+import { AlertTriangle, BookMarked, BookOpen, FileText, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatSource } from "@/lib/store/chat-store";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
@@ -29,6 +29,10 @@ function extractExactPhrase(snippet?: string): string | undefined {
 }
 
 function sourceHref(source: ChatSource): string {
+  // Global publications, Research Guide entries and WOL articles: the server
+  // already knows where they open.
+  if (source.href && !source.videoId) return source.href;
+
   if (source.type === "video" || source.videoId) {
     if (source.videoId) {
       if (source.videoId.startsWith("docid-")) {
@@ -88,6 +92,7 @@ function sourceIcon(type: string) {
   if (type === "pdf") return FileText;
   if (type === "estudo_pessoal") return BookMarked;
   if (type === "biblia") return Scroll;
+  if (type === "publicacao") return BookOpen;
   return NotebookPen;
 }
 
@@ -251,6 +256,8 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
               {sources.map((source, idx) => {
                 const isVideo = source.type === "video" || Boolean(source.videoId);
                 const Icon = isVideo ? Video : sourceIcon(source.type);
+                const href = sourceHref(source);
+                const isExternal = /^https?:\/\//.test(href);
                 const uniqueKey = source.videoId
                   ? `video-${source.videoId}-${idx}`
                   : source.noteId
@@ -259,9 +266,9 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
                 return (
                   <Link
                     key={uniqueKey}
-                    href={sourceHref(source)}
-                    target={isVideo ? "_blank" : undefined}
-                    rel={isVideo ? "noopener noreferrer" : undefined}
+                    href={href}
+                    target={isExternal ? "_blank" : undefined}
+                    rel={isExternal ? "noopener noreferrer" : undefined}
                     className={cn(
                       "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-[11.5px] text-accent",
                       "transition-colors hover:bg-accent/20 hover:border-accent/50"
@@ -273,6 +280,9 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
                         ? `${source.title} — ${source.chapterTitle}`
                         : source.title}
                     </span>
+                    {isVideo && source.startTime && (
+                      <span className="font-mono text-[10px]">{source.startTime}</span>
+                    )}
                   </Link>
                 );
               })}

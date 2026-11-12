@@ -19,6 +19,10 @@ function extractExactPhrase(snippet?: string): string | undefined {
 }
 
 function sourceHref(source: AssistantSource): string {
+  // Global publications, Research Guide entries and WOL articles: the server
+  // already knows where they open.
+  if (source.href && !source.videoId) return source.href;
+
   if (source.type === "video" || source.videoId) {
     if (source.videoId) {
       if (source.videoId.startsWith("docid-")) {
@@ -146,14 +150,15 @@ function Conversation() {
               </span>
               <div className="flex flex-wrap gap-2">
                 {sources.map((source) => {
-                  const isVideo = source.type === "video" || Boolean(source.videoId);
+                  const href = sourceHref(source);
+                  const isExternal = /^https?:\/\//.test(href);
                   return (
                     <Link
-                      key={`${source.noteId ?? source.videoId}-${source.chapterTitle ?? source.title}`}
-                      href={sourceHref(source)}
-                      target={isVideo ? "_blank" : undefined}
-                      rel={isVideo ? "noopener noreferrer" : undefined}
-                      onClick={() => !isVideo && close()}
+                      key={`${source.noteId ?? source.videoId ?? source.href ?? source.type}-${source.title}-${source.chapterTitle ?? ""}`}
+                      href={href}
+                      target={isExternal ? "_blank" : undefined}
+                      rel={isExternal ? "noopener noreferrer" : undefined}
+                      onClick={() => !isExternal && close()}
                       className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-[12px] font-normal text-accent transition-colors hover:bg-accent/20"
                     >
                       <span className="font-mono text-[9px]">{source.type}</span>

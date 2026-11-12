@@ -1,14 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { generateSingleEmbedding } from "@/lib/vector/openai";
-import {
-  buildRagSystemPrompt,
-  fetchExactMetadataMatches,
-  formatAllowedSourcesLabel,
-  applyPublishPeriod,
-  rerankMatches,
-  type MatchResult,
-} from "@/lib/vector/rag-query";
-import { planSearchQuery } from "@/lib/vector/query-planner";
+import { buildRagSystemPrompt, formatAllowedSourcesLabel } from "@/lib/vector/rag-query";
+import { buildSources, retrieveContext } from "@/lib/vector/retrieve";
 import OpenAI from "openai";
 
 export async function POST(
@@ -39,7 +31,7 @@ export async function POST(
 
   const body = await request.json();
   const message = (body.message as string)?.trim();
-  const allowedSourceTypes = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
+  const allowedSourceTypes: string[] = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
     ? body.allowedSourceTypes
     : ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"];
 
@@ -58,15 +50,23 @@ export async function POST(
     .select("role, content")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(11);
 
-  // Fetched newest-first so the limit keeps the LAST 10 messages (ascending +
-  // limit kept the first 10, i.e. the oldest, in a long conversation), then
+  // Fetched newest-first so the limit keeps the LAST messages (ascending +
+  // limit kept the first ones, i.e. the oldest, in a long conversation), then
   // flipped back to chronological order.
-  const history = (historyRows ?? []).reverse().map((m) => ({
+  let history = (historyRows ?? []).reverse().map((m) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
   }));
+  // The client saves the user's message BEFORE calling this route, so the
+  // history already ends with it. Left in, the model was sent the question
+  // twice and the query planner mistook every first question for a follow-up.
+  const lastTurn = history[history.length - 1];
+  if (lastTurn && lastTurn.role === "user" && lastTurn.content.trim() === message) {
+    history = history.slice(0, -1);
+  }
+  history = history.slice(-10);
 
   const encoder = new TextEncoder();
 
@@ -74,6 +74,23 @@ export async function POST(
     async start(controller) {
       function sendEvent(data: Record<string, unknown>) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      }
+
+      // Usage rows are bookkeeping: never worth holding the answer up for.
+      function logUsage(operation: string, model: string, promptTokens: number, completionTokens: number, costUsd: number) {
+        if (promptTokens + completionTokens <= 0) return;
+        void supabase
+          .from("ai_usage_logs")
+          .insert({
+            user_id: user!.id,
+            operation_type: operation,
+            model,
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: promptTokens + completionTokens,
+            estimated_cost_usd: costUsd,
+          })
+          .then(() => undefined);
       }
 
       try {
@@ -84,174 +101,55 @@ export async function POST(
         const searchesVideos = allowedSourceTypes.includes("video");
         sendEvent({ type: "status", text: "Entendendo sua pergunta…" });
 
-        // 0. Rewrite the message into a standalone search query using the
-        // conversation so far ("Procure mais uma vez" -> the topic it refers
-        // to; typos fixed). Only retrieval uses it — the answer below still
-        // responds to the user's real message.
-        const plan = await planSearchQuery(openai, message, history);
-        const searchQuery = plan.searchQuery;
-        if (plan.promptTokens + plan.completionTokens > 0) {
-          await supabase.from("ai_usage_logs").insert({
-            user_id: user.id,
-            operation_type: "chat_rag_query_planner",
-            model: "gpt-4o-mini",
-            prompt_tokens: plan.promptTokens,
-            completion_tokens: plan.completionTokens,
-            total_tokens: plan.promptTokens + plan.completionTokens,
-            estimated_cost_usd:
-              (plan.promptTokens / 1_000_000) * 0.15 + (plan.completionTokens / 1_000_000) * 0.6,
-          });
-        }
-
-        sendEvent({
-          type: "status",
-          text: searchesVideos ? "Procurando vídeos e fontes…" : "Procurando nas suas fontes…",
+        // Planning (the message rewritten into a standalone search query using
+        // the conversation so far) and every lookup live in retrieveContext.
+        // Only retrieval uses the rewrite — the answer below still responds to
+        // the user's real message.
+        //
+        // Threshold raised slightly from 0.35 — at 0.35, "Fontes" routinely
+        // listed chunks that were only loosely on-topic, which the model then
+        // correctly declined to answer from. See the `uncertain` flag below.
+        const { matchRows, notice, catalog, plan, embeddingTokens, embeddingCost } = await retrieveContext({
+          supabase,
+          openai,
+          userId: user.id,
+          message,
+          history,
+          allowedSourceTypes,
+          threshold: 0.42,
+          matchCount: 8,
+          onPlanned: () =>
+            sendEvent({
+              type: "status",
+              text: searchesVideos ? "Procurando vídeos e fontes…" : "Procurando nas suas fontes…",
+            }),
         });
 
-        // 1. Generate query embedding
-        const { embedding, tokens: queryTokens, cost: queryCost } =
-          await generateSingleEmbedding(searchQuery);
+        logUsage(
+          "chat_rag_query_planner",
+          "gpt-4o-mini",
+          plan.promptTokens,
+          plan.completionTokens,
+          (plan.promptTokens / 1_000_000) * 0.15 + (plan.completionTokens / 1_000_000) * 0.6
+        );
+        logUsage("chat_rag_embedding", "text-embedding-3-small", embeddingTokens, 0, embeddingCost);
 
-        // Log embedding cost
-        if (queryTokens > 0) {
-          await supabase.from("ai_usage_logs").insert({
-            user_id: user.id,
-            operation_type: "chat_rag_embedding",
-            model: "text-embedding-3-small",
-            prompt_tokens: queryTokens,
-            completion_tokens: 0,
-            total_tokens: queryTokens,
-            estimated_cost_usd: queryCost,
-          });
-        }
-
-        // 2. Vector search (hybrid: personal notes + global videos)
-        // Raised slightly from 0.35 — at 0.35, "Fontes" routinely listed
-        // chunks that were only loosely on-topic (e.g. three separate
-        // chapters of Romans for a specific-verse question), which the model
-        // then correctly declined to answer from, but the UI still showed
-        // as if they might contain the answer. See the `uncertain` flag
-        // below for closing that gap without needing a further threshold
-        // bump that could start hiding genuinely relevant chunks instead.
-        const RAG_THRESHOLD = 0.42;
-        const { data: matches } = await supabase.rpc("match_hybrid_embeddings", {
-          query_embedding: embedding,
-          user_id_param: user.id,
-          match_threshold: RAG_THRESHOLD,
-          match_count: 8,
-          allowed_types: allowedSourceTypes,
-        });
-
-        const exactMatches = await fetchExactMetadataMatches(supabase, searchQuery, allowedSourceTypes, { keywords: plan.keywords, period: plan.period });
-        const rawMatches = [...exactMatches, ...((matches ?? []) as MatchResult[])];
-        const reranked = (await rerankMatches(supabase, searchQuery, rawMatches))
-          .filter((m) => allowedSourceTypes.includes(m.source_type))
-          .filter((m) => m.similarity >= RAG_THRESHOLD);
-
-        // Enforce the publication window the user asked for ("julho de 2021",
-        // "este mês"): semantic hits know nothing about dates.
-        const { matches: matchRows, notice: periodNotice } = await applyPublishPeriod(supabase, reranked, plan.period, searchQuery);
-
-        // 3. Build sources array with note & video IDs for linking
-        interface SourceItem {
-          noteId?: string;
-          videoId?: string;
-          jwlibraryNoteId?: string;
-          type: string;
-          title: string;
-          chapterTitle?: string;
-          documentId?: number;
-          videoUrl?: string;
-          coverImage?: string;
-          durationFormatted?: string;
-          subtitlesUrl?: string;
-          snippet?: string;
-          bookOrder?: number;
-          chapter?: number;
-          firstVerse?: number;
-        }
-
-        const sourcesMap = new Map<string, SourceItem>();
-        // sourcesMap key of each matchRow, in order — the prompt numbers its
-        // "[Fonte N]" by matchRow index, and the model cites those numbers back.
-        const rowKeys: string[] = [];
-        if (matchRows.length > 0) {
-          for (const match of matchRows) {
-            let meta: Record<string, unknown> = {};
-            if (typeof match.metadata === "string") {
-              try {
-                meta = JSON.parse(match.metadata) as Record<string, unknown>;
-              } catch {
-                meta = {};
-              }
-            } else if (typeof match.metadata === "object" && match.metadata !== null) {
-              meta = match.metadata as Record<string, unknown>;
-            }
-
-            const noteId = match.note_id ?? (meta.noteId as string | undefined) ?? undefined;
-            const videoId = match.video_id ?? (meta.videoId as string | undefined) ?? undefined;
-            const jwlibraryNoteId = meta.jwlibraryNoteId as string | undefined;
-
-            const chapterTitle = meta.chapterTitle as string | undefined;
-            const documentId = meta.documentId as number | undefined;
-            const bookOrder = meta.bookOrder as number | undefined;
-            const chapter = meta.chapter as number | undefined;
-            const firstVerse = (meta.firstVerse as number | null | undefined) ?? undefined;
-
-            let type = (meta.type as string | undefined) || match.source_type || "nota";
-            if (chapterTitle || documentId || type === "jwpub") {
-              type = "jwpub";
-            }
-
-            const title = (meta.title as string | undefined) || (match as unknown as Record<string, unknown>).title as string || (type === "video" ? "Vídeo JW" : "Item");
-            const videoUrl = meta.videoUrl as string | undefined;
-            const coverImage = meta.coverImage as string | undefined;
-            const durationFormatted = meta.durationFormatted as string | undefined;
-            const subtitlesUrl = meta.subtitlesUrl as string | undefined;
-            const snippet = match.content ? match.content.trim() : undefined;
-
-            const key = videoId
-              ? `video:${videoId}`
-              : jwlibraryNoteId
-                ? `jwlibrary:${jwlibraryNoteId}`
-                : bookOrder !== undefined && chapter !== undefined
-                  ? `biblia:${bookOrder}:${chapter}`
-                  : `${noteId}:${chapterTitle ?? ""}`;
-            rowKeys.push(key);
-            if (!sourcesMap.has(key)) {
-              sourcesMap.set(key, {
-                ...(noteId ? { noteId } : {}),
-                ...(videoId ? { videoId } : {}),
-                ...(jwlibraryNoteId ? { jwlibraryNoteId } : {}),
-                type,
-                title,
-                ...(chapterTitle ? { chapterTitle } : {}),
-                ...(documentId ? { documentId } : {}),
-                ...(snippet ? { snippet } : {}),
-                ...(videoUrl ? { videoUrl } : {}),
-                ...(coverImage ? { coverImage } : {}),
-                ...(durationFormatted ? { durationFormatted } : {}),
-                ...(subtitlesUrl ? { subtitlesUrl } : {}),
-                ...(bookOrder !== undefined ? { bookOrder } : {}),
-                ...(chapter !== undefined ? { chapter } : {}),
-                ...(firstVerse !== undefined ? { firstVerse } : {}),
-              });
-            }
-          }
-        }
+        // Source cards. `rowKeys` maps each matchRow to its card: the prompt
+        // numbers its "[Fonte N]" by matchRow index, and the model cites those
+        // numbers back.
+        const { sources: sourcesMap, rowKeys } = buildSources(matchRows);
         const allSources = Array.from(sourcesMap.values());
         sendEvent({
           type: "status",
           text: allSources.length > 0 ? `Analisando ${allSources.length} ${allSources.length === 1 ? "fonte" : "fontes"}…` : "Preparando a resposta…",
         });
 
-        // 4. Build system prompt — shared with assistant/stream/route.ts so
-        // the "nothing found" / "list of named matches" / "answer from
-        // content" styles stay in sync.
+        // System prompt — shared with assistant/stream/route.ts so the
+        // "nothing found" / "list of named matches" / "answer from content"
+        // styles stay in sync.
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
-        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel, periodNotice, { citeSources: true });
+        const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel, notice, { citeSources: !catalog, catalog });
 
-        // 5. Build messages with history
         const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
           { role: "system", content: systemPrompt },
           ...history,
@@ -332,13 +230,13 @@ export async function POST(
           }
         }
 
-        // 7. Send sources — flagged "uncertain" when the model itself
-        // hedged (per the cautious-prompt wording above, "a informação não
-        // foi encontrada") despite something scoring above RAG_THRESHOLD.
-        // Sources are what the *search* found; this flag is whether the
-        // *model* actually confirmed one of them answers the question —
-        // the two can disagree, and the UI needs to show that distinction
-        // instead of presenting merely-similar chunks as if they were it.
+        // Send sources — flagged "uncertain" when the model itself hedged (per
+        // the cautious-prompt wording, "a informação não foi encontrada")
+        // despite something scoring above the threshold. Sources are what the
+        // *search* found; this flag is whether the *model* actually confirmed
+        // one of them answers the question — the two can disagree, and the UI
+        // needs to show that distinction instead of presenting merely-similar
+        // chunks as if they were it.
         // Flush anything held back that turned out not to be the marker.
         const markerAt = fullContent.indexOf(MARKER);
         if (markerAt < 0 && emitted < fullContent.length) {
@@ -359,12 +257,12 @@ export async function POST(
           cited && cited.size > 0
             ? Array.from(sourcesMap.entries()).filter(([key]) => cited.has(key)).map(([, item]) => item)
             : allSources;
-        const uncertain = sources.length > 0 && /n[ãa]o\s+(foi|foram)\s+encontrad/i.test(fullContent);
+        const uncertain = sources.length > 0 && !catalog && /n[ãa]o\s+(foi|foram)\s+encontrad/i.test(fullContent);
         if (sources.length > 0) {
           sendEvent({ type: "sources", sources, uncertain });
         }
 
-        // 8. Persist assistant message
+        // Persist assistant message
         await supabase.from("chat_messages").insert({
           conversation_id: conversationId,
           user_id: user.id,
@@ -380,24 +278,14 @@ export async function POST(
           .update({ updated_at: new Date().toISOString() })
           .eq("id", conversationId);
 
-        // 9. Log chat completion cost
-        const totalTokens = promptTokens + completionTokens;
         // gpt-4o-mini: $0.15/1M prompt, $0.60/1M completion
-        const chatCostUsd =
-          (promptTokens / 1_000_000) * 0.15 +
-          (completionTokens / 1_000_000) * 0.6;
-
-        if (totalTokens > 0) {
-          await supabase.from("ai_usage_logs").insert({
-            user_id: user.id,
-            operation_type: "chat_rag_completion",
-            model: "gpt-4o-mini",
-            prompt_tokens: promptTokens,
-            completion_tokens: completionTokens,
-            total_tokens: totalTokens,
-            estimated_cost_usd: chatCostUsd,
-          });
-        }
+        logUsage(
+          "chat_rag_completion",
+          "gpt-4o-mini",
+          promptTokens,
+          completionTokens,
+          (promptTokens / 1_000_000) * 0.15 + (completionTokens / 1_000_000) * 0.6
+        );
 
         sendEvent({ type: "done" });
       } catch (err) {

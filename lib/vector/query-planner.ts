@@ -21,6 +21,12 @@ export interface PlannedQuery {
    * YYYY-MM-DD bounds. Absent when the question names no time window.
    */
   period?: { from: string; to: string };
+  /**
+   * "count"/"list" are questions about the video CATALOG ("quantas adorações
+   * matinais em 2026?", "quais discursos do X existem?") — answered by a real
+   * query, not from retrieved passages. Everything else is "answer".
+   */
+  intent: "answer" | "count" | "list";
   promptTokens: number;
   completionTokens: number;
 }
@@ -49,12 +55,18 @@ Exemplos (histórico -> última mensagem => consulta):
 Passo 3 — liste em "keywords" SÓ as palavras que NOMEIAM o que deve ser encontrado (título, pessoa, tema, termo): minúsculas, no máximo 5.
 - NÃO inclua verbos/pedidos ("resuma", "fale", "procure", "mostre"), formato ou tamanho ("em algumas frases", "resumo", "lista"), palavras de tempo ou ordem ("último", "mais recente", "lançado", "novo", "primeiro"), números/anos, nem palavras genéricas ("vídeo", "boletim", "assunto").
 - Exemplos: "resuma em algumas frases o último broadcasting lançado" -> ["broadcasting"]; "vídeos do Mark Sanderson sobre o tempo" -> ["mark","sanderson","tempo"]; "boletim número 6 de 2026" -> [].
+- O nome do tipo de programa ("cântico original", "adoração matinal", "broadcasting") é genérico, mas o TEMA pedido dentro dele sempre entra: "qual cântico original fala sobre o paraíso?" -> ["paraíso"]; "adoração matinal sobre humildade" -> ["humildade"]; "em que vídeo falam do piloto de avião?" -> ["piloto","avião"].
 
 Passo 4 — "period": se o usuário pede algo de um período em que foi LANÇADO/PUBLICADO ("de julho de 2021", "deste mês", "do mês passado", "de 2024", "da semana passada", "lançados em setembro"), resolva-o para datas reais e devolva {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} (limites inclusivos; um mês inteiro vai do dia 1 ao último dia; um ano do 01/01 ao 31/12). Se NÃO há período ("o último", "o mais recente" sem data), ou se a data faz parte do NOME de um evento ("Reunião Anual de 2021", "turma 150 de Gileade"), devolva null. "O último de 2024" -> o ano 2024 inteiro. "Este ano" / "neste ano" -> o ano de hoje inteiro; "este mês" -> o mês de hoje inteiro; "ano passado" / "mês passado" -> o ano/mês anterior inteiro.
 
 Hoje é {{HOJE}}. Use isso para entender "este mês", "este ano", "ano passado" (escreva o ano explícito na consulta quando fizer sentido), mas NÃO transforme "o último"/"o mais recente" em uma data.
 
-Responda somente com JSON: {"followUp": true|false, "query": "...", "keywords": ["..."], "period": {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} | null}`;
+Passo 5 — "intent":
+- "count": o usuário quer saber QUANTOS vídeos existem ("quantas adorações matinais saíram em 2026?", "quantos boletins teve este ano?").
+- "list": o usuário quer a RELAÇÃO de vídeos de um orador, de uma categoria ou de um período ("quais discursos do Geoffrey Jackson existem?", "liste os boletins de 2025", "que broadcastings saíram este ano?").
+- "answer": todo o resto — inclusive pedir vídeos SOBRE um assunto ("vídeos sobre ansiedade", "liste vídeos que falam de neutralidade"), resumos e perguntas sobre o conteúdo.
+
+Responda somente com JSON: {"followUp": true|false, "query": "...", "keywords": ["..."], "period": {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"} | null, "intent": "answer"|"count"|"list"}`;
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -123,7 +135,18 @@ export async function planSearchQuery(
   message: string,
   history: { role: "user" | "assistant"; content: string }[] = []
 ): Promise<PlannedQuery> {
-  const fallback: PlannedQuery = { searchQuery: message, promptTokens: 0, completionTokens: 0 };
+  const fallback: PlannedQuery = { searchQuery: message, intent: "answer", promptTokens: 0, completionTokens: 0 };
+
+  // The chat saves the user's message before asking for the answer, so the
+  // history read back from the database already ends with it. Shown the same
+  // sentence as both "history" and "last message", the model called every
+  // first question a follow-up and often returned no keywords at all — which
+  // switched the by-name search off ("Quais discursos do Geoffrey Jackson
+  // existem?" found nothing, with 42 of his talks in the catalog).
+  const last = history[history.length - 1];
+  if (last && last.role === "user" && last.content.trim() === message.trim()) {
+    history = history.slice(0, -1);
+  }
 
   try {
     // Assistant turns are trimmed: all the planner needs from them is the
@@ -150,7 +173,7 @@ export async function planSearchQuery(
       { timeout: PLANNER_TIMEOUT_MS }
     );
 
-    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown; keywords?: unknown; period?: unknown };
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { query?: unknown; keywords?: unknown; period?: unknown; intent?: unknown };
     // Split every keyword into plain letter/digit words: the model sometimes
     // returns "sal. 119:2," or "(sal.", and those commas/parentheses end up
     // inside a PostgREST `.or()` filter, where they are syntax -- the whole
@@ -173,6 +196,7 @@ export async function planSearchQuery(
       searchQuery: query && query.length <= 500 ? query : message,
       keywords,
       period,
+      intent: parsed.intent === "count" || parsed.intent === "list" ? parsed.intent : "answer",
       promptTokens: res.usage?.prompt_tokens ?? 0,
       completionTokens: res.usage?.completion_tokens ?? 0,
     };

@@ -20,6 +20,10 @@ export interface ChatSource {
   bookOrder?: number;
   chapter?: number;
   firstVerse?: number;
+  /** Set for sources with no note/video id of their own — a Perspicaz article, the Research Guide entry of a verse, an article on WOL. */
+  href?: string;
+  /** "12:34" — where the cited passage starts in the video. */
+  startTime?: string;
 }
 
 export interface ChatMessage {
