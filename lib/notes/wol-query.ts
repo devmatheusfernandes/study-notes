@@ -16,17 +16,56 @@ export type WolQuery =
   | { kind: "lookup"; q: string; label: string }
   | { kind: "insight"; title: string };
 
-/** Periodical symbols WOL dates itself: "w05 1/6 16", "g88 8/12 10", "w24.11 9". */
+/** Periodical symbols WOL dates itself. */
 const PERIODICAL = "w|wp|g|mwb|km|kmw|yb";
+const PAGES = String.raw`(\d{1,3}(?:\s*-\s*\d{1,3})?)`;
 
-const PERIODICAL_WITH_DAY = new RegExp(
-  `^(${PERIODICAL})\\s?(\\d{2})\\s+(\\d{1,2}\\/\\d{1,2})\\s+(?:p(?:ág)?\\.?\\s*)?(\\d{1,3}(?:\\s*-\\s*\\d{1,3})?)$`,
-  "i"
-);
-const PERIODICAL_WITH_MONTH = new RegExp(
-  `^(${PERIODICAL})\\s?(\\d{2})\\.(\\d{1,2})\\s+(?:p(?:ág)?\\.?\\s*)?(\\d{1,3}(?:\\s*-\\s*\\d{1,3})?)$`,
-  "i"
-);
+/**
+ * Month names/abbreviations as people write them — study editions and the
+ * Meeting Workbook are cited by month ("w20 julho págs. 6-7"), and WOL itself
+ * only takes the number form (`w20.07`) or an unaccented name, so everything
+ * is folded to the number.
+ */
+const MONTHS: Record<string, string> = {
+  janeiro: "01", jan: "01", fevereiro: "02", fev: "02", marco: "03", mar: "03", abril: "04", abr: "04",
+  maio: "05", mai: "05", junho: "06", jun: "06", julho: "07", jul: "07", agosto: "08", ago: "08",
+  setembro: "09", set: "09", outubro: "10", out: "10", novembro: "11", nov: "11", dezembro: "12", dez: "12",
+};
+
+/** "pág.", "págs.", "pp.", "p." before a number — WOL's own cards write it, its search box rejects it. */
+const PAGE_WORD = /\b(?:p[áa]gs?|pp?)\.?\s*(?=\d)/gi;
+
+const fold = (raw: string) => raw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+const P_DAY = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})\s+(\d{1,2}\/\d{1,2})\s+${PAGES}$`);
+const P_MONTH_NUM = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})\.(\d{1,2})\s+${PAGES}$`);
+const P_MONTH_NAME = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})[\s.]+([a-z]{3,9})\.?\s+${PAGES}$`);
+/** Magazines numbered per year: "g20 n. 1 pág. 4", "wp18 nº 2 3". */
+const P_ISSUE_NUMBER = new RegExp(String.raw`^(g|wp)\s?(\d{2})\s+(?:n\.?|no\.?|n[º°]|numero)\s?(\d)\s+${PAGES}$`);
+
+function parsePeriodical(text: string): { q: string; label: string } | null {
+  const t = fold(text.replace(PAGE_WORD, ""));
+  const compact = (pages: string) => pages.replace(/\s/g, "");
+
+  let m = P_DAY.exec(t);
+  if (m) return { q: `${m[1]}${m[2]} ${m[3]} ${compact(m[4])}`, label: `${m[1]}${m[2]} ${m[3]} p. ${compact(m[4])}` };
+
+  m = P_MONTH_NUM.exec(t);
+  if (m) return { q: `${m[1]}${m[2]}.${m[3]} ${compact(m[4])}`, label: `${m[1]}${m[2]}.${m[3]} p. ${compact(m[4])}` };
+
+  m = P_MONTH_NAME.exec(t);
+  if (m && MONTHS[m[3]]) {
+    return {
+      q: `${m[1]}${m[2]}.${MONTHS[m[3]]} ${compact(m[4])}`,
+      label: `${m[1]}${m[2]} ${m[3]} p. ${compact(m[4])}`,
+    };
+  }
+
+  m = P_ISSUE_NUMBER.exec(t);
+  if (m) return { q: `${m[1]}${m[2]}.${m[3]} ${compact(m[4])}`, label: `${m[1]}${m[2]} n. ${m[3]} p. ${compact(m[4])}` };
+
+  return null;
+}
 
 /** keyword → how WOL wants it written. Plain page needs none. */
 const KEYWORDS: Record<string, { wol: string; label: string }> = {
@@ -67,32 +106,13 @@ function parseTail(tail: string): { wol: string; label: string } | null {
 const MAX_CANDIDATES = 3;
 
 export function parseWolQueries(raw: string): WolQuery[] {
-  const text = raw.trim().replace(/\s+/g, " ");
-  if (text.length < 3 || text.length > 80) return [];
+  const original = raw.trim().replace(/\s+/g, " ");
+  if (original.length < 3 || original.length > 80) return [];
+  const text = original.replace(PAGE_WORD, "");
   const results: WolQuery[] = [];
 
-  const day = PERIODICAL_WITH_DAY.exec(text);
-  if (day) {
-    const page = day[4].replace(/\s/g, "");
-    return [
-      {
-        kind: "lookup",
-        q: `${day[1].toLowerCase()}${day[2]} ${day[3]} ${page}`,
-        label: `${day[1].toLowerCase()}${day[2]} ${day[3]} p. ${page}`,
-      },
-    ];
-  }
-  const month = PERIODICAL_WITH_MONTH.exec(text);
-  if (month) {
-    const page = month[4].replace(/\s/g, "");
-    return [
-      {
-        kind: "lookup",
-        q: `${month[1].toLowerCase()}${month[2]}.${month[3]} ${page}`,
-        label: `${month[1].toLowerCase()}${month[2]}.${month[3]} p. ${page}`,
-      },
-    ];
-  }
+  const periodical = parsePeriodical(original);
+  if (periodical) return [{ kind: "lookup", q: periodical.q, label: periodical.label }];
 
   // Perspicaz by article title: "perspicaz criação", "it-1 criação".
   const insight = /^(?:perspicaz|it(?:-[12])?)\s+(\p{L}[\p{L}\s,()'‘’-]{1,60})$/iu.exec(text);

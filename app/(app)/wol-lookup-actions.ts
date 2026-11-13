@@ -25,7 +25,7 @@ export interface WolHit {
 }
 
 /** Cap on what a note carries per citation — a page is a few KB; anything bigger is a whole article. */
-const MAX_SNAPSHOT_CHARS = 24_000;
+const MAX_SNAPSHOT_CHARS = 60_000;
 
 const WOL = "https://wol.jw.org/pt/wol";
 const TIMEOUT_MS = 8000;
@@ -64,8 +64,13 @@ async function requireUser(): Promise<boolean> {
   return Boolean(user);
 }
 
-/** One search-box query ("w05 1/6 16") → the article WOL opens for it. */
-export async function lookupWolReference(q: string, label: string): Promise<{ hit?: WolHit; error?: string }> {
+/**
+ * One search-box query ("w05 1/6 16") → the article(s) WOL opens for it. A page
+ * range ("w03 15/3 20-25") can touch several articles (the tail of the previous
+ * one, the one that really spans it), so up to three come back — the widest
+ * coverage first for a range, WOL's own order for a single page.
+ */
+export async function lookupWolReference(q: string, label: string): Promise<{ hits?: WolHit[]; error?: string }> {
   if (!(await requireUser())) return { error: "Sessão expirada." };
   const query = q.trim();
   if (!SAFE_QUERY.test(query)) return { error: "Consulta inválida." };
@@ -73,29 +78,41 @@ export async function lookupWolReference(q: string, label: string): Promise<{ hi
   const html = await fetchWol(`${WOL}/l/r5/lp-t?q=${encodeURIComponent(query)}`);
   if (!html) return { error: "Sem resposta do WOL." };
 
-  // The result is a card — `<li class="linkCard">` for a periodical page,
+  // Each result is a card — `<li class="linkCard">` for a periodical page,
   // `<li class="row navCard">` for a book chapter — whose anchor carries the
-  // MepsDocumentId, plus (for a page) a `#h=<firstParagraph>:…` range.
-  const anchor = /<a href="\/pt\/wol\/d\/r5\/lp-t\/(\d+)([^"]*)"[^>]*>([\s\S]*?)<\/a>/.exec(html);
-  if (!anchor) return { error: "Não encontrei essa página no WOL." };
-  const docId = anchor[1];
-  const card = anchor[3];
+  // MepsDocumentId, plus (for a page) a `#h=<firstParagraph>:…-<lastParagraph>:…` range.
+  const found: { docId: number; title: string; source: string; first?: number; last?: number }[] = [];
+  for (const anchor of html.matchAll(/<a href="\/pt\/wol\/d\/r5\/lp-t\/(\d+)([^"]*)"[^>]*>([\s\S]*?)<\/a>/g)) {
+    const docId = Number(anchor[1]);
+    if (found.some((f) => f.docId === docId)) continue;
+    const card = anchor[3];
+    const range = /#h(?:=|&#x3D;)(\d+):\d+-(\d+):/.exec(anchor[2]);
+    found.push({
+      docId,
+      title: decode(/<div class="\s*cardLine1\s[^"]*">([\s\S]*?)<\/div>/.exec(card)?.[1] ?? ""),
+      source: decode(/<div class="\s*cardLine2\s[^"]*">([\s\S]*?)<\/div>/.exec(card)?.[1] ?? ""),
+      first: range ? Number(range[1]) : undefined,
+      last: range ? Number(range[2]) : undefined,
+    });
+  }
+  if (found.length === 0) return { error: "Não encontrei essa página no WOL." };
 
-  const title = decode(/<div class="\s*cardLine1\s[^"]*">([\s\S]*?)<\/div>/.exec(card)?.[1] ?? "");
-  const source = decode(/<div class="\s*cardLine2\s[^"]*">([\s\S]*?)<\/div>/.exec(card)?.[1] ?? "");
-  const range = /#h(?:=|&#x3D;)(\d+):\d+-(\d+):/.exec(anchor[2]);
-  const pid = range?.[1];
-  const snapshot = range ? await fetchSnapshot(Number(docId), Number(range[1]), Number(range[2])) : undefined;
+  if (/\d\s*-\s*\d+$/.test(query)) {
+    const span = (f: (typeof found)[number]) => (f.first !== undefined && f.last !== undefined ? f.last - f.first : 0);
+    found.sort((x, y) => span(y) - span(x));
+  }
 
-  return {
-    hit: {
-      mepsDocumentId: Number(docId),
-      title: title || label,
-      label: title && source ? `${title} — ${source}` : label,
-      pid,
-      snapshot,
-    },
-  };
+  const hits = await Promise.all(
+    found.slice(0, 3).map(async (f): Promise<WolHit> => ({
+      mepsDocumentId: f.docId,
+      title: f.title || label,
+      label: f.title && f.source ? `${f.title} — ${f.source}` : label,
+      pid: f.first !== undefined ? String(f.first) : undefined,
+      snapshot:
+        f.first !== undefined && f.last !== undefined ? await fetchSnapshot(f.docId, f.first, f.last) : undefined,
+    }))
+  );
+  return { hits };
 }
 
 function normalize(raw: string): string {
@@ -169,7 +186,7 @@ function flattenArticleHtml(html: string): string {
 
 /** The paragraphs `first`…`last` (by data-pid) of one WOL document, in document order. */
 async function fetchSnapshot(docId: number, first: number, last: number): Promise<string | undefined> {
-  if (!Number.isInteger(docId) || last < first || last - first > 60) return undefined;
+  if (!Number.isInteger(docId) || last < first || last - first > 150) return undefined;
   const page = await fetchWol(`${WOL}/d/r5/lp-t/${docId}`);
   if (!page) return undefined;
   const start = page.indexOf('<article id="article"');
