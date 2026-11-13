@@ -19,6 +19,7 @@ import {
   Tags,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useIngestProgress } from "@/lib/store/ingest-progress-store";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -154,7 +155,12 @@ export function NoteCard({
   const isOptimistic = id.startsWith("optimistic:");
   const isUploading = processing && isOptimistic;
   const isIngesting = processing && !isOptimistic;
-  const processingLabel = isUploading ? "Enviando…" : "Processando…";
+  const ingestProgress = useIngestProgress(isIngesting ? id : undefined);
+  const processingLabel = isUploading
+    ? "Enviando…"
+    : ingestProgress
+      ? `Processando… ${ingestProgress.percent}%`
+      : "Processando…";
 
   // Text notes carry rich HTML (formatting preserved in the excerpt); files
   // just carry a plain one-line description (e.g. "2.3 MB") — only the

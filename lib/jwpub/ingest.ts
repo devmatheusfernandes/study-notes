@@ -9,6 +9,7 @@ import {
   markPublicationFailed,
 } from "@/app/(app)/jwpub-actions";
 import { parseJwpub } from "./parser";
+import { useIngestProgressStore } from "@/lib/store/ingest-progress-store";
 import { uploadMedia, rewriteMediaUrls } from "./media";
 import { sanitizeChapterHtml, rewriteJwpubLinks } from "./sanitize";
 
@@ -53,9 +54,28 @@ export async function ingestJwpub(
   noteId: string,
   onProgress?: (stage: string) => void
 ): Promise<{ ok: boolean; error?: string; title?: string }> {
+  // One overall percentage across the phases, weighted by how long each
+  // tends to take: reading the archive 0–35, images 35–55, chapters 55–85,
+  // excerpts 85–92, footnotes 92–96, table of contents 96–100. Never goes
+  // backwards, so a phase that turns out to have nothing to do can't make the
+  // bar jump back.
+  let last = 0;
+  const report = (percent: number, stage: string) => {
+    last = Math.max(last, Math.min(100, Math.round(percent)));
+    useIngestProgressStore.getState().set(noteId, { stage, percent: last });
+    onProgress?.(stage);
+  };
+  const span = (from: number, to: number, current: number, total: number) =>
+    from + ((to - from) * current) / Math.max(1, total);
+
   try {
+    report(1, "Abrindo arquivo");
     const parsed = await parseJwpub(file, (stage, current, total) => {
-      onProgress?.(total ? `${stage} (${current}/${total})` : stage);
+      const label = total ? `${stage} (${current}/${total})` : stage;
+      if (total && stage === "Decodificando capítulos") report(span(8, 32, current ?? 0, total), label);
+      else if (stage === "Lendo publicação") report(5, label);
+      else if (stage === "Extraindo imagens") report(33, label);
+      else report(last, label);
     });
 
     const { publicationId, title: savedTitle, error } = await savePublication({
@@ -75,9 +95,9 @@ export async function ingestJwpub(
 
     if (error || !publicationId) throw new Error(error ?? "Falha ao registrar a publicação.");
 
-    onProgress?.("Enviando imagens");
+    report(35, "Enviando imagens");
     const mediaUrls = await uploadMedia(publicationId, parsed.media, (uploaded, total) => {
-      onProgress?.(`Enviando imagens (${uploaded}/${total})`);
+      report(span(35, 55, uploaded, total), `Enviando imagens (${uploaded}/${total})`);
     });
 
     // Sanitize once here, at write time, so the database only ever holds
@@ -93,7 +113,7 @@ export async function ingestJwpub(
     // resolve-or-download path.
     const citedExtractIds = new Set<number>();
     for (const [index, chapter] of parsed.chapters.entries()) {
-      onProgress?.(`Salvando capítulos (${index + 1}/${parsed.chapters.length})`);
+      report(span(55, 85, index, parsed.chapters.length), `Salvando capítulos (${index + 1}/${parsed.chapters.length})`);
       const rewritten = rewriteJwpubLinks(
         rewriteMediaUrls(chapter.html, mediaUrls),
         parsed.bibleCitations,
@@ -108,7 +128,7 @@ export async function ingestJwpub(
     }
 
     if (citedExtractIds.size > 0) {
-      onProgress?.("Salvando trechos citados");
+      report(85, "Salvando trechos citados");
       const rows = [...citedExtractIds]
         .map((id) => parsed.extracts.byExtractId.get(id))
         .filter((extract): extract is NonNullable<typeof extract> => extract !== undefined)
@@ -129,10 +149,13 @@ export async function ingestJwpub(
       // stored ("Trecho não encontrado") with nothing to say why.
       let batch: typeof rows = [];
       let batchChars = 0;
+      let savedRows = 0;
       const flush = async () => {
         if (batch.length === 0) return;
         const saved = await saveExtracts(publicationId, batch);
         if (saved?.error) throw new Error(saved.error);
+        savedRows += batch.length;
+        report(span(85, 92, savedRows, rows.length), `Salvando trechos citados (${savedRows}/${rows.length})`);
         batch = [];
         batchChars = 0;
       };
@@ -146,7 +169,7 @@ export async function ingestJwpub(
     }
 
     if (parsed.footnotes.length > 0) {
-      onProgress?.("Salvando notas de rodapé");
+      report(92, "Salvando notas de rodapé");
       const cleaned = parsed.footnotes.map((footnote) => ({
         footnoteId: footnote.footnoteId,
         html: sanitizeChapterHtml(
@@ -166,11 +189,14 @@ export async function ingestJwpub(
     // same periodical otherwise shares verbatim. Falling back to the raw
     // title only if that write somehow didn't happen.
     const finalTitle = savedTitle ?? parsed.title;
+    report(100, "Concluído");
     return { ok: true, title: finalTitle.trim() !== "" ? finalTitle : undefined };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido.";
     await markPublicationFailed(noteId).catch(() => {});
     return { ok: false, error: message };
+  } finally {
+    useIngestProgressStore.getState().clear(noteId);
   }
 }
 

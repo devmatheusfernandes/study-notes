@@ -29,6 +29,8 @@ import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store"
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
+import { Progress } from "@/components/ui/progress";
+import { useIngestProgress, useIngestProgressStore } from "@/lib/store/ingest-progress-store";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
@@ -223,6 +225,7 @@ export function JwpubReader({
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
+  const ingestProgress = useIngestProgress(noteId);
 
   const [footnoteOpen, setFootnoteOpen] = useState(false);
   const [footnoteHtml, setFootnoteHtml] = useState<string | null>(null);
@@ -774,6 +777,7 @@ export function JwpubReader({
     setIsReprocessing(true);
     try {
       let blob: Blob;
+      useIngestProgressStore.getState().set(noteId, { stage: "Baixando arquivo", percent: 0 });
       if (note?.storagePath) {
         const { url, error } = await getFileUrl(note.storagePath);
         if (error || !url) throw new Error(error ?? "Não foi possível baixar o arquivo.");
@@ -800,6 +804,7 @@ export function JwpubReader({
         error instanceof Error ? error.message : undefined
       );
     } finally {
+      useIngestProgressStore.getState().clear(noteId);
       setIsReprocessing(false);
     }
   }
@@ -877,6 +882,16 @@ export function JwpubReader({
             </button>
           )}
 
+          {isReprocessing && (
+            <span
+              role="status"
+              title={ingestProgress?.stage ?? "Processando"}
+              className="shrink-0 font-mono text-[11px] tabular-nums text-accent"
+            >
+              {ingestProgress?.percent ?? 0}%
+            </span>
+          )}
+
           {chapters.length > 0 && (
             <button
               type="button"
@@ -922,6 +937,14 @@ export function JwpubReader({
             >
               Processar publicação
             </Button>
+            {isReprocessing && (
+              <div className="flex w-full max-w-xs flex-col gap-1.5" role="status" aria-live="polite">
+                <Progress value={ingestProgress?.percent ?? 0} />
+                <p className="font-mono text-[11px] text-muted-foreground">
+                  {ingestProgress?.percent ?? 0}% · {ingestProgress?.stage ?? "Iniciando"}
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <>
