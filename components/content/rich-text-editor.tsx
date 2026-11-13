@@ -1,5 +1,7 @@
 "use client";
 
+import { NoteHighlight } from "@/lib/tiptap/note-highlight";
+import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { convertPastedJwpubLinks } from "@/lib/notes/jwpub-paste";
 import {
   forwardRef,
@@ -31,6 +33,9 @@ import {
   AlignRight,
   AlignJustify,
   ListChecks,
+  Highlighter,
+  Eraser,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { notify } from "@/components/ui/toaster";
@@ -433,11 +438,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     if (warmTimer.current) clearTimeout(warmTimer.current);
   }, []);
 
+  // The bubble swaps its tools for the six highlight colours (+ remove) rather
+  // than growing wider — it has to fit a phone.
+  const [showHighlightColors, setShowHighlightColors] = useState(false);
+
   const editor = useEditor({
     immediatelyRender: false,
     autofocus: autoFocus ? "end" : false,
     extensions: [
       StarterKit,
+      NoteHighlight,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Image.configure({ HTMLAttributes: { class: "rounded-2xl max-w-full" } }),
       TaskList,
@@ -588,6 +598,51 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         shouldShow={bubbleMenuShouldShow}
         className="flex items-center gap-0.5 rounded-full border border-border bg-card p-1 shadow-lg"
       >
+        {showHighlightColors ? (
+          <>
+            {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, { name, hex }]) => (
+              <button
+                key={index}
+                type="button"
+                // Selection collapses on mousedown-then-blur — run before that happens.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  editor.chain().focus().setNoteHighlight(hex).run();
+                  setShowHighlightColors(false);
+                }}
+                aria-label={`Destacar de ${name.toLowerCase()}`}
+                title={name}
+                className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110"
+              >
+                <span
+                  className={cn(
+                    "size-5 rounded-full ring-offset-1 ring-offset-card",
+                    editor.isActive("highlight", { color: hex }) && "ring-2 ring-foreground/70"
+                  )}
+                  style={{ backgroundColor: hex }}
+                />
+              </button>
+            ))}
+            {editor.isActive("highlight") && (
+              <>
+                <span className="mx-0.5 h-4 w-px bg-border" />
+                <ToolbarButton
+                  label="Remover destaque"
+                  onClick={() => {
+                    editor.chain().focus().unsetNoteHighlight().run();
+                    setShowHighlightColors(false);
+                  }}
+                >
+                  <Eraser className="size-3.5" />
+                </ToolbarButton>
+              </>
+            )}
+            <ToolbarButton label="Voltar" onClick={() => setShowHighlightColors(false)}>
+              <X className="size-3.5" />
+            </ToolbarButton>
+          </>
+        ) : (
+          <>
         <ToolbarButton
           label="Negrito"
           active={editor.isActive("bold")}
@@ -638,6 +693,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         >
           <AlignJustify className="size-3.5" />
         </ToolbarButton>
+        <span className="mx-0.5 h-4 w-px bg-border" />
+        <ToolbarButton
+          label="Destacar"
+          active={editor.isActive("highlight")}
+          onClick={() => setShowHighlightColors(true)}
+        >
+          <Highlighter className="size-3.5" />
+        </ToolbarButton>
+          </>
+        )}
       </BubbleMenu>
 
       <input

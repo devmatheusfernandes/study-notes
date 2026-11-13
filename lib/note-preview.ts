@@ -60,6 +60,12 @@ function truncateToHtml(root: Node, budget: { used: number; done: boolean }): st
   // Preserve the tag for inline formatting; block-level elements (p, div, li…)
   // just contribute their text with a separating space, since the excerpt is
   // a single flowing line, not a re-rendering of the note's block structure.
+  if (tag === "mark") {
+    const color = el.getAttribute("data-color");
+    if (color && /^#[0-9a-f]{3,8}$/i.test(color)) {
+      return `<mark style="background-color: ${color}; color: #1c1917">${inner}</mark>`;
+    }
+  }
   return INLINE_TAGS.has(tag) ? `<${tag}>${inner}</${tag}>` : `${inner} `;
 }
 

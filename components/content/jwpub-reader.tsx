@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ChevronLeft, ChevronRight, List, PanelRightOpen, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -36,6 +36,7 @@ import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import type { ChapterSummary, JwpubTocItem, PublicationSummary } from "@/lib/jwpub/types";
 import { Progress } from "@/components/ui/progress";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
+import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { useIngestProgress, useIngestProgressStore } from "@/lib/store/ingest-progress-store";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubTocView } from "./jwpub-toc-view";
@@ -867,30 +868,6 @@ export function JwpubReader({
     }
   }
 
-  /** Header button: brings back the reference panel that was last open (footnote, Bible passage, citation or excerpt). */
-  function reopenReferencePanel() {
-    switch (lastReferencePanel.current) {
-      case "footnote":
-        setFootnoteOpen(true);
-        raise("footnote");
-        return;
-      case "bible":
-        setBibleOpen(true);
-        raise("bible");
-        return;
-      case "reference":
-        setReferenceOpen(true);
-        raise("reference");
-        return;
-      case "extract":
-        setOpenExtracts(lastExtracts.current);
-        raise("extract");
-        return;
-      default:
-        notify.info("Nenhuma referência aberta", "Toque numa nota de rodapé ou citação do texto para vê-la aqui.");
-    }
-  }
-
   const failed = publication.status === "failed" || chapters.length === 0;
 
   return (
@@ -950,17 +927,8 @@ export function JwpubReader({
             </span>
           )}
 
-          {chapters.length > 0 && (
-            <button
-              type="button"
-              onClick={reopenReferencePanel}
-              aria-label="Abrir referências"
-              title="Abrir a última referência consultada"
-              className="shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <PanelRightOpen className="size-4" />
-            </button>
-          )}
+          {/* Where the "open last reference" button used to be — the history is useful while reading too. Shown at every width here (the header has no avatar menu to move it into). */}
+          <HistoryVaultButton className="inline-flex shrink-0 rounded-full text-muted-foreground" />
 
           {chapters.length > 0 && (
             <button
