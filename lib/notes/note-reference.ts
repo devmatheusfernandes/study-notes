@@ -165,6 +165,8 @@ export type NoteReferenceAttributes = {
   chapter: number | null;
   startVerse: number | null;
   endVerse: number | null;
+  /** Comma-joined explicit verse list ("1,2,5"), only for a list reference. */
+  verses?: string | null;
   symbol: string | null;
   documentId: number | null;
   publicationId: string | null;
@@ -210,6 +212,7 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
       chapter: ref.chapter,
       startVerse: ref.startVerse,
       endVerse: ref.endVerse,
+      verses: ref.verses && ref.verses.length > 1 ? ref.verses.join(",") : null,
       symbol: null,
       documentId: null,
       publicationId: null,
@@ -263,6 +266,12 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
   };
 }
 
+function listFromAttribute(raw: string | null): { verses?: number[] } {
+  if (!raw) return {};
+  const verses = raw.split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  return verses.length > 1 ? { verses } : {};
+}
+
 function toNumber(raw: string | null): number | null {
   if (raw === null || raw.trim() === "") return null;
   const value = Number(raw);
@@ -291,6 +300,7 @@ export function referenceFromElement(element: Element): NoteReference | null {
       chapter,
       startVerse: toNumber(element.getAttribute("data-ref-verse")),
       endVerse: toNumber(element.getAttribute("data-ref-verse-end")),
+      ...listFromAttribute(element.getAttribute("data-ref-verses")),
     };
   }
 
@@ -359,7 +369,7 @@ export function referenceFromElement(element: Element): NoteReference | null {
 /** Stable identity for a reference — lets the panel skip a refetch when the same chip is clicked twice. */
 export function referenceKey(ref: NoteReference): string {
   if (ref.kind === "bible") {
-    return `bible:${ref.bookOrder}:${ref.chapter}:${ref.startVerse ?? ""}:${ref.endVerse ?? ""}`;
+    return `bible:${ref.bookOrder}:${ref.chapter}:${ref.startVerse ?? ""}:${ref.endVerse ?? ""}:${ref.verses?.join(",") ?? ""}`;
   }
   if (ref.kind === "video") return `video:${ref.videoId}`;
   if (ref.kind === "note") return `note:${ref.noteId}`;

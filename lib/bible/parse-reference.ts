@@ -157,13 +157,33 @@ export interface ParsedBibleReference {
   startVerse: number | null;
   /** `null` unless the user wrote a range ("mt 7:12-14"). */
   endVerse: number | null;
+  /**
+   * Set only for a list like "Salmo 12:1, 2, 5" or "Mt 5:1-3, 7": every verse
+   * named, ascending. `startVerse`/`endVerse` then bracket the list (first/last)
+   * so code that only knows ranges still degrades sensibly.
+   */
+  verses?: number[];
+}
+
+/** "1, 2, 5" / "1-3, 7" → [1,2,3,7]; `null` if malformed. Single segments are left to the plain start/end path. */
+function parseVerseList(raw: string): number[] | null {
+  const verses = new Set<number>();
+  for (const part of raw.split(",")) {
+    const m = /^\s*(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?\s*$/.exec(part);
+    if (!m) return null;
+    const from = Number(m[1]);
+    const to = m[2] ? Number(m[2]) : from;
+    if (from < 1 || to < from || to - from > 200) return null;
+    for (let v = from; v <= to; v += 1) verses.add(v);
+  }
+  return [...verses].sort((a, b) => a - b);
 }
 
 //  "1 Coríntios 13:4-8" → ["1 Coríntios", "13", "4", "8"]
 //  The book part is lazy-but-bounded so a leading ordinal ("1 Co") survives
 //  while the chapter/verse tail stays anchored to the end of the string.
 const REFERENCE_PATTERN =
-  /^([1-3]?\s*\p{L}[\p{L}.\s]{0,24}?)\s*(\d{1,3})(?:\s*[:.]\s*(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?)?$/u;
+  /^([1-3]?\s*\p{L}[\p{L}.\s]{0,24}?)\s*(\d{1,3})(?:\s*[:.]\s*(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?((?:\s*,\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)+)?)?$/u;
 
 /**
  * Parses one already-extracted reference body (no surrounding parentheses).
@@ -187,6 +207,20 @@ export function parseBibleReference(raw: string): ParsedBibleReference | null {
   if (startVerse !== null && startVerse < 1) return null;
   if (endVerse !== null && (startVerse === null || endVerse <= startVerse)) return null;
 
+  if (match[5] && startVerse !== null) {
+    const verses = parseVerseList(`${startVerse}${endVerse !== null ? `-${endVerse}` : ""}${match[5]}`);
+    if (!verses) return null;
+    return {
+      kind: "bible",
+      bookOrder,
+      book: BIBLE_BOOK_NAMES_PT[bookOrder],
+      chapter,
+      startVerse: verses[0],
+      endVerse: verses.length > 1 ? verses[verses.length - 1] : null,
+      verses,
+    };
+  }
+
   return {
     kind: "bible",
     bookOrder,
@@ -197,9 +231,23 @@ export function parseBibleReference(raw: string): ParsedBibleReference | null {
   };
 }
 
+/** [1,2,3,5] → "1-3, 5" (runs of three or more collapse; pairs stay "1, 2"). */
+export function formatVerseList(verses: number[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < verses.length; ) {
+    let j = i;
+    while (j + 1 < verses.length && verses[j + 1] === verses[j] + 1) j += 1;
+    if (j - i >= 2) out.push(`${verses[i]}-${verses[j]}`);
+    else for (let k = i; k <= j; k += 1) out.push(String(verses[k]));
+    i = j + 1;
+  }
+  return out.join(", ");
+}
+
 /** Canonical display form — "Mateus 7:12-14", "Salmo 23". */
 export function formatBibleReference(ref: ParsedBibleReference): string {
   if (ref.startVerse === null) return `${ref.book} ${ref.chapter}`;
+  if (ref.verses && ref.verses.length > 1) return `${ref.book} ${ref.chapter}:${formatVerseList(ref.verses)}`;
   if (ref.endVerse === null) return `${ref.book} ${ref.chapter}:${ref.startVerse}`;
   return `${ref.book} ${ref.chapter}:${ref.startVerse}-${ref.endVerse}`;
 }

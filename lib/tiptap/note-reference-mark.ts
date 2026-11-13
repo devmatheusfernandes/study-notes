@@ -89,6 +89,12 @@ export const NoteReferenceMark = Mark.create<NoteReferenceOptions>({
         renderHTML: (attributes) =>
           attributes.endVerse !== null ? { "data-ref-verse-end": String(attributes.endVerse) } : {},
       },
+      verses: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-verses"),
+        renderHTML: (attributes) =>
+          attributes.verses ? { "data-ref-verses": String(attributes.verses) } : {},
+      },
       symbol: {
         default: null,
         parseHTML: (element) => element.getAttribute("data-ref-symbol"),

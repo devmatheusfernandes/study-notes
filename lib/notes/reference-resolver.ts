@@ -97,6 +97,23 @@ export function cachedNoteReference(reference: NoteReference | null): ResolvedRe
 async function fetchReference(reference: NoteReference): Promise<ResolvedReference> {
   if (reference.kind === "note") return EMPTY; // read straight from the notes store, never fetched
 
+  if (reference.kind === "bible" && reference.verses && reference.verses.length > 1) {
+    // A list ("Salmo 12:1, 2, 5"): load the chapter and keep only the named verses.
+    const wanted = new Set(reference.verses);
+    const chapterRows =
+      (await readOfflineBibleChapter(reference.bookOrder, reference.chapter)) ??
+      (await (async () => {
+        const r = await getBibleChapterVerses(reference.bookOrder, reference.chapter);
+        return r.error ? r : r.verses ?? null;
+      })());
+    if (chapterRows && !Array.isArray(chapterRows)) {
+      return { ...EMPTY, error: (chapterRows as { error?: string }).error ?? "Não foi possível carregar o versículo." };
+    }
+    const picked = ((chapterRows as typeof EMPTY.verses) ?? []) ?.filter((v) => v.verse !== null && wanted.has(v.verse));
+    if (!picked || picked.length === 0) return { ...EMPTY, error: "Versículo não encontrado." };
+    return { ...EMPTY, verses: picked };
+  }
+
   if (reference.kind === "bible") {
     // Downloaded Bible → answer from the device, no Server Action, no queue.
     const local =
