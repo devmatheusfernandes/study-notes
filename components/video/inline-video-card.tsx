@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
   ChevronUp,
+  Copy,
   FileText,
   NotebookPen,
   Sparkles,
@@ -166,6 +167,45 @@ export function InlineVideoCard({
     }
     return 0;
   }, [segments, currentTime, relevantStartTime]);
+
+  // Press-and-hold on a line starts a selection; from then on a tap toggles
+  // lines instead of seeking, so several can be gathered and copied (no
+  // timestamps). Keyed by index — `segments` is fixed once loaded.
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const selecting = selected.size > 0;
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdOrigin = useRef<{ x: number; y: number } | null>(null);
+  const holdFired = useRef(false);
+
+  const cancelHold = useCallback(() => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    holdOrigin.current = null;
+  }, []);
+
+  const toggleSelected = useCallback((index: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  const copySelected = async () => {
+    const text = [...selected]
+      .sort((a, b) => a - b)
+      .map((i) => segments[i]?.text.trim())
+      .filter(Boolean)
+      .join(" ");
+    try {
+      await navigator.clipboard.writeText(text);
+      notify.success(selected.size === 1 ? "Trecho copiado" : `${selected.size} trechos copiados`);
+      setSelected(new Set());
+    } catch {
+      notify.error("Não foi possível copiar.");
+    }
+  };
 
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const activeSegmentRef = useRef<HTMLButtonElement>(null);
@@ -358,12 +398,43 @@ export function InlineVideoCard({
                           key={`${segment.startTime}-${segment.text.slice(0, 15)}`}
                           ref={isActive ? activeSegmentRef : undefined}
                           type="button"
-                          onClick={() => handleSeekTo(segment.startTime)}
+                          onPointerDown={(e) => {
+                            holdFired.current = false;
+                            holdOrigin.current = { x: e.clientX, y: e.clientY };
+                            if (holdTimer.current) clearTimeout(holdTimer.current);
+                            holdTimer.current = setTimeout(() => {
+                              holdFired.current = true;
+                              holdTimer.current = null;
+                              setSelected((prev) => (prev.has(index) ? prev : new Set(prev).add(index)));
+                              navigator.vibrate?.(15);
+                            }, 450);
+                          }}
+                          onPointerMove={(e) => {
+                            const o = holdOrigin.current;
+                            // Dragging means scrolling the list, not holding.
+                            if (o && Math.hypot(e.clientX - o.x, e.clientY - o.y) > 8) cancelHold();
+                          }}
+                          onPointerUp={cancelHold}
+                          onPointerLeave={cancelHold}
+                          onPointerCancel={cancelHold}
+                          onContextMenu={(e) => e.preventDefault()}
+                          onClick={() => {
+                            // The click that ends a long press must not also seek/toggle.
+                            if (holdFired.current) {
+                              holdFired.current = false;
+                              return;
+                            }
+                            if (selecting) toggleSelected(index);
+                            else handleSeekTo(segment.startTime);
+                          }}
+                          aria-pressed={selecting ? selected.has(index) : undefined}
                           className={cn(
-                            "flex items-start gap-2.5 rounded-lg p-2 text-left text-[12px] transition-colors",
-                            isActive
-                              ? "bg-primary/20 text-accent font-medium"
-                              : "text-foreground/80 hover:bg-secondary"
+                            "flex select-none items-start gap-2.5 rounded-lg p-2 text-left text-[12px] transition-colors",
+                            selected.has(index)
+                              ? "bg-accent/15 text-foreground ring-1 ring-accent/50"
+                              : isActive
+                                ? "bg-primary/20 text-accent font-medium"
+                                : "text-foreground/80 hover:bg-secondary"
                           )}
                         >
                           <span className="mt-0.5 shrink-0 font-mono text-[10.5px] text-accent">
@@ -380,6 +451,33 @@ export function InlineVideoCard({
                   </p>
                 )}
               </div>
+
+              {selecting && (
+                <div className="flex items-center justify-between gap-2 border-t border-border/60 bg-secondary/40 px-3 py-2">
+                  <span className="text-[11.5px] text-muted-foreground">
+                    {selected.size} {selected.size === 1 ? "trecho" : "trechos"}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelected(new Set())}
+                      className="h-7 rounded-full px-2.5 text-[11px]"
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      leftIcon={<Copy className="size-3 text-accent" />}
+                      onClick={() => void copySelected()}
+                      className="h-7 rounded-full px-2.5 text-[11px]"
+                    >
+                      Copiar
+                    </Button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
