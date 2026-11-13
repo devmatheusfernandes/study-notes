@@ -319,5 +319,75 @@ export async function getChapterResearchGuide(
     }
   }
 
-  return { entries, extracts };
+  return { entries: withTextCitedExtracts(entries, extracts, bookOrder, chapter), extracts };
+}
+
+/** Widest verse span an excerpt's own cross-reference may cover and still count as "about" each verse in it — "capítulos 5 e 6" (5:1-20) must not surface everywhere. */
+const MAX_TEXT_REF_SPAN = 3;
+
+const plainText = (html: string) =>
+  html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * JW Library lists an excerpt under every verse the excerpt itself cites, but
+ * the guide's own index anchors it under only some of them (Eclesiastes 5:1
+ * has the "Lição Para Nós" excerpt whose text says "(5:1)", yet the guide file
+ * only places it under 5:4). So for each excerpt already loaded for this
+ * chapter, add a link under the verses its text cites narrowly (a verse or a
+ * short run), unless that verse already carries it.
+ */
+function withTextCitedExtracts(
+  entries: ResearchGuideVerseEntry[],
+  extracts: Record<number, ResearchGuideExtract>,
+  bookOrder: number,
+  chapter: number
+): ResearchGuideVerseEntry[] {
+  const refPattern = new RegExp(`b/NWTR/${bookOrder}:${chapter}:(\\d+)-${bookOrder}:${chapter}:(\\d+)`, "g");
+  const present = new Map<number, Set<number>>(); // verse → extract ids already linked
+  for (const entry of entries) {
+    if (entry.verse === null) continue;
+    const ids = new Set<number>();
+    for (const m of entry.contentHtml.matchAll(/data-jwpub-extract="([\d,]+)"/g)) {
+      for (const id of m[1].split(",")) ids.add(Number(id));
+    }
+    present.set(entry.verse, ids);
+  }
+
+  const additions = new Map<number, string>();
+  for (const extract of Object.values(extracts)) {
+    const verses = new Set<number>();
+    for (const m of extract.html.matchAll(refPattern)) {
+      const from = Number(m[1]);
+      const to = Number(m[2]);
+      if (to < from || to - from >= MAX_TEXT_REF_SPAN) continue;
+      for (let v = from; v <= to; v += 1) verses.add(v);
+    }
+    const label = plainText(extract.caption ?? "") || extract.refTitle || "Trecho";
+    for (const verse of verses) {
+      if (present.get(verse)?.has(extract.extractId)) continue;
+      additions.set(
+        verse,
+        (additions.get(verse) ?? "") +
+          `<p class="sk"><a class="xt" data-jwpub-extract="${extract.extractId}">${label
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")}</a></p>`
+      );
+    }
+  }
+  if (additions.size === 0) return entries;
+
+  const merged = entries.map((entry) =>
+    entry.verse !== null && additions.has(entry.verse)
+      ? { ...entry, contentHtml: entry.contentHtml + additions.get(entry.verse) }
+      : entry
+  );
+  const covered = new Set(entries.map((e) => e.verse));
+  for (const [verse, html] of additions) {
+    if (!covered.has(verse)) merged.push({ verse, contentHtml: html });
+  }
+  return merged.sort((a, b) => (a.verse ?? -1) - (b.verse ?? -1));
 }
