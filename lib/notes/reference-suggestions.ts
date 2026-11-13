@@ -17,6 +17,7 @@ import {
 import { BIBLE_BOOK_ABBREVIATIONS_PT } from "@/lib/bible/book-abbreviations";
 import { parseNoteReference, type NoteReference } from "./note-reference";
 import type { ChapterTitleHit, VideoTitleHit } from "@/app/(app)/note-reference-search-actions";
+import type { WolHit } from "@/app/(app)/wol-lookup-actions";
 
 export interface PublicationOption {
   symbol: string;
@@ -33,6 +34,8 @@ export interface NoteOption {
 export interface ReferenceSearchResults {
   chapters: ChapterTitleHit[];
   videos: VideoTitleHit[];
+  /** Publications not in the library, resolved through WOL (see wol-lookup-actions.ts) — filled by the editor, not by searchReferenceTitles. */
+  wol?: WolHit[];
 }
 
 const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
@@ -133,6 +136,20 @@ export function buildReferenceSuggestions(
         reference: parsed,
       });
     }
+  }
+
+  // Publications the user hasn't downloaded, found through WOL ("w05 1/6 16",
+  // "bh cap. 3", "Perspicaz Criação"). Reuses the `pubref` reference the .jwpub
+  // citations already produce, so the chip/panel/"Baixar" flow is unchanged.
+  for (const hit of search.wol ?? []) {
+    if (items.length >= MAX_ITEMS) break;
+    items.push({
+      type: "insert",
+      label: hit.label,
+      hint: "WOL",
+      text: `(${hit.label.replace(/[()]/g, "")})`,
+      reference: { kind: "pubref", mepsDocumentId: hit.mepsDocumentId, pid: hit.pid },
+    });
   }
 
   // Once the query names a known publication followed by whitespace, every

@@ -68,8 +68,11 @@ import {
 import { prefetchNoteReference, warmPastedReferences } from "@/lib/notes/reference-resolver";
 import { ReferenceSuggestionMenu } from "@/components/content/reference-suggestion-menu";
 import { isReferenceTitleIndexReady, searchReferenceTitles, warmReferenceTitleIndex } from "@/lib/notes/reference-title-index";
+import { parseWolQueries } from "@/lib/notes/wol-query";
+import { lookupPerspicazTitle, lookupWolReference, type WolHit } from "@/app/(app)/wol-lookup-actions";
 
 const REFERENCE_SEARCH_DEBOUNCE_MS = 250;
+const WOL_DEBOUNCE_MS = 500;
 const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
 
 // Module-level, not inline in JSX: BubbleMenu (@tiptap/react/menus) puts
@@ -248,12 +251,47 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     return () => clearTimeout(timer);
   }, [suggestion]);
 
+  // Publications not in the library, resolved through WOL. Only fires when the
+  // text has a shape WOL can answer (see lib/notes/wol-query.ts), after a longer
+  // debounce than the local searches since it's a trip to an external site.
+  const [wolHits, setWolHits] = useState<{ query: string; hits: WolHit[] }>({ query: "", hits: [] });
+  const wolRequestRef = useRef(0);
+  const wolQuery = suggestion?.query ?? "";
+  useEffect(() => {
+    const candidates = parseWolQueries(wolQuery);
+    const requestId = ++wolRequestRef.current;
+    if (candidates.length === 0) return;
+    const timer = setTimeout(() => {
+      void Promise.all(
+        candidates.map(async (candidate) => {
+          try {
+            if (candidate.kind === "insight") return (await lookupPerspicazTitle(candidate.title)).hits ?? [];
+            const { hit } = await lookupWolReference(candidate.q, candidate.label);
+            return hit ? [hit] : [];
+          } catch {
+            return []; // offline / WOL unreachable: the row just doesn't appear
+          }
+        })
+      ).then((groups) => {
+        if (wolRequestRef.current !== requestId) return;
+        const seen = new Set<number>();
+        const hits = groups.flat().filter((h) => !seen.has(h.mepsDocumentId) && seen.add(h.mepsDocumentId));
+        setWolHits({ query: wolQuery, hits });
+      });
+    }, WOL_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [wolQuery]);
+
   const items = useMemo(
     () =>
       suggestion
-        ? buildReferenceSuggestions(suggestion.query, publications ?? [], notes ?? [], searchResults)
+        ? buildReferenceSuggestions(suggestion.query, publications ?? [], notes ?? [], {
+            ...searchResults,
+            // Ignore results that belong to an earlier keystroke.
+            wol: wolHits.query === suggestion.query ? wolHits.hits : [],
+          })
         : [],
-    [suggestion, publications, notes, searchResults]
+    [suggestion, publications, notes, searchResults, wolHits]
   );
   const activeIndex = highlight.query === (suggestion?.query ?? "") ? highlight.index : 0;
   const setActiveIndex = useCallback(
