@@ -17,6 +17,8 @@
  * Both need `DOMParser`/`document`; they only ever run in the browser.
  */
 
+import { jwIndentPx } from "@/lib/jwpub/indent";
+
 const CITATION_SELECTOR = "[data-jwpub-bible-first], [data-jwpub-extract], [data-jwpub-pubref]";
 
 /** The HTML to put on the clipboard for the current selection, or `null` when it holds no citation (let the browser copy normally). */
@@ -24,7 +26,20 @@ export function buildJwpubClipboardHtml(range: Range, publicationId: string, not
   const holder = document.createElement("div");
   holder.appendChild(range.cloneContents());
   const citations = holder.querySelectorAll<HTMLElement>(CITATION_SELECTOR);
-  if (citations.length === 0) return null;
+
+  // Indentation lives in the reader's CSS (by class), which the clipboard
+  // doesn't carry — so it is written out as an inline margin, in em because
+  // that is the unit the note editor's paragraph indent reads back.
+  let indented = 0;
+  holder.querySelectorAll<HTMLElement>("p, div").forEach((el) => {
+    const px = jwIndentPx(el.className);
+    if (px > 0 && !el.closest("li, blockquote")) {
+      el.style.marginLeft = `${px / 16}em`;
+      indented++;
+    }
+  });
+
+  if (citations.length === 0 && indented === 0) return null;
   citations.forEach((el) => {
     el.setAttribute("data-jwpub-pub", publicationId);
     // The publication's own id changes whenever it is reprocessed (the reader's

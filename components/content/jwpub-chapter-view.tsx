@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { NotebookPen } from "lucide-react";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { buildJwpubClipboardHtml } from "@/lib/notes/jwpub-paste";
+import { JW_INDENT_CSS, JW_INDENT_SCOPE } from "@/lib/jwpub/indent";
 import { queueSaveAnswer } from "@/lib/offline/jwlibrary-mutations";
 import type { ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
@@ -515,6 +516,8 @@ export function JwpubChapterView({
 
   return (
     <>
+      {/* The archive has no stylesheet of its own — see lib/jwpub/indent.ts. */}
+      <style>{JW_INDENT_CSS}</style>
       <motion.div
         key={html.slice(0, 64)}
         initial={{ opacity: 0, y: 8 }}
@@ -522,6 +525,7 @@ export function JwpubChapterView({
         transition={{ duration: 0.25, ease: "easeOut" }}
         ref={containerRef}
         className={[
+          JW_INDENT_SCOPE,
           "mx-auto w-full max-w-2xl text-[15px] leading-relaxed text-foreground/90",
           "[&_h1]:font-heading [&_h1]:text-2xl [&_h1]:leading-tight [&_h1]:mt-6 [&_h1]:mb-3",
           "[&_h2]:font-heading [&_h2]:text-xl [&_h2]:leading-tight [&_h2]:mt-6 [&_h2]:mb-2.5",
