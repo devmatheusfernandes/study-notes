@@ -40,12 +40,22 @@ interface JwpubReferenceSurfaceProps {
    * — e.g. a citation shape this app doesn't parse a MepsDocumentId out of.
    */
   unresolvedMepsDocumentId?: number | null;
+  /** Paragraph of that unresolved publication the citation points at — the WOL text scrolls to it. */
+  unresolvedPid?: string | null;
   /** Called after a successful download — the caller re-resolves and reopens with the newly-available `target`, same click, no re-navigation needed. */
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
   onClose: () => void;
 }
 
-function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number; onResolved?: (mepsDocumentId: number, noteId: string) => void }) {
+function DownloadPrompt({
+  mepsDocumentId,
+  pid,
+  onResolved,
+}: {
+  mepsDocumentId: number;
+  pid?: string | null;
+  onResolved?: (mepsDocumentId: number, noteId: string) => void;
+}) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [progress, setProgress] = useState<IngestProgress | null>(null);
 
@@ -83,6 +93,18 @@ function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number
     };
   }, [mepsDocumentId]);
   const loadingArticle = article?.id !== mepsDocumentId;
+  const articleRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to (and briefly mark) the cited paragraph once the text is on screen.
+  useEffect(() => {
+    if (!pid || !article?.html || article.id !== mepsDocumentId) return;
+    const el = articleRef.current?.querySelector<HTMLElement>(`[data-pid="${CSS.escape(pid)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("ring-2", "ring-accent", "bg-accent/20", "rounded-xl", "p-2.5", "transition-all", "duration-500");
+    const timer = setTimeout(() => el.classList.remove("ring-2", "ring-accent", "bg-accent/20"), 4500);
+    return () => clearTimeout(timer);
+  }, [article, pid, mepsDocumentId]);
 
   return (
     <div className="flex flex-col items-start gap-3">
@@ -92,6 +114,7 @@ function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number
         </div>
       ) : article?.html ? (
         <div
+          ref={articleRef}
           className="w-full text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
           dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(article.html) }}
         />
@@ -128,6 +151,7 @@ function Body({
   isLoading,
   error,
   unresolvedMepsDocumentId,
+  unresolvedPid,
   onResolved,
   onClose,
 }: {
@@ -136,6 +160,7 @@ function Body({
   isLoading: boolean;
   error?: string | null;
   unresolvedMepsDocumentId?: number | null;
+  unresolvedPid?: string | null;
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
   onClose: () => void;
 }) {
@@ -165,7 +190,7 @@ function Body({
 
   if (!target || !html) {
     if (!error && unresolvedMepsDocumentId) {
-      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} onResolved={onResolved} />;
+      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} onResolved={onResolved} />;
     }
     return <p className="text-[13.5px] text-muted-foreground">{error ?? "Conteúdo não encontrado."}</p>;
   }
@@ -209,6 +234,7 @@ export function JwpubReferenceSurface({
   isLoading,
   error,
   unresolvedMepsDocumentId,
+  unresolvedPid,
   onResolved,
   onClose,
   raiseKey,
@@ -226,6 +252,7 @@ export function JwpubReferenceSurface({
         isLoading={isLoading}
         error={error}
         unresolvedMepsDocumentId={unresolvedMepsDocumentId}
+        unresolvedPid={unresolvedPid}
         onResolved={onResolved}
         onClose={onClose}
       />

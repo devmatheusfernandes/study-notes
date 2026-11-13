@@ -61,6 +61,8 @@ export interface ResolvedReference {
   extracts: JwpubExtractItem[] | null;
   /** A pasted citation into a publication that isn't in the library — the panel offers "Baixar" for it. */
   unresolvedMepsDocumentId: number | null;
+  /** The cited paragraph of that unresolved publication, so the WOL text can scroll to it. */
+  unresolvedPid: string | null;
   error: string | null;
 }
 
@@ -71,6 +73,7 @@ const EMPTY: ResolvedReference = {
   video: null,
   extracts: null,
   unresolvedMepsDocumentId: null,
+  unresolvedPid: null,
   error: null,
 };
 
@@ -161,7 +164,7 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
     const hit = resolved[0];
     // Not in the library: not an error and not cached (see below) — the panel
     // offers a download, after which a click resolves for real.
-    if (!hit) return { ...EMPTY, unresolvedMepsDocumentId: reference.mepsDocumentId };
+    if (!hit) return { ...EMPTY, unresolvedMepsDocumentId: reference.mepsDocumentId, unresolvedPid: reference.pid ?? null };
     const html = hit.contentHtml ?? (await loadChapter(hit.publicationId, hit.documentId)).html ?? null;
     if (html === null) return { ...EMPTY, error: "Não foi possível carregar o trecho." };
     return {
