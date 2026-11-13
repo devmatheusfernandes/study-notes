@@ -102,20 +102,8 @@ export function JwpubReader({
     (initialToc?.length ?? 0) > 0 && !initialDocParam && !initialChapterParam ? "toc" : "chapter"
   );
 
-  // Logged once per open — the publication's own title is enough to identify
-  // it in the history Vault, so this doesn't need to re-fire on every chapter
-  // switch within it (unlike bible-reader.tsx, where each chapter is its own
-  // entry).
   const recordHistoryVisit = useNavigationHistoryStore((s) => s.recordVisit);
   const publicationTitle = publication.title;
-  useEffect(() => {
-    recordHistoryVisit({
-      id: noteId,
-      type: "publication",
-      title: publicationTitle || "Publicação",
-      href: `/notes/${noteId}`,
-    });
-  }, [noteId, publicationTitle, recordHistoryVisit]);
 
   // `doc` (JWPUB documentId) is a stable, unique-per-chapter number — resolve
   // it with an exact match ONLY, no title heuristics. Some books have a
@@ -331,6 +319,24 @@ export function JwpubReader({
   }, [publication.id]);
 
   const activeChapter = chapters[activeIndex];
+
+  // History keeps ONE row per publication, but remembers WHERE in it you are:
+  // the chapter, as both the row's subtitle and the link it reopens at
+  // (`?doc=`). Re-recorded on every chapter change, which also moves the row
+  // back to the top. On the contents screen (no chapter open) it falls back
+  // to the publication itself.
+  const historyChapterId = view === "chapter" ? activeChapter?.documentId : undefined;
+  const historyChapterTitle = view === "chapter" ? activeChapter?.title : undefined;
+  useEffect(() => {
+    const hasPlace = historyChapterId !== undefined;
+    recordHistoryVisit({
+      id: noteId,
+      type: "publication",
+      title: publicationTitle || "Publicação",
+      subtitle: hasPlace ? historyChapterTitle || undefined : undefined,
+      href: hasPlace ? `/notes/${noteId}?doc=${historyChapterId}` : `/notes/${noteId}`,
+    });
+  }, [noteId, publicationTitle, historyChapterId, historyChapterTitle, recordHistoryVisit]);
 
   // Chapter HTML cache, keyed by documentId — filled by both the active-chapter
   // load below and the next-chapter prefetch right after it, so flipping
