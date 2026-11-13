@@ -23,6 +23,7 @@ import {
   type BibleVerseRow,
 } from "@/app/(app)/bible-actions";
 import {
+  getExtractsByNote,
   resolveJwpubReferences,
   resolvePublicationChapterById,
   resolvePublicationReference,
@@ -119,8 +120,22 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
   }
 
   if (reference.kind === "extract") {
-    const result = await loadExtracts(reference.publicationId, reference.extractIds);
+    let result = await loadExtracts(reference.publicationId, reference.extractIds);
+    // The publication was reprocessed since the citation was pasted: its old
+    // id is gone, so look it up again through the note it belongs to.
+    if (!result.error && (result.extracts?.length ?? 0) === 0 && reference.pubNoteId) {
+      try {
+        result = await getExtractsByNote(reference.pubNoteId, reference.extractIds);
+      } catch {
+        return { ...EMPTY, error: "Sem conexão para carregar esta referência." };
+      }
+    }
     if (result.error) return { ...EMPTY, error: result.error };
+    // An empty answer is a miss, not a result: reported as an error so it is
+    // never cached (the publication may be re-imported a moment later).
+    if ((result.extracts?.length ?? 0) === 0) {
+      return { ...EMPTY, error: "Trecho não encontrado. Reimporte a publicação e copie de novo." };
+    }
     return { ...EMPTY, extracts: result.extracts ?? [] };
   }
 

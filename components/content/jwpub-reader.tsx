@@ -932,6 +932,7 @@ export function JwpubReader({
                 <JwpubChapterView
                   html={html ?? ""}
                   publicationId={publication.id}
+                  noteId={noteId}
                   documentId={activeChapter.documentId}
                   answers={answers}
                   onFootnote={handleFootnote}

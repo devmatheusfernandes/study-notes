@@ -142,6 +142,12 @@ export const NoteReferenceMark = Mark.create<NoteReferenceOptions>({
         renderHTML: (attributes) =>
           attributes.extractIds ? { "data-ref-extract-ids": String(attributes.extractIds) } : {},
       },
+      pubNoteId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-pub-note"),
+        renderHTML: (attributes) =>
+          attributes.pubNoteId ? { "data-ref-pub-note": String(attributes.pubNoteId) } : {},
+      },
       mepsId: {
         default: null,
         parseHTML: (element) => element.getAttribute("data-ref-meps-id"),

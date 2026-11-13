@@ -69,6 +69,8 @@ export interface ParsedVerseIdsReference {
 export interface ParsedExtractReference {
   kind: "extract";
   publicationId: string;
+  /** The note the publication was imported under — survives a reprocess, which gives the publication a new id. */
+  pubNoteId?: string;
   extractIds: number[];
 }
 
@@ -173,6 +175,7 @@ export type NoteReferenceAttributes = {
   verseFirst?: number | null;
   verseLast?: number | null;
   extractIds?: string | null;
+  pubNoteId?: string | null;
   mepsId?: number | null;
   pubrefPid?: string | null;
 };
@@ -195,7 +198,7 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
     return { ...blank, kind: "verses", verseFirst: ref.firstVerseId, verseLast: ref.lastVerseId };
   }
   if (ref.kind === "extract") {
-    return { ...blank, kind: "extract", publicationId: ref.publicationId, extractIds: ref.extractIds.join(",") };
+    return { ...blank, kind: "extract", publicationId: ref.publicationId, extractIds: ref.extractIds.join(","), pubNoteId: ref.pubNoteId ?? null };
   }
   if (ref.kind === "pubref") {
     return { ...blank, kind: "pubref", mepsId: ref.mepsDocumentId, pubrefPid: ref.pid ?? null };
@@ -320,7 +323,12 @@ export function referenceFromElement(element: Element): NoteReference | null {
       .map(Number)
       .filter((id) => Number.isFinite(id));
     if (!publicationId || extractIds.length === 0) return null;
-    return { kind: "extract", publicationId, extractIds };
+    return {
+      kind: "extract",
+      publicationId,
+      extractIds,
+      pubNoteId: element.getAttribute("data-ref-pub-note") ?? undefined,
+    };
   }
 
   if (kind === "pubref") {

@@ -309,6 +309,28 @@ export async function getExtracts(
 }
 
 /**
+ * Same as getExtracts, addressed by the NOTE the publication was imported
+ * under. A pasted citation carries it because reprocessing a publication
+ * gives it a new id: the id stamped at copy time then points at nothing,
+ * while the note, and the extract ids (the archive's own), stay the same.
+ */
+export async function getExtractsByNote(
+  noteId: string,
+  extractIds: number[]
+): Promise<{ extracts?: JwpubExtractRow[]; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  const { data: publication } = await supabase
+    .from("jwpub_publications")
+    .select("id")
+    .eq("note_id", noteId)
+    .eq("status", "ready")
+    .maybeSingle();
+  if (!publication) return { extracts: [] };
+  return getExtracts(publication.id, extractIds);
+}
+
+/**
  * The offline download reads a whole publication through these, in slices: a
  * Server Action response is capped (about 4.5 MB on Vercel), and one chapter —
  * let alone all of them — can outweigh that. Each slice stops once it has

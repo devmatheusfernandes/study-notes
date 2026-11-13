@@ -20,12 +20,18 @@
 const CITATION_SELECTOR = "[data-jwpub-bible-first], [data-jwpub-extract], [data-jwpub-pubref]";
 
 /** The HTML to put on the clipboard for the current selection, or `null` when it holds no citation (let the browser copy normally). */
-export function buildJwpubClipboardHtml(range: Range, publicationId: string): string | null {
+export function buildJwpubClipboardHtml(range: Range, publicationId: string, noteId?: string): string | null {
   const holder = document.createElement("div");
   holder.appendChild(range.cloneContents());
   const citations = holder.querySelectorAll<HTMLElement>(CITATION_SELECTOR);
   if (citations.length === 0) return null;
-  citations.forEach((el) => el.setAttribute("data-jwpub-pub", publicationId));
+  citations.forEach((el) => {
+    el.setAttribute("data-jwpub-pub", publicationId);
+    // The publication's own id changes whenever it is reprocessed (the reader's
+    // refresh button); the note it was imported under does not, so it is the
+    // stable way back.
+    if (noteId) el.setAttribute("data-jwpub-pub-note", noteId);
+  });
   return holder.innerHTML;
 }
 
@@ -66,6 +72,7 @@ export function convertPastedJwpubLinks(html: string): string {
         "data-note-ref": "extract",
         "data-ref-publication-id": publicationId,
         "data-ref-extract-ids": extractIds.join(","),
+        ...(el.dataset.jwpubPubNote ? { "data-ref-pub-note": el.dataset.jwpubPubNote } : {}),
       });
     } else if (el.dataset.jwpubPubref !== undefined && Number.isFinite(mepsId)) {
       const attrs: Record<string, string> = {

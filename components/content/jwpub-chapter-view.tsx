@@ -14,6 +14,8 @@ import { wrapTokenRange, getTokenRangeForSelection, unwrapHighlightMarks } from 
 interface JwpubChapterViewProps {
   html: string;
   publicationId: string;
+  /** The note this publication was imported under — stamped on copied citations (see buildJwpubClipboardHtml). */
+  noteId?: string;
   documentId: number;
   /** Saved "Your answer" text, keyed `"<documentId>:<textarea id>"` (falling back to `<documentId>:<data-pid>"` for legacy rows) — see getAnswers in jwpub-actions.ts. */
   answers: Record<string, string>;
@@ -52,6 +54,7 @@ const SELECTION_POPUP_HALF_WIDTH = 110;
 export function JwpubChapterView({
   html,
   publicationId,
+  noteId,
   documentId,
   answers,
   onFootnote,
@@ -195,7 +198,7 @@ export function JwpubChapterView({
       if (!selection || selection.isCollapsed || selection.rangeCount === 0 || !event.clipboardData) return;
       const range = selection.getRangeAt(0);
       if (!container!.contains(range.commonAncestorContainer)) return;
-      const copiedHtml = buildJwpubClipboardHtml(range, publicationId);
+      const copiedHtml = buildJwpubClipboardHtml(range, publicationId, noteId);
       if (!copiedHtml) return;
       event.clipboardData.setData("text/html", copiedHtml);
       event.clipboardData.setData("text/plain", selection.toString());
@@ -203,7 +206,7 @@ export function JwpubChapterView({
     }
     container.addEventListener("copy", handleCopy);
     return () => container.removeEventListener("copy", handleCopy);
-  }, [publicationId]);
+  }, [publicationId, noteId]);
 
   // Upgrades resolved pubrefs to look clickable (accent + underline), same
   // treatment as footnotes/bible refs — done imperatively post-render, like

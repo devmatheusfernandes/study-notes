@@ -103,7 +103,8 @@ export async function ingestJwpub(
       for (const match of rewritten.matchAll(/data-jwpub-extract="([\d,]+)"/g)) {
         for (const id of match[1].split(",")) citedExtractIds.add(Number(id));
       }
-      await saveChapterContent(publicationId, chapter.documentId, sanitizeChapterHtml(rewritten));
+      const savedChapter = await saveChapterContent(publicationId, chapter.documentId, sanitizeChapterHtml(rewritten));
+      if (savedChapter?.error) throw new Error(savedChapter.error);
     }
 
     if (citedExtractIds.size > 0) {
@@ -121,10 +122,27 @@ export async function ingestJwpub(
           refSymbol: extract.refSymbol,
           refMepsDocumentId: extract.refMepsDocumentId,
         }));
-      // Chunked for the same payload reason as chapters/footnotes.
-      for (let i = 0; i < rows.length; i += 50) {
-        await saveExtracts(publicationId, rows.slice(i, i + 50));
+      // Batched by SIZE, not just count: an excerpt can be a whole article,
+      // and 50 of them in one upsert can outrun the database's statement
+      // timeout. The result used to be ignored, so a failed batch left a
+      // publication whose citations all pointed at excerpts that were never
+      // stored ("Trecho não encontrado") with nothing to say why.
+      let batch: typeof rows = [];
+      let batchChars = 0;
+      const flush = async () => {
+        if (batch.length === 0) return;
+        const saved = await saveExtracts(publicationId, batch);
+        if (saved?.error) throw new Error(saved.error);
+        batch = [];
+        batchChars = 0;
+      };
+      for (const row of rows) {
+        const size = row.html.length + (row.caption?.length ?? 0);
+        if (batch.length > 0 && (batch.length >= 25 || batchChars + size > 400_000)) await flush();
+        batch.push(row);
+        batchChars += size;
       }
+      await flush();
     }
 
     if (parsed.footnotes.length > 0) {
@@ -137,7 +155,8 @@ export async function ingestJwpub(
       }));
       // Chunked for the same payload reason as chapters.
       for (let i = 0; i < cleaned.length; i += 100) {
-        await saveFootnotes(publicationId, cleaned.slice(i, i + 100));
+        const savedFootnotes = await saveFootnotes(publicationId, cleaned.slice(i, i + 100));
+        if (savedFootnotes?.error) throw new Error(savedFootnotes.error);
       }
     }
 
