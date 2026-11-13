@@ -676,7 +676,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                     type="button"
                     onClick={() => editorRef.current?.openFind()}
                     aria-label="Buscar na nota"
-                    title="Buscar na nota (Ctrl+F)"
+                    title="Buscar na nota (Ctrl+Shift+F)"
                     className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   >
                     <Search className="size-4" />

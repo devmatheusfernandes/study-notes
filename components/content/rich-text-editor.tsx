@@ -134,7 +134,7 @@ function ToolbarButton({
 }
 
 export interface RichTextEditorHandle {
-  /** Opens the find-in-note bar (Ctrl+F does the same) — for a trigger button outside this component. */
+  /** Opens the find-in-note bar (Ctrl+Shift+F does the same) — for a trigger button outside this component. */
   openFind: () => void;
   /** Opens the native file picker to insert an image — for a trigger button that lives outside this component (see note-editor.tsx's header). */
   openImagePicker: () => void;
@@ -458,9 +458,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // than growing wider — it has to fit a phone.
   const [showHighlightColors, setShowHighlightColors] = useState(false);
 
-  // Find in note. Ctrl/Cmd+F opens it from anywhere on the note screen (the
-  // browser's own find can't see inside collapsed sections or step through
-  // them), Esc closes it.
+  // Find in note. Ctrl/Cmd+Shift+F opens it from anywhere on the note screen
+  // (the browser's own Ctrl+F is left alone; it can't see inside collapsed
+  // sections), Esc closes it.
   const [findOpen, setFindOpen] = useState(false);
   const [findSeed, setFindSeed] = useState("");
   const [findSignal, setFindSignal] = useState(0);
@@ -632,7 +632,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") {
+      // Ctrl/Cmd+Shift+F — plain Ctrl+F stays the browser's own find.
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
         openFindBarRef.current();
       }
