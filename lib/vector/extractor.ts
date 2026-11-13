@@ -75,10 +75,19 @@ export async function extractContentForNote(
         return null;
       }
 
-      const buffer = Buffer.from(await fileData.arrayBuffer());
-      const pdfModule = (await import("pdf-parse")) as unknown as { default?: (b: Buffer) => Promise<{ text: string; numpages: number }> } | ((b: Buffer) => Promise<{ text: string; numpages: number }>);
-      const pdfFn = typeof pdfModule === "function" ? pdfModule : (pdfModule.default ?? (pdfModule as unknown as (b: Buffer) => Promise<{ text: string; numpages: number }>));
-      const parsed = await pdfFn(buffer);
+      // pdf-parse v2 is a class; the old `pdf(buffer)` default export is gone.
+      // Calling it threw, the catch below turned that into `null`, and every
+      // PDF landed in the queue as "failed".
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: new Uint8Array(await fileData.arrayBuffer()) });
+      let parsed: { text: string; total: number };
+      try {
+        parsed = await parser.getText({ pageJoiner: "
+
+" });
+      } finally {
+        await parser.destroy();
+      }
       const pdfText = parsed.text || "";
       const fullText = `${decryptedTitle}\n\n${pdfText}`.trim();
       const chunks = splitTextIntoChunks(fullText);
@@ -89,7 +98,7 @@ export async function extractContentForNote(
         chunks: chunks.map((c) => ({
           chunkIndex: c.index,
           content: c.content,
-          metadata: { title: decryptedTitle, type: note.type, totalPages: parsed.numpages },
+          metadata: { title: decryptedTitle, type: note.type, totalPages: parsed.total },
         })),
       };
     } catch (err) {
