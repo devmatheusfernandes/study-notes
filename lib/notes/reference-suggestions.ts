@@ -148,7 +148,7 @@ export function buildReferenceSuggestions(
       label: hit.label,
       hint: "WOL",
       text: `(${hit.label.replace(/[()]/g, "")})`,
-      reference: { kind: "pubref", mepsDocumentId: hit.mepsDocumentId, pid: hit.pid },
+      reference: { kind: "pubref", mepsDocumentId: hit.mepsDocumentId, pid: hit.pid, snapshot: hit.snapshot },
     });
   }
 

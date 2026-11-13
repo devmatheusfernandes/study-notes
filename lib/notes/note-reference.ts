@@ -79,6 +79,8 @@ export interface ParsedPubRefReference {
   kind: "pubref";
   mepsDocumentId: number;
   pid?: string;
+  /** The cited paragraphs, saved with the chip (WOL lookups) so it opens offline without the publication. */
+  snapshot?: string;
 }
 
 export type NoteReference =
@@ -180,7 +182,18 @@ export type NoteReferenceAttributes = {
   pubNoteId?: string | null;
   mepsId?: number | null;
   pubrefPid?: string | null;
+  pubrefSnapshot?: string | null;
 };
+
+/**
+ * A saved snapshot rides inside an HTML attribute of the note body. Several
+ * consumers of that body (search, vectorization, scripture indexing) strip tags
+ * with a plain `<[^>]+>` regex, which a raw ">" inside an attribute would cut
+ * short and leak the rest as text — so the markup is entity-escaped first, and
+ * the attribute never contains a literal "<" or ">".
+ */
+const encodeSnapshot = (html: string) => html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const decodeSnapshot = (text: string) => text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 export function referenceToAttributes(ref: NoteReference): NoteReferenceAttributes {
   const blank: NoteReferenceAttributes = {
@@ -203,7 +216,13 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
     return { ...blank, kind: "extract", publicationId: ref.publicationId, extractIds: ref.extractIds.join(","), pubNoteId: ref.pubNoteId ?? null };
   }
   if (ref.kind === "pubref") {
-    return { ...blank, kind: "pubref", mepsId: ref.mepsDocumentId, pubrefPid: ref.pid ?? null };
+    return {
+      ...blank,
+      kind: "pubref",
+      mepsId: ref.mepsDocumentId,
+      pubrefPid: ref.pid ?? null,
+      pubrefSnapshot: ref.snapshot ? encodeSnapshot(ref.snapshot) : null,
+    };
   }
   if (ref.kind === "bible") {
     return {
@@ -348,6 +367,10 @@ export function referenceFromElement(element: Element): NoteReference | null {
       kind: "pubref",
       mepsDocumentId,
       pid: element.getAttribute("data-ref-pubref-pid") ?? undefined,
+      snapshot: (() => {
+        const raw = element.getAttribute("data-ref-pubref-snapshot");
+        return raw ? decodeSnapshot(raw) : undefined;
+      })(),
     };
   }
 

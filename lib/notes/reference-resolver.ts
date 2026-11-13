@@ -63,6 +63,8 @@ export interface ResolvedReference {
   unresolvedMepsDocumentId: number | null;
   /** The cited paragraph of that unresolved publication, so the WOL text can scroll to it. */
   unresolvedPid: string | null;
+  /** Cited paragraphs saved in the note itself — shown instead of fetching, so they work offline. */
+  unresolvedSnapshot: string | null;
   error: string | null;
 }
 
@@ -74,6 +76,7 @@ const EMPTY: ResolvedReference = {
   extracts: null,
   unresolvedMepsDocumentId: null,
   unresolvedPid: null,
+  unresolvedSnapshot: null,
   error: null,
 };
 
@@ -160,11 +163,23 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
   }
 
   if (reference.kind === "pubref") {
-    const { resolved } = await resolveJwpubReferences([reference.mepsDocumentId]);
-    const hit = resolved[0];
+    const unresolved = {
+      ...EMPTY,
+      unresolvedMepsDocumentId: reference.mepsDocumentId,
+      unresolvedPid: reference.pid ?? null,
+      unresolvedSnapshot: reference.snapshot ?? null,
+    };
+    let hit;
+    try {
+      hit = (await resolveJwpubReferences([reference.mepsDocumentId])).resolved[0];
+    } catch (error) {
+      // Offline: the copy saved in the note is still readable.
+      if (reference.snapshot) return unresolved;
+      throw error;
+    }
     // Not in the library: not an error and not cached (see below) — the panel
     // offers a download, after which a click resolves for real.
-    if (!hit) return { ...EMPTY, unresolvedMepsDocumentId: reference.mepsDocumentId, unresolvedPid: reference.pid ?? null };
+    if (!hit) return unresolved;
     const html = hit.contentHtml ?? (await loadChapter(hit.publicationId, hit.documentId)).html ?? null;
     if (html === null) return { ...EMPTY, error: "Não foi possível carregar o trecho." };
     return {

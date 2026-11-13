@@ -42,6 +42,8 @@ interface JwpubReferenceSurfaceProps {
   unresolvedMepsDocumentId?: number | null;
   /** Paragraph of that unresolved publication the citation points at — the WOL text scrolls to it. */
   unresolvedPid?: string | null;
+  /** The cited paragraphs saved in the note — shown right away, no network. */
+  unresolvedSnapshot?: string | null;
   /** Called after a successful download — the caller re-resolves and reopens with the newly-available `target`, same click, no re-navigation needed. */
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
   onClose: () => void;
@@ -50,10 +52,12 @@ interface JwpubReferenceSurfaceProps {
 function DownloadPrompt({
   mepsDocumentId,
   pid,
+  snapshot,
   onResolved,
 }: {
   mepsDocumentId: number;
   pid?: string | null;
+  snapshot?: string | null;
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
 }) {
   const [isDownloading, setIsDownloading] = useState(false);
@@ -79,7 +83,11 @@ function DownloadPrompt({
   // The publication isn't in the library, but WOL has the text: show it now,
   // and keep "Baixar" for when the user wants it in the library for good.
   const [article, setArticle] = useState<{ id: number; html: string | null } | null>(null);
+  // With a copy saved in the note the full article is only fetched on request.
+  const [wantsFullArticle, setWantsFullArticle] = useState(false);
+  const fetchArticle = !snapshot || wantsFullArticle;
   useEffect(() => {
+    if (!fetchArticle) return;
     let cancelled = false;
     getWolArticle(mepsDocumentId)
       .then((result) => {
@@ -91,23 +99,35 @@ function DownloadPrompt({
     return () => {
       cancelled = true;
     };
-  }, [mepsDocumentId]);
-  const loadingArticle = article?.id !== mepsDocumentId;
+  }, [mepsDocumentId, fetchArticle]);
+  const loadingArticle = fetchArticle && article?.id !== mepsDocumentId;
   const articleRef = useRef<HTMLDivElement>(null);
 
   // Scroll to (and briefly mark) the cited paragraph once the text is on screen.
   useEffect(() => {
-    if (!pid || !article?.html || article.id !== mepsDocumentId) return;
+    if (!pid || !fetchArticle || !article?.html || article.id !== mepsDocumentId) return;
     const el = articleRef.current?.querySelector<HTMLElement>(`[data-pid="${CSS.escape(pid)}"]`);
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "start" });
     el.classList.add("ring-2", "ring-accent", "bg-accent/20", "rounded-xl", "p-2.5", "transition-all", "duration-500");
     const timer = setTimeout(() => el.classList.remove("ring-2", "ring-accent", "bg-accent/20"), 4500);
     return () => clearTimeout(timer);
-  }, [article, pid, mepsDocumentId]);
+  }, [article, pid, mepsDocumentId, fetchArticle]);
 
   return (
     <div className="flex flex-col items-start gap-3">
+      {snapshot && !wantsFullArticle && (
+        <>
+          <div
+            className="w-full text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
+            dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(snapshot) }}
+          />
+          <p className="text-[12.5px] text-muted-foreground">Trecho salvo na sua nota — disponível offline.</p>
+          <Button variant="outline" size="sm" onClick={() => setWantsFullArticle(true)}>
+            Ver artigo inteiro
+          </Button>
+        </>
+      )}
       {loadingArticle ? (
         <div className="w-full" role="status" aria-label="Carregando do WOL">
           <ReferenceContentSkeleton paragraphs={4} withHeading />
@@ -120,7 +140,9 @@ function DownloadPrompt({
         />
       ) : null}
       <p className="text-[13.5px] text-muted-foreground">
-        {article?.html
+        {snapshot && !wantsFullArticle
+          ? "Quer a publicação completa, com marcações e leitura offline? Baixe para a biblioteca."
+          : article?.html
           ? "Texto exibido a partir do WOL. Baixe a publicação para ter ela na sua biblioteca, com marcações e leitura offline."
           : "Essa publicação ainda não está na sua biblioteca. O jw.org disponibiliza o arquivo original — dá para trazer ela para cá."}
       </p>
@@ -152,6 +174,7 @@ function Body({
   error,
   unresolvedMepsDocumentId,
   unresolvedPid,
+  unresolvedSnapshot,
   onResolved,
   onClose,
 }: {
@@ -161,6 +184,7 @@ function Body({
   error?: string | null;
   unresolvedMepsDocumentId?: number | null;
   unresolvedPid?: string | null;
+  unresolvedSnapshot?: string | null;
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
   onClose: () => void;
 }) {
@@ -190,7 +214,7 @@ function Body({
 
   if (!target || !html) {
     if (!error && unresolvedMepsDocumentId) {
-      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} onResolved={onResolved} />;
+      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} snapshot={unresolvedSnapshot} onResolved={onResolved} />;
     }
     return <p className="text-[13.5px] text-muted-foreground">{error ?? "Conteúdo não encontrado."}</p>;
   }
@@ -235,6 +259,7 @@ export function JwpubReferenceSurface({
   error,
   unresolvedMepsDocumentId,
   unresolvedPid,
+  unresolvedSnapshot,
   onResolved,
   onClose,
   raiseKey,
@@ -253,6 +278,7 @@ export function JwpubReferenceSurface({
         error={error}
         unresolvedMepsDocumentId={unresolvedMepsDocumentId}
         unresolvedPid={unresolvedPid}
+        unresolvedSnapshot={unresolvedSnapshot}
         onResolved={onResolved}
         onClose={onClose}
       />

@@ -20,7 +20,12 @@ export interface WolHit {
   label: string;
   /** First paragraph of the cited range, when WOL names one. */
   pid?: string;
+  /** The cited paragraphs themselves (sanitized on render), kept in the note so it opens offline without downloading the publication. */
+  snapshot?: string;
 }
+
+/** Cap on what a note carries per citation — a page is a few KB; anything bigger is a whole article. */
+const MAX_SNAPSHOT_CHARS = 24_000;
 
 const WOL = "https://wol.jw.org/pt/wol";
 const TIMEOUT_MS = 8000;
@@ -78,7 +83,9 @@ export async function lookupWolReference(q: string, label: string): Promise<{ hi
 
   const title = decode(/<div class="\s*cardLine1\s[^"]*">([\s\S]*?)<\/div>/.exec(card)?.[1] ?? "");
   const source = decode(/<div class="\s*cardLine2\s[^"]*">([\s\S]*?)<\/div>/.exec(card)?.[1] ?? "");
-  const pid = /#h(?:=|&#x3D;)(\d+):/.exec(anchor[2])?.[1];
+  const range = /#h(?:=|&#x3D;)(\d+):\d+-(\d+):/.exec(anchor[2]);
+  const pid = range?.[1];
+  const snapshot = range ? await fetchSnapshot(Number(docId), Number(range[1]), Number(range[2])) : undefined;
 
   return {
     hit: {
@@ -86,6 +93,7 @@ export async function lookupWolReference(q: string, label: string): Promise<{ hi
       title: title || label,
       label: title && source ? `${title} — ${source}` : label,
       pid,
+      snapshot,
     },
   };
 }
@@ -149,4 +157,31 @@ export async function getWolArticle(mepsDocumentId: number): Promise<{ title?: s
 
   const title = decode(/<(?:p|h1)\b[^>]*class="(?:st|title)[^"]*"[^>]*>([\s\S]*?)<\/(?:p|h1)>/.exec(html)?.[1] ?? "");
   return { title: title || undefined, html };
+}
+
+/** Flattens links (they'd point at wol.jw.org paths) and drops anything that isn't text. */
+function flattenArticleHtml(html: string): string {
+  return html
+    .replace(/<a\b[^>]*>/gi, "<span>")
+    .replace(/<\/a>/gi, "</span>")
+    .replace(/<(script|style|iframe)\b[\s\S]*?<\/\1>/gi, "");
+}
+
+/** The paragraphs `first`…`last` (by data-pid) of one WOL document, in document order. */
+async function fetchSnapshot(docId: number, first: number, last: number): Promise<string | undefined> {
+  if (!Number.isInteger(docId) || last < first || last - first > 60) return undefined;
+  const page = await fetchWol(`${WOL}/d/r5/lp-t/${docId}`);
+  if (!page) return undefined;
+  const start = page.indexOf('<article id="article"');
+  const end = page.indexOf("</article>", start);
+  if (start === -1 || end === -1) return undefined;
+
+  const parts: string[] = [];
+  for (const m of page.slice(start, end).matchAll(/<(p|h[1-6]|li)\b[^>]*\bdata-pid="(\d+)"[^>]*>[\s\S]*?<\/\1>/g)) {
+    const pid = Number(m[2]);
+    if (pid >= first && pid <= last) parts.push(m[0]);
+  }
+  if (parts.length === 0) return undefined;
+  const html = flattenArticleHtml(parts.join("\n"));
+  return html.length > MAX_SNAPSHOT_CHARS ? undefined : html;
 }
