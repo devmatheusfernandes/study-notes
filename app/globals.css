@@ -316,6 +316,47 @@ input[type="search"]::-webkit-search-decoration {
   transition: background-color 0.15s ease;
 }
 
+/* Collapsible sections (lib/tiptap/collapsible-headings.ts). The body of a
+   collapsed heading is only hidden, never removed from the document. */
+.ProseMirror .note-collapsed {
+  display: none;
+}
+.ProseMirror .has-collapse {
+  position: relative;
+}
+.heading-collapse-toggle {
+  position: absolute;
+  left: -1.6rem;
+  top: 0.1em;
+  display: flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--muted-foreground);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+.heading-collapse-toggle svg {
+  transform: rotate(90deg);
+  transition: transform 0.15s;
+}
+.heading-collapse-toggle[aria-expanded="false"] {
+  opacity: 1;
+}
+.heading-collapse-toggle[aria-expanded="false"] svg {
+  transform: rotate(0deg);
+}
+.has-collapse:hover > .heading-collapse-toggle,
+.heading-collapse-toggle:focus-visible {
+  opacity: 1;
+}
+.heading-collapse-toggle:hover {
+  background-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
 .note-reference:hover {
   background: color-mix(in oklab, var(--primary) 26%, transparent);
 }

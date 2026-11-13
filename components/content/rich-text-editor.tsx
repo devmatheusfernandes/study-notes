@@ -1,6 +1,8 @@
 "use client";
 
 import { NoteHighlight } from "@/lib/tiptap/note-highlight";
+import { CollapsibleHeadings } from "@/lib/tiptap/collapsible-headings";
+import { useIsMobile } from "@/hooks/ui/use-device";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { convertPastedJwpubLinks } from "@/lib/notes/jwpub-paste";
 import {
@@ -284,6 +286,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   const editorRef = useRef<Editor | null>(null);
 
+  // onReferenceClick is a prop, so it needs the ref treatment; the two
+  // suggestion callbacks below are stable useCallbacks and are handed to the
+  // extension directly.
+  const referenceClickRef = useRef(onReferenceClick);
+
+  // Phone-width screens are too tight for the collapse chevrons and for a
+  // reference side panel that opens by itself; tablets and up get both.
+  const isMobile = useIsMobile();
+  const isMobileRef = useRef(isMobile);
+
   const applyItem = useCallback((item: ReferenceSuggestionItem) => {
     const editor = editorRef.current;
     const active = suggestionRef.current;
@@ -320,6 +332,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       // Trailing space so typing continues outside the reference.
       .insertContent({ type: "text", text: " " })
       .run();
+
+    // Open what was just inserted in the side panel, so it doesn't need a
+    // click afterwards. Not on a phone — there the panel covers the note.
+    if (!isMobileRef.current) referenceClickRef.current?.(item.reference);
   }, []);
 
   const handleSuggestionKeyDown = useCallback(
@@ -408,10 +424,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [suggestion]);
 
-  // onReferenceClick is a prop, so it needs the ref treatment; the two
-  // suggestion callbacks above are already stable useCallbacks and can be
-  // handed to the extension directly.
-  const referenceClickRef = useRef(onReferenceClick);
   const getKnownSymbols = useCallback(() => symbolsRef.current, []);
 
   // Own React node view instead of Tiptap's default (a bare native
@@ -457,6 +469,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
          plugin event (a keystroke, a click) — never while rendering, which is
          what the rule is guarding against. */
       /* eslint-disable react-hooks/refs */
+      CollapsibleHeadings.configure({ isEnabled: () => !isMobileRef.current }),
       NoteReferenceMark.configure({ getKnownSymbols }),
       ReferenceSuggestion.configure({
         char: NOTE_REFERENCE_TRIGGER,
@@ -577,6 +590,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     activeIndexRef.current = activeIndex;
     suggestionRef.current = suggestion;
     referenceClickRef.current = onReferenceClick;
+    isMobileRef.current = isMobile;
   });
 
   // Adopt persisted content once (e.g. once localStorage rehydrates) without
