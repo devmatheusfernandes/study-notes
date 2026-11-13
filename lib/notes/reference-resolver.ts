@@ -16,8 +16,19 @@
  * the note is waiting behind.
  */
 
-import { getBibleChapterVerses, getBibleVerseRange, type BibleVerseRow } from "@/app/(app)/bible-actions";
-import { resolvePublicationChapterById, resolvePublicationReference } from "@/app/(app)/jwpub-actions";
+import {
+  getBibleChapterVerses,
+  getBibleVerseRange,
+  getBibleVerses,
+  type BibleVerseRow,
+} from "@/app/(app)/bible-actions";
+import {
+  resolveJwpubReferences,
+  resolvePublicationChapterById,
+  resolvePublicationReference,
+} from "@/app/(app)/jwpub-actions";
+import { loadChapter, loadExtracts } from "@/lib/offline/jwpub-data";
+import type { JwpubExtractItem } from "@/components/content/jwpub-extract-surface";
 import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
 import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
 import { readOfflineBibleChapter, readOfflineBibleRange } from "@/lib/offline/bible-offline";
@@ -45,10 +56,22 @@ export interface ResolvedReference {
   target: ResolvedPublicationTarget | null;
   html: string | null;
   video: ResolvedVideoTarget | null;
+  /** Excerpts embedded in a .jwpub, for a pasted "extract" citation. */
+  extracts: JwpubExtractItem[] | null;
+  /** A pasted citation into a publication that isn't in the library — the panel offers "Baixar" for it. */
+  unresolvedMepsDocumentId: number | null;
   error: string | null;
 }
 
-const EMPTY: ResolvedReference = { verses: null, target: null, html: null, video: null, error: null };
+const EMPTY: ResolvedReference = {
+  verses: null,
+  target: null,
+  html: null,
+  video: null,
+  extracts: null,
+  unresolvedMepsDocumentId: null,
+  error: null,
+};
 
 /**
  * Module-level on purpose: it outlives the panel and is shared across every
@@ -86,6 +109,37 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
         ? await getBibleChapterVerses(reference.bookOrder, reference.chapter)
         : await getBibleVerseRange(reference.bookOrder, reference.chapter, reference.startVerse, reference.endVerse);
     return { ...EMPTY, verses: result.verses ?? null, error: result.error ?? null };
+  }
+
+  if (reference.kind === "verses") {
+    const result = await getBibleVerses(reference.firstVerseId, reference.lastVerseId);
+    return { ...EMPTY, verses: result.verses ?? null, error: result.error ?? null };
+  }
+
+  if (reference.kind === "extract") {
+    const result = await loadExtracts(reference.publicationId, reference.extractIds);
+    if (result.error) return { ...EMPTY, error: result.error };
+    return { ...EMPTY, extracts: result.extracts ?? [] };
+  }
+
+  if (reference.kind === "pubref") {
+    const { resolved } = await resolveJwpubReferences([reference.mepsDocumentId]);
+    const hit = resolved[0];
+    // Not in the library: not an error and not cached (see below) — the panel
+    // offers a download, after which a click resolves for real.
+    if (!hit) return { ...EMPTY, unresolvedMepsDocumentId: reference.mepsDocumentId };
+    const html = hit.contentHtml ?? (await loadChapter(hit.publicationId, hit.documentId)).html ?? null;
+    if (html === null) return { ...EMPTY, error: "Não foi possível carregar o trecho." };
+    return {
+      ...EMPTY,
+      target: {
+        noteId: hit.noteId,
+        publicationTitle: hit.publicationTitle,
+        chapterTitle: hit.chapterTitle,
+        documentId: hit.documentId,
+      },
+      html,
+    };
   }
 
   if (reference.kind === "video") {
@@ -138,7 +192,7 @@ export function resolveNoteReference(reference: NoteReference): Promise<Resolved
 
   const request = fetchReference(reference)
     .then((resolved) => {
-      if (resolved.error === null) cache.set(key, resolved);
+      if (resolved.error === null && resolved.unresolvedMepsDocumentId === null) cache.set(key, resolved);
       return resolved;
     })
     .finally(() => {

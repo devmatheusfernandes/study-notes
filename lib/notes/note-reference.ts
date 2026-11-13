@@ -54,8 +54,36 @@ export interface ParsedNoteReference {
   title: string;
 }
 
+/**
+ * A scripture pasted from a .jwpub reader. The publication only knows
+ * `BibleVerseId`s (sequential, 0–31193 — not book/chapter/verse), so these are
+ * kept as ids and resolved with a lookup by id at click time.
+ */
+export interface ParsedVerseIdsReference {
+  kind: "verses";
+  firstVerseId: number;
+  lastVerseId: number;
+}
+
+/** A citation pasted from a .jwpub reader whose excerpt(s) live in that publication's own `jwpub_extracts`. */
+export interface ParsedExtractReference {
+  kind: "extract";
+  publicationId: string;
+  extractIds: number[];
+}
+
+/** A citation pasted from a .jwpub reader that points at another publication by `MepsDocumentId`. */
+export interface ParsedPubRefReference {
+  kind: "pubref";
+  mepsDocumentId: number;
+  pid?: string;
+}
+
 export type NoteReference =
   | ParsedBibleReference
+  | ParsedVerseIdsReference
+  | ParsedExtractReference
+  | ParsedPubRefReference
   | ParsedPublicationReference
   | ParsedVideoReference
   | ParsedNoteReference;
@@ -112,6 +140,7 @@ export function parseNoteReference(
 export function formatNoteReference(ref: NoteReference): string {
   if (ref.kind === "bible") return formatBibleReference(ref);
   if (ref.kind === "video" || ref.kind === "note") return ref.title;
+  if (ref.kind === "verses" || ref.kind === "extract" || ref.kind === "pubref") return "";
   return ref.chapter === null
     ? ref.symbol.toUpperCase()
     : `${ref.symbol.toUpperCase()} ${ref.chapter}`;
@@ -129,7 +158,7 @@ export function formatNoteReference(ref: NoteReference): string {
 export const REFERENCE_ATTRIBUTE = "data-note-ref";
 
 export type NoteReferenceAttributes = {
-  kind: "bible" | "publication" | "video" | "note" | null;
+  kind: "bible" | "publication" | "video" | "note" | "verses" | "extract" | "pubref" | null;
   bookOrder: number | null;
   chapter: number | null;
   startVerse: number | null;
@@ -140,9 +169,37 @@ export type NoteReferenceAttributes = {
   isGlobal: boolean | null;
   videoId: string | null;
   linkedNoteId: string | null;
+  // Pasted from a .jwpub reader — optional so the older kinds needn't spell them out.
+  verseFirst?: number | null;
+  verseLast?: number | null;
+  extractIds?: string | null;
+  mepsId?: number | null;
+  pubrefPid?: string | null;
 };
 
 export function referenceToAttributes(ref: NoteReference): NoteReferenceAttributes {
+  const blank: NoteReferenceAttributes = {
+    kind: null,
+    bookOrder: null,
+    chapter: null,
+    startVerse: null,
+    endVerse: null,
+    symbol: null,
+    documentId: null,
+    publicationId: null,
+    isGlobal: null,
+    videoId: null,
+    linkedNoteId: null,
+  };
+  if (ref.kind === "verses") {
+    return { ...blank, kind: "verses", verseFirst: ref.firstVerseId, verseLast: ref.lastVerseId };
+  }
+  if (ref.kind === "extract") {
+    return { ...blank, kind: "extract", publicationId: ref.publicationId, extractIds: ref.extractIds.join(",") };
+  }
+  if (ref.kind === "pubref") {
+    return { ...blank, kind: "pubref", mepsId: ref.mepsDocumentId, pubrefPid: ref.pid ?? null };
+  }
   if (ref.kind === "bible") {
     return {
       kind: "bible",
@@ -249,6 +306,33 @@ export function referenceFromElement(element: Element): NoteReference | null {
     };
   }
 
+  if (kind === "verses") {
+    const verseFirst = toNumber(element.getAttribute("data-ref-verse-first"));
+    const verseLast = toNumber(element.getAttribute("data-ref-verse-last"));
+    if (verseFirst === null || verseLast === null) return null;
+    return { kind: "verses", firstVerseId: verseFirst, lastVerseId: verseLast };
+  }
+
+  if (kind === "extract") {
+    const publicationId = element.getAttribute("data-ref-publication-id");
+    const extractIds = (element.getAttribute("data-ref-extract-ids") ?? "")
+      .split(",")
+      .map(Number)
+      .filter((id) => Number.isFinite(id));
+    if (!publicationId || extractIds.length === 0) return null;
+    return { kind: "extract", publicationId, extractIds };
+  }
+
+  if (kind === "pubref") {
+    const mepsDocumentId = toNumber(element.getAttribute("data-ref-meps-id"));
+    if (mepsDocumentId === null) return null;
+    return {
+      kind: "pubref",
+      mepsDocumentId,
+      pid: element.getAttribute("data-ref-pubref-pid") ?? undefined,
+    };
+  }
+
   if (kind === "video") {
     const videoId = element.getAttribute("data-ref-video-id");
     if (!videoId) return null;
@@ -271,6 +355,9 @@ export function referenceKey(ref: NoteReference): string {
   }
   if (ref.kind === "video") return `video:${ref.videoId}`;
   if (ref.kind === "note") return `note:${ref.noteId}`;
+  if (ref.kind === "verses") return `verses:${ref.firstVerseId}-${ref.lastVerseId}`;
+  if (ref.kind === "extract") return `extract:${ref.publicationId}:${ref.extractIds.join(",")}`;
+  if (ref.kind === "pubref") return `pubref:${ref.mepsDocumentId}:${ref.pid ?? ""}`;
   return `pub:${ref.symbol}:${ref.chapter ?? ""}:${ref.documentId ?? ""}`;
 }
 

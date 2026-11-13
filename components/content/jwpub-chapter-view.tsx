@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { NotebookPen } from "lucide-react";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
+import { buildJwpubClipboardHtml } from "@/lib/notes/jwpub-paste";
 import { queueSaveAnswer } from "@/lib/offline/jwlibrary-mutations";
 import type { ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
@@ -182,6 +183,27 @@ export function JwpubChapterView({
     onHighlightNote,
     onHighlightMark,
   ]);
+
+  // Copying text that contains citations puts them on the clipboard in a form
+  // the note editor can turn back into clickable references (see
+  // lib/notes/jwpub-paste.ts). A selection with no citation copies normally.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    function handleCopy(event: ClipboardEvent) {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0 || !event.clipboardData) return;
+      const range = selection.getRangeAt(0);
+      if (!container!.contains(range.commonAncestorContainer)) return;
+      const copiedHtml = buildJwpubClipboardHtml(range, publicationId);
+      if (!copiedHtml) return;
+      event.clipboardData.setData("text/html", copiedHtml);
+      event.clipboardData.setData("text/plain", selection.toString());
+      event.preventDefault();
+    }
+    container.addEventListener("copy", handleCopy);
+    return () => container.removeEventListener("copy", handleCopy);
+  }, [publicationId]);
 
   // Upgrades resolved pubrefs to look clickable (accent + underline), same
   // treatment as footnotes/bible refs — done imperatively post-render, like

@@ -1,5 +1,6 @@
 "use client";
 
+import { convertPastedJwpubLinks } from "@/lib/notes/jwpub-paste";
 import {
   forwardRef,
   useCallback,
@@ -502,6 +503,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         void insertImageFile(editor, file);
         return true;
       },
+      // A passage copied out of a .jwpub reader arrives with its citations as
+      // links; turn them into note references before ProseMirror parses it.
+      transformPastedHTML: (html) => convertPastedJwpubLinks(html),
       handlePaste: (_view, event) => {
         const file = Array.from(event.clipboardData?.files ?? []).find((f) => f.type.startsWith("image/"));
         if (!file || !editor) return false;

@@ -115,6 +115,42 @@ export const NoteReferenceMark = Mark.create<NoteReferenceOptions>({
         renderHTML: (attributes) =>
           attributes.videoId ? { "data-ref-video-id": String(attributes.videoId) } : {},
       },
+      verseFirst: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-verse-first"),
+        renderHTML: (attributes) =>
+          attributes.verseFirst !== null && attributes.verseFirst !== undefined
+            ? { "data-ref-verse-first": String(attributes.verseFirst) }
+            : {},
+      },
+      verseLast: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-verse-last"),
+        renderHTML: (attributes) =>
+          attributes.verseLast !== null && attributes.verseLast !== undefined
+            ? { "data-ref-verse-last": String(attributes.verseLast) }
+            : {},
+      },
+      extractIds: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-extract-ids"),
+        renderHTML: (attributes) =>
+          attributes.extractIds ? { "data-ref-extract-ids": String(attributes.extractIds) } : {},
+      },
+      mepsId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-meps-id"),
+        renderHTML: (attributes) =>
+          attributes.mepsId !== null && attributes.mepsId !== undefined
+            ? { "data-ref-meps-id": String(attributes.mepsId) }
+            : {},
+      },
+      pubrefPid: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-pubref-pid"),
+        renderHTML: (attributes) =>
+          attributes.pubrefPid ? { "data-ref-pubref-pid": String(attributes.pubrefPid) } : {},
+      },
       linkedNoteId: {
         default: null,
         parseHTML: (element) => element.getAttribute("data-ref-note-id"),

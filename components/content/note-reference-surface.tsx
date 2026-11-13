@@ -11,6 +11,8 @@ import {
 import { useNotesStore } from "@/lib/store/notes-store";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
+import { JwpubExtractSurface } from "./jwpub-extract-surface";
+import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import { NoteVideoSurface } from "./note-video-surface";
 import { NoteLinkSurface } from "./note-link-surface";
 
@@ -22,7 +24,15 @@ interface NoteReferenceSurfaceProps {
   onOpenNote: (noteId: string) => void;
 }
 
-const EMPTY: ResolvedReference = { verses: null, target: null, html: null, video: null, error: null };
+const EMPTY: ResolvedReference = {
+  verses: null,
+  target: null,
+  html: null,
+  video: null,
+  extracts: null,
+  unresolvedMepsDocumentId: null,
+  error: null,
+};
 
 /**
  * Opens whatever reference the user clicked inside a note body, in the same
@@ -38,6 +48,7 @@ const EMPTY: ResolvedReference = { verses: null, target: null, html: null, video
 export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteReferenceSurfaceProps) {
   const [resolved, setResolved] = useState<ResolvedReference>(EMPTY);
   const [isLoading, setIsLoading] = useState(false);
+  const { openSource, surfaceProps: sourceSurfaceProps } = useOpenPublicationSource();
 
   // A linked note is already sitting in the offline-first store (see
   // note-editor.tsx's own comment on noteMentionOptions) — no fetch, no
@@ -109,20 +120,39 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
   return (
     <>
       <JwpubBibleSurface
-        open={reference?.kind === "bible"}
+        open={reference?.kind === "bible" || reference?.kind === "verses"}
         verses={resolved.verses}
         error={resolved.error}
         isLoading={isLoading}
         onClose={onClose}
       />
       <JwpubReferenceSurface
-        open={reference?.kind === "publication"}
+        open={reference?.kind === "publication" || reference?.kind === "pubref"}
         target={resolved.target}
         html={resolved.html}
         error={resolved.error}
         isLoading={isLoading}
+        unresolvedMepsDocumentId={resolved.unresolvedMepsDocumentId}
+        onResolved={() => {
+          // The download just made this citation resolvable — re-resolve it in place.
+          if (reference?.kind !== "pubref") return;
+          setResolved(EMPTY);
+          setIsLoading(true);
+          resolveNoteReference(reference)
+            .then((next) => setResolved(next))
+            .catch(() => setResolved({ ...EMPTY, error: "Sem conexão para carregar esta referência." }))
+            .finally(() => setIsLoading(false));
+        }}
         onClose={onClose}
       />
+      <JwpubExtractSurface
+        open={reference?.kind === "extract"}
+        extracts={resolved.extracts ?? []}
+        isLoading={isLoading}
+        onClose={onClose}
+        onOpenSource={openSource}
+      />
+      <JwpubReferenceSurface {...sourceSurfaceProps} />
       <NoteVideoSurface
         open={reference?.kind === "video"}
         video={resolved.video}
