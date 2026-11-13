@@ -24,7 +24,12 @@ import { useNotesStore } from "@/lib/store/notes-store";
 import { loadAnswers, loadChapter, loadChapterHighlights, loadExtracts, loadFootnote } from "@/lib/offline/jwpub-data";
 import { queueCreateHighlight } from "@/lib/offline/jwlibrary-mutations";
 import { JW_MARKS_CHANGED_EVENT, useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
-import { getOfflinePublication, refreshOfflineUserData } from "@/lib/offline/jwpub-offline";
+import {
+  OFFLINE_PUBLICATION_CHANGED_EVENT,
+  downloadPublication,
+  getOfflinePublication,
+  refreshOfflineUserData,
+} from "@/lib/offline/jwpub-offline";
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
@@ -803,6 +808,10 @@ export function JwpubReader({
     setIsReprocessing(true);
     try {
       let blob: Blob;
+      // Checked BEFORE reprocessing: the new publication gets a new id, which
+      // leaves the copy on the device pointing at the old one — so a
+      // publication that was kept offline is downloaded again afterwards.
+      const wasOffline = !!(await getOfflinePublication(noteId));
       useIngestProgressStore.getState().set(noteId, { stage: "Baixando arquivo", percent: 0 });
       if (note?.storagePath) {
         const { url, error } = await getFileUrl(note.storagePath);
@@ -826,6 +835,10 @@ export function JwpubReader({
         setActiveIndex(0);
       }
       notify.success("Publicação processada");
+
+      if (wasOffline && refreshed.publication) {
+        void refreshOfflineCopy(refreshed.publication, refreshed.chapters ?? []);
+      }
     } catch (error) {
       notify.error(
         "Não foi possível processar a publicação",
@@ -834,6 +847,23 @@ export function JwpubReader({
     } finally {
       useIngestProgressStore.getState().clear(noteId);
       setIsReprocessing(false);
+    }
+  }
+
+  /** Re-downloads the offline copy of a freshly reprocessed publication, in the background. Never throws — the header's download button still offers it by hand. */
+  async function refreshOfflineCopy(fresh: PublicationSummary, freshChapters: ChapterSummary[]) {
+    try {
+      notify.info("Atualizando a cópia offline…", "A publicação foi reprocessada, então a cópia no aparelho está sendo refeita.");
+      await useJwOutbox.getState().sync();
+      if (useJwOutbox.getState().ops.length > 0) throw new Error("Há alterações ainda sem sincronizar.");
+      await downloadPublication(noteId, fresh, freshChapters, () => {});
+      window.dispatchEvent(new Event(OFFLINE_PUBLICATION_CHANGED_EVENT));
+      notify.success("Cópia offline atualizada");
+    } catch (error) {
+      notify.error(
+        "Não foi possível atualizar a cópia offline",
+        error instanceof Error ? `${error.message} Use "Baixar de novo" no botão de download.` : 'Use "Baixar de novo" no botão de download.'
+      );
     }
   }
 

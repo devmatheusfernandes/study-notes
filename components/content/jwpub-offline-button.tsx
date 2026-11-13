@@ -11,6 +11,7 @@ import { useDeviceStore } from "@/hooks/ui/use-device";
 import { cn } from "@/lib/utils";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import {
+  OFFLINE_PUBLICATION_CHANGED_EVENT,
   downloadPublication,
   getOfflinePublication,
   removeOfflinePublication,
@@ -44,11 +45,16 @@ export function JwpubOfflineButton({ noteId, publication, chapters }: JwpubOffli
 
   useEffect(() => {
     let cancelled = false;
-    void getOfflinePublication(noteId).then((found) => {
-      if (!cancelled) setRecord(found ?? null);
-    });
+    const read = () =>
+      void getOfflinePublication(noteId).then((found) => {
+        if (!cancelled) setRecord(found ?? null);
+      });
+    read();
+    // The reader re-downloads in the background after a reprocess.
+    window.addEventListener(OFFLINE_PUBLICATION_CHANGED_EVENT, read);
     return () => {
       cancelled = true;
+      window.removeEventListener(OFFLINE_PUBLICATION_CHANGED_EVENT, read);
     };
   }, [noteId]);
 

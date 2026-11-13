@@ -89,6 +89,9 @@ async function safely<T>(fallback: T, run: () => Promise<T>): Promise<T> {
  * Reading
  * ------------------------------------------------------------------ */
 
+/** Fired once a download (or a re-download after a reprocess) has written a publication to the device, so open buttons re-read what is stored. */
+export const OFFLINE_PUBLICATION_CHANGED_EVENT = "study-notes:offline-publication-changed";
+
 export function getOfflinePublication(noteId: string): Promise<OfflinePublication | undefined> {
   return safely(undefined, () => idbGet<OfflinePublication>("publications", noteId));
 }
