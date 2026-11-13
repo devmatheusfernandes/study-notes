@@ -95,8 +95,29 @@ export interface JwpubPublicationMeta {
   issueTagNumber: number | null;
 }
 
+/**
+ * One row of the publication's own table of contents (`PublicationViewItem`) —
+ * see lib/jwpub/toc.ts for how the flat list becomes tabs and entries.
+ */
+export interface JwpubTocItem {
+  itemId: number;
+  /** `null` for a top-level item (a tab); the archive itself uses -1. */
+  parentId: number | null;
+  position: number;
+  title: string;
+  /** The item's `number` field ("1", "2"…) — the archive stores the number only, never the word "Capítulo". */
+  number: string | null;
+  /** The item's `location` field: the printed page it starts on. */
+  location: string | null;
+  schemaType: number;
+  /** `Document.DocumentId` the item opens; `null` for a heading that only groups others. */
+  documentId: number | null;
+}
+
 export interface ParsedJwpub extends JwpubPublicationMeta {
   chapters: JwpubChapter[];
+  /** Empty when the archive has no PublicationViewItem table. */
+  toc: JwpubTocItem[];
   footnotes: JwpubFootnote[];
   /** Media filename → the raw bytes pulled out of the archive, only for files actually referenced. */
   media: Map<string, Blob>;

@@ -3,6 +3,7 @@
 import { deriveJwpubKeys, decodeJwpubContent } from "./crypto";
 import { extractCitationKey } from "./types";
 import type {
+  JwpubTocItem,
   JwpubChapter,
   JwpubFootnote,
   JwpubBibleCitation,
@@ -107,11 +108,12 @@ export async function parseJwpub(file: Blob, onProgress?: ParseProgress): Promis
     const footnotes = await readFootnotes(db, keys, inflate);
     const bibleCitations = readBibleCitations(db);
     const extracts = await readExtracts(db, keys, inflate);
+    const toc = readToc(db);
 
     onProgress?.("Extraindo imagens");
     const media = await extractMedia(entries, chapters);
 
-    return { ...meta, chapters, footnotes, media, bibleCitations, extracts };
+    return { ...meta, chapters, toc, footnotes, media, bibleCitations, extracts };
   } finally {
     db.close();
   }
@@ -264,6 +266,53 @@ function readBibleCitations(db: import("sql.js").Database): Map<string, JwpubBib
   }
 
   return citations;
+}
+
+/**
+ * The publication's own table of contents. Optional in the archive and
+ * non-fatal here: a publication with no (or an unreadable) one just opens on
+ * its chapter list as before.
+ *
+ * `PublicationViewItem` is the tree — `ParentPublicationViewItemId` -1 marks a
+ * top-level item (a tab), `DefaultDocumentId` -1 a heading with no document.
+ * The cleaner display text lives in `PublicationViewItemField`: the item's
+ * `Title` carries its number as a prefix ("1. Organizados…"), whereas the
+ * `name` field is the bare title and `number` / `location` are separate.
+ */
+function readToc(db: import("sql.js").Database): JwpubTocItem[] {
+  try {
+    const items = db.exec(
+      "SELECT PublicationViewItemId, ParentPublicationViewItemId, Title, SchemaType, DefaultDocumentId FROM PublicationViewItem ORDER BY PublicationViewItemId"
+    );
+    if (items.length === 0) return [];
+
+    const fields = new Map<number, Record<string, string>>();
+    const fieldRes = db.exec("SELECT PublicationViewItemId, Type, Value FROM PublicationViewItemField");
+    for (const [itemId, type, value] of fieldRes[0]?.values ?? []) {
+      if (itemId === null || type === null || value === null) continue;
+      const record = fields.get(Number(itemId)) ?? {};
+      record[String(type)] = String(value);
+      fields.set(Number(itemId), record);
+    }
+
+    return items[0].values.map(([id, parent, title, schema, documentId], index) => {
+      const itemId = Number(id);
+      const own = fields.get(itemId) ?? {};
+      const parentId = parent === null || Number(parent) < 0 ? null : Number(parent);
+      return {
+        itemId,
+        parentId,
+        position: index,
+        title: own.name ?? (title === null ? "" : String(title)),
+        number: own.number ?? null,
+        location: own.location ?? null,
+        schemaType: schema === null ? 0 : Number(schema),
+        documentId: documentId === null || Number(documentId) < 0 ? null : Number(documentId),
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 /**

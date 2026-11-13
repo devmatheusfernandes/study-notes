@@ -28,10 +28,11 @@ import { getOfflinePublication, refreshOfflineUserData } from "@/lib/offline/jwp
 import { useNavigationHistoryStore } from "@/lib/store/navigation-history-store";
 import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
-import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
+import type { ChapterSummary, JwpubTocItem, PublicationSummary } from "@/lib/jwpub/types";
 import { Progress } from "@/components/ui/progress";
 import { useIngestProgress, useIngestProgressStore } from "@/lib/store/ingest-progress-store";
 import { JwpubChapterView } from "./jwpub-chapter-view";
+import { JwpubTocView } from "./jwpub-toc-view";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import { JwpubFootnoteSurface } from "./jwpub-footnote-surface";
 import { JwpubBibleSurface } from "./jwpub-bible-surface";
@@ -49,6 +50,8 @@ interface JwpubReaderProps {
   noteId: string;
   initialPublication: PublicationSummary;
   initialChapters: ChapterSummary[];
+  /** The publication's own contents tree. Absent/empty → the reader opens on the first chapter, as it did before. */
+  initialToc?: JwpubTocItem[];
   initialChapterParam?: string;
   initialDocParam?: string;
 }
@@ -69,6 +72,7 @@ export function JwpubReader({
   noteId,
   initialPublication,
   initialChapters,
+  initialToc,
   initialChapterParam,
   initialDocParam,
 }: JwpubReaderProps) {
@@ -83,6 +87,13 @@ export function JwpubReader({
 
   const [publication, setPublication] = useState(initialPublication);
   const [chapters, setChapters] = useState(initialChapters);
+  const [toc, setToc] = useState<JwpubTocItem[]>(initialToc ?? []);
+  // Opens on the contents screen, like JW Library — unless the link names a
+  // chapter (a citation, search result or reload mid-chapter), which goes
+  // straight there.
+  const [view, setView] = useState<"toc" | "chapter">(() =>
+    (initialToc?.length ?? 0) > 0 && !initialDocParam && !initialChapterParam ? "toc" : "chapter"
+  );
 
   // Logged once per open — the publication's own title is enough to identify
   // it in the history Vault, so this doesn't need to re-fire on every chapter
@@ -188,7 +199,10 @@ export function JwpubReader({
     const targetIdx = resolveChapterIndex(docParam, chapterParam);
     // Deferred out of the effect body itself (react-hooks/set-state-in-effect)
     // — same shape this effect already had before the dependency fix.
-    queueMicrotask(() => setActiveIndex(targetIdx));
+    queueMicrotask(() => {
+      setActiveIndex(targetIdx);
+      setView("chapter");
+    });
   }, [searchParams, resolveChapterIndex]);
 
   // Moving between chapters (prev/next, the chapter list) also writes `?doc=`
@@ -208,6 +222,7 @@ export function JwpubReader({
   const navigateToIndex = useCallback(
     (index: number) => {
       setActiveIndex(index);
+      setView("chapter");
       const chapter = chapters[index];
       if (!chapter) return;
       const params = new URLSearchParams(searchParams.toString());
@@ -535,6 +550,13 @@ export function JwpubReader({
 
   const handlePublicationRef = useCallback(
     (mepsDocumentId: number, pid?: string) => {
+      // A link to another chapter of THIS publication (the contents page, "veja
+      // o capítulo 4") just turns to it — no panel, nothing to resolve.
+      const ownIndex = chapters.findIndex((c) => c.mepsDocumentId === mepsDocumentId);
+      if (ownIndex !== -1) {
+        navigateToIndex(ownIndex);
+        return;
+      }
       const resolved = resolvedPubRefs.get(mepsDocumentId);
       if (resolved) {
         showResolvedRef(resolved, pid);
@@ -568,7 +590,7 @@ export function JwpubReader({
           notify.error("Sem conexão", "Esta referência precisa de internet para abrir.");
         });
     },
-    [resolvedPubRefs, showResolvedRef, raise]
+    [chapters, navigateToIndex, resolvedPubRefs, showResolvedRef, raise]
   );
 
   const handleExtract = useCallback(
@@ -795,6 +817,8 @@ export function JwpubReader({
       if (refreshed.publication) {
         setPublication(refreshed.publication);
         setChapters(refreshed.chapters ?? []);
+        setToc(refreshed.toc ?? []);
+        setView((refreshed.toc?.length ?? 0) > 0 ? "toc" : "chapter");
         setActiveIndex(0);
       }
       notify.success("Publicação processada");
@@ -907,12 +931,12 @@ export function JwpubReader({
           {chapters.length > 0 && (
             <button
               type="button"
-              onClick={() => setShowChapters((v) => !v)}
-              aria-label="Capítulos"
-              aria-pressed={showChapters}
+              onClick={() => (toc.length > 0 ? setView((v) => (v === "toc" ? "chapter" : "toc")) : setShowChapters((v) => !v))}
+              aria-label={toc.length > 0 ? "Sumário" : "Capítulos"}
+              aria-pressed={toc.length > 0 ? view === "toc" : showChapters}
               className={cn(
                 "shrink-0 rounded-full p-2 transition-colors",
-                showChapters
+                (toc.length > 0 ? view === "toc" : showChapters)
                   ? "bg-primary/[0.18] text-accent"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground"
               )}
@@ -945,6 +969,18 @@ export function JwpubReader({
                 </p>
               </div>
             )}
+          </div>
+        ) : view === "toc" && toc.length > 0 ? (
+          <div className="flex-1 px-4 py-6 sm:px-6">
+            <JwpubTocView
+              title={publication.title}
+              toc={toc}
+              activeDocumentId={activeChapter?.documentId}
+              onOpen={(documentId) => {
+                const index = chapters.findIndex((c) => c.documentId === documentId);
+                if (index !== -1) navigateToIndex(index);
+              }}
+            />
           </div>
         ) : (
           <>

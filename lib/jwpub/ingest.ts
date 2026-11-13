@@ -6,6 +6,7 @@ import {
   saveChapterContent,
   saveFootnotes,
   saveExtracts,
+  saveToc,
   markPublicationFailed,
 } from "@/app/(app)/jwpub-actions";
 import { parseJwpub } from "./parser";
@@ -182,6 +183,12 @@ export async function ingestJwpub(
         if (savedFootnotes?.error) throw new Error(savedFootnotes.error);
       }
     }
+
+    // The contents tree is cosmetic — a failure here must not fail a
+    // publication whose chapters all saved fine; it just opens on the plain
+    // chapter list until it is reprocessed.
+    report(96, "Salvando sumário");
+    await saveToc(publicationId, parsed.toc).catch(() => undefined);
 
     // `savedTitle` is savePublication's own return -- it has already folded
     // the issue's month/year into the raw `Publication.Title` (see

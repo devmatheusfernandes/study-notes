@@ -21,7 +21,7 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
   const locked = await getNoteLockState(id);
 
   // An uploaded .jwpub gets the JwpubReader.
-  const { publication, chapters } = await getPublication(id);
+  const { publication, chapters, toc } = await getPublication(id);
   if (publication) {
     return (
       <LockGate noteId={id} initialLocked={locked}>
@@ -30,6 +30,7 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
           noteId={id}
           initialPublication={publication}
           initialChapters={chapters ?? []}
+          initialToc={toc}
           initialChapterParam={chapterParam}
           initialDocParam={docParam}
         />

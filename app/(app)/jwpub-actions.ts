@@ -10,7 +10,7 @@ import {
   JWPUB_MEDIA_BATCH_SIZE,
   MAX_IMAGE_SIZE,
 } from "@/lib/storage-config";
-import type { ChapterSummary, PublicationSummary } from "@/lib/jwpub/types";
+import type { ChapterSummary, JwpubTocItem, PublicationSummary } from "@/lib/jwpub/types";
 
 async function requireUser() {
   const supabase = await createClient();
@@ -230,6 +230,40 @@ export async function saveFootnotes(
   return error ? { error: "Não foi possível salvar as notas de rodapé." } : {};
 }
 
+/**
+ * Replaces the publication's table of contents. Delete-then-insert: the whole
+ * tree is written together on (re)processing, and a newer archive can drop
+ * items an older one had.
+ */
+export async function saveToc(
+  publicationId: string,
+  items: JwpubTocItem[]
+): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  if (!(await ownedPublication(supabase, publicationId))) return { error: "Acesso negado." };
+
+  const { error: deleteError } = await supabase.from("jwpub_toc_items").delete().eq("publication_id", publicationId);
+  if (deleteError) return { error: "Não foi possível salvar o sumário." };
+  if (items.length === 0) return {};
+
+  const { error } = await supabase.from("jwpub_toc_items").insert(
+    items.map((item) => ({
+      user_id: user.id,
+      publication_id: publicationId,
+      item_id: item.itemId,
+      parent_item_id: item.parentId,
+      position: item.position,
+      title: item.title,
+      number: item.number,
+      location: item.location,
+      schema_type: item.schemaType,
+      document_id: item.documentId,
+    }))
+  );
+  return error ? { error: "Não foi possível salvar o sumário." } : {};
+}
+
 /** One embedded excerpt, as the reader renders it. See JwpubExtract in lib/jwpub/types.ts. */
 export interface JwpubExtractRow {
   extractId: number;
@@ -445,7 +479,13 @@ export async function markPublicationFailed(noteId: string): Promise<{ error?: s
 /** Metadata + chapter list, deliberately without `content_html` so opening the reader stays cheap. */
 export async function getPublication(
   noteId: string
-): Promise<{ publication?: PublicationSummary; chapters?: ChapterSummary[]; error?: string }> {
+): Promise<{
+  publication?: PublicationSummary;
+  chapters?: ChapterSummary[];
+  /** The publication's own contents tree; empty for one imported before it was read (reprocess to get it). */
+  toc?: JwpubTocItem[];
+  error?: string;
+}> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
@@ -473,7 +513,23 @@ export async function getPublication(
     .eq("publication_id", publication.id)
     .order("position", { ascending: true });
 
+  const { data: tocRows } = await supabase
+    .from("jwpub_toc_items")
+    .select("item_id, parent_item_id, position, title, number, location, schema_type, document_id")
+    .eq("publication_id", publication.id)
+    .order("position", { ascending: true });
+
   return {
+    toc: (tocRows ?? []).map((row) => ({
+      itemId: row.item_id,
+      parentId: row.parent_item_id,
+      position: row.position,
+      title: row.title,
+      number: row.number,
+      location: row.location,
+      schemaType: row.schema_type,
+      documentId: row.document_id,
+    })),
     publication: {
       id: publication.id,
       symbol: publication.symbol,
