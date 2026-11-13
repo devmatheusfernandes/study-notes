@@ -82,9 +82,8 @@ export async function extractContentForNote(
       const parser = new PDFParse({ data: new Uint8Array(await fileData.arrayBuffer()) });
       let parsed: { text: string; total: number };
       try {
-        parsed = await parser.getText({ pageJoiner: "
-
-" });
+        // pageJoiner "": drop the "-- 1 of 3 --" markers the library adds between pages.
+        parsed = await parser.getText({ pageJoiner: "" });
       } finally {
         await parser.destroy();
       }
