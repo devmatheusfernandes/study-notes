@@ -58,6 +58,21 @@ export async function deriveJwpubKeys(meta: JwpubPublicationMeta): Promise<Jwpub
 }
 
 /**
+ * Whether decoded text is real markup rather than the accident of decrypting
+ * something that was never encrypted.
+ *
+ * Plenty of blobs (excerpts especially) are deflated only. Run through AES
+ * anyway they come out as noise, and 1 time in 256 that noise starts with
+ * `0x3c` — "<" — which is exactly the test used above to mean "already plain
+ * HTML, skip inflating". It then passed the old `includes("<")` check too (a
+ * few hundred random bytes nearly always contain one), so ~0.4% of excerpts
+ * were stored as binary garbage. Real HTML decodes without a single U+FFFD.
+ */
+function looksLikeHtml(text: string): boolean {
+  return text.trimStart().startsWith("<") && !text.includes("�");
+}
+
+/**
  * Turns one `Document.Content`/`Footnote.Content` BLOB into HTML.
  *
  * Publications vary: some are AES-CBC encrypted then deflated, some only
@@ -71,7 +86,14 @@ export async function decodeJwpubContent(
   inflate: (input: Uint8Array) => Uint8Array
 ): Promise<string> {
   if (raw.length === 0) return "";
-  if (raw[0] === 0x3c) return new TextDecoder().decode(raw as BufferSource);
+  // Starting with "<" only SUGGESTS plain HTML — an encrypted or deflated blob
+  // starts with that byte 1 time in 256 too — so it has to actually read as
+  // HTML, or the decrypt/inflate attempts below still get their turn.
+  let plain: string | null = null;
+  if (raw[0] === 0x3c) {
+    plain = new TextDecoder().decode(raw as BufferSource);
+    if (looksLikeHtml(plain)) return plain;
+  }
 
   if (keys) {
     try {
@@ -84,7 +106,7 @@ export async function decodeJwpubContent(
       const text = new TextDecoder().decode(
         (bytes[0] === 0x3c ? bytes : inflate(bytes)) as BufferSource
       );
-      if (text.includes("<")) return text;
+      if (looksLikeHtml(text)) return text;
     } catch {
       // Not encrypted with this key (or not encrypted at all) — fall through.
     }
@@ -93,6 +115,6 @@ export async function decodeJwpubContent(
   try {
     return new TextDecoder().decode(inflate(raw) as BufferSource);
   } catch {
-    return new TextDecoder().decode(raw as BufferSource);
+    return plain ?? new TextDecoder().decode(raw as BufferSource);
   }
 }

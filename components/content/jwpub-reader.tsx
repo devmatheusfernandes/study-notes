@@ -30,6 +30,7 @@ import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import type { ChapterSummary, JwpubTocItem, PublicationSummary } from "@/lib/jwpub/types";
 import { Progress } from "@/components/ui/progress";
+import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { useIngestProgress, useIngestProgressStore } from "@/lib/store/ingest-progress-store";
 import { JwpubChapterView } from "./jwpub-chapter-view";
 import { JwpubTocView } from "./jwpub-toc-view";
@@ -240,6 +241,9 @@ export function JwpubReader({
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
+  // The header's ↻ asks first: reprocessing re-reads the whole archive, which
+  // on a big publication takes minutes, and it was easy to hit by accident.
+  const [confirmReprocessOpen, setConfirmReprocessOpen] = useState(false);
   const ingestProgress = useIngestProgress(noteId);
 
   const [footnoteOpen, setFootnoteOpen] = useState(false);
@@ -896,7 +900,7 @@ export function JwpubReader({
           {!failed && (
             <button
               type="button"
-              onClick={() => void reprocess()}
+              onClick={() => setConfirmReprocessOpen(true)}
               disabled={isReprocessing}
               aria-label="Reprocessar publicação"
               title="Reler o arquivo original — útil depois que o app aprende a reconhecer mais coisas nele, como referências para outras publicações"
@@ -1098,6 +1102,16 @@ export function JwpubReader({
           </>
         )}
       </AnimatePresence>
+
+      <ConfirmVault
+        open={confirmReprocessOpen}
+        onOpenChange={setConfirmReprocessOpen}
+        title="Reprocessar publicação?"
+        description="O arquivo original é lido de novo e o conteúdo da publicação é refeito. Em publicações grandes isso pode levar alguns minutos. Seus destaques, notas e respostas não são afetados."
+        confirmLabel="Reprocessar"
+        destructive={false}
+        onConfirm={() => void reprocess()}
+      />
 
       <JwpubFootnoteSurface
         open={footnoteOpen}
