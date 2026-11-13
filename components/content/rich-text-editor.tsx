@@ -501,7 +501,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     editorProps: {
       attributes: {
         class:
-          "min-h-[50vh] w-full flex-1 outline-none text-base leading-relaxed text-foreground/90 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul[data-type=taskList]]:my-2 [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:flex [&_ul[data-type=taskList]]:flex-col [&_ul[data-type=taskList]]:gap-0.5 [&_ul[data-type=taskList]]:pl-0 [&_img]:my-2",
+          "min-h-[50vh] w-full flex-1 outline-none text-base leading-relaxed text-foreground/90 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul[data-type=taskList]]:my-2 [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:flex [&_ul[data-type=taskList]]:flex-col [&_ul[data-type=taskList]]:gap-0.5 [&_ul[data-type=taskList]]:pl-0 [&_img]:my-2 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:leading-tight [&_h2]:mt-4 [&_h2]:mb-1.5 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:leading-snug [&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:leading-snug",
       },
       // Clicking a reference opens it. Handled here rather than with a DOM
       // listener so the caret still lands where the user clicked — the text
