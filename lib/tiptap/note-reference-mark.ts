@@ -32,6 +32,11 @@ export interface NoteReferenceOptions {
 export const NoteReferenceMark = Mark.create<NoteReferenceOptions>({
   name: NOTE_REFERENCE_MARK,
 
+  // Outermost mark. Otherwise a citation like "<em>nwt</em> 1782" renders as
+  // two reference chips, because the italic mark (lower rank) nests outside
+  // and splits the reference's span at every formatting change.
+  priority: 1000,
+
   // Typing straight after a reference must produce ordinary text, not more
   // reference — the mark ends where the closing parenthesis does.
   inclusive: false,

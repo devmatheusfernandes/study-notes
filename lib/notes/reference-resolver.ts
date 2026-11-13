@@ -30,8 +30,8 @@ import {
 import { loadChapter, loadExtracts } from "@/lib/offline/jwpub-data";
 import type { JwpubExtractItem } from "@/components/content/jwpub-extract-surface";
 import { getGlobalVideoById } from "@/app/(app)/global-video-actions";
-import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
-import { readOfflineBibleChapter, readOfflineBibleRange } from "@/lib/offline/bible-offline";
+import { referenceFromElement, referenceKey, type NoteReference } from "@/lib/notes/note-reference";
+import { readOfflineBibleByIds, readOfflineBibleChapter, readOfflineBibleRange } from "@/lib/offline/bible-offline";
 
 /** A publication chapter, in the shape JwpubReferenceSurface's `target` wants. */
 export interface ResolvedPublicationTarget {
@@ -112,6 +112,8 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
   }
 
   if (reference.kind === "verses") {
+    const local = await readOfflineBibleByIds(reference.firstVerseId, reference.lastVerseId);
+    if (local) return { ...EMPTY, verses: local };
     const result = await getBibleVerses(reference.firstVerseId, reference.lastVerseId);
     return { ...EMPTY, verses: result.verses ?? null, error: result.error ?? null };
   }
@@ -212,4 +214,39 @@ export function resolveNoteReference(reference: NoteReference): Promise<Resolved
 export function prefetchNoteReference(reference: NoteReference): void {
   if (reference.kind === "note") return;
   void resolveNoteReference(reference).catch(() => {});
+}
+
+/** Most references warmed per pass — each is a Server Action, and those queue one at a time behind the note's own saves. */
+const WARM_LIMIT = 12;
+
+/**
+ * Resolves, ahead of any click, the citations pasted from a .jwpub reader that
+ * a note body contains (extracts, scripture ids, publication pointers). Run
+ * once the note is open and after edits settle: by the time one is clicked its
+ * content is already in the cache and the panel paints in the same frame.
+ *
+ * One at a time, and never throws. Anything already cached or in flight is a
+ * no-op, so calling this repeatedly is cheap. Typed "(mt 7:12)" references are
+ * left to the hover prefetch — they're plentiful and cheap to fetch on demand.
+ */
+export async function warmPastedReferences(root: HTMLElement): Promise<void> {
+  const elements = root.querySelectorAll("[data-note-ref=extract], [data-note-ref=verses], [data-note-ref=pubref]");
+  const seen = new Set<string>();
+  const pending: NoteReference[] = [];
+  for (const element of elements) {
+    const reference = referenceFromElement(element);
+    if (!reference) continue;
+    const key = referenceKey(reference);
+    if (seen.has(key) || cache.has(key)) continue;
+    seen.add(key);
+    pending.push(reference);
+    if (pending.length >= WARM_LIMIT) break;
+  }
+  for (const reference of pending) {
+    try {
+      await resolveNoteReference(reference);
+    } catch {
+      // offline or transient — the click itself reports it
+    }
+  }
 }

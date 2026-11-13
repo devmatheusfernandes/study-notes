@@ -1,5 +1,5 @@
 import { getBibleChapterVerses, getBibleDownloadSlice, type BibleVerseRow } from "@/app/(app)/bible-actions";
-import { idbClear, idbGet, idbPut, idbPutMany, isOfflineStorageAvailable } from "./idb";
+import { idbClear, idbGet, idbGetAll, idbPut, idbPutMany, isOfflineStorageAvailable } from "./idb";
 
 /**
  * The whole Bible (public.bible_verses, ~31k rows) kept on the device so a
@@ -96,8 +96,42 @@ export async function readOfflineBibleRange(
   return slice.length > 0 ? slice : undefined;
 }
 
+/** Chapters in verse-id order, built once from the device copy — a `BibleVerseId` is sequential, so a range maps to the chapters it overlaps. */
+let idIndex: Promise<{ first: number; last: number; verses: BibleVerseRow[] }[]> | undefined;
+
+function buildIdIndex() {
+  idIndex ??= idbGetAll<BibleChapterRow>("bibleChapters").then((rows) =>
+    rows
+      .filter((row) => row.verses.length > 0)
+      .map((row) => ({ first: row.verses[0].id, last: row.verses[row.verses.length - 1].id, verses: row.verses }))
+      .sort((a, b) => a.first - b.first)
+  );
+  return idIndex;
+}
+
+/**
+ * Verses by `BibleVerseId` range — what a citation pasted from a .jwpub reader
+ * carries (it names ids, not book/chapter/verse). `undefined` when the Bible
+ * isn't downloaded or the range isn't found, so the caller asks the server.
+ */
+export async function readOfflineBibleByIds(firstVerseId: number, lastVerseId: number): Promise<BibleVerseRow[] | undefined> {
+  try {
+    if (!(await isDownloaded())) return undefined;
+    const index = await buildIdIndex();
+    const out: BibleVerseRow[] = [];
+    for (const chapter of index) {
+      if (chapter.last < firstVerseId || chapter.first > lastVerseId) continue;
+      for (const verse of chapter.verses) if (verse.id >= firstVerseId && verse.id <= lastVerseId) out.push(verse);
+    }
+    return out.length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function downloadBible(onProgress?: (fraction: number) => void): Promise<{ error?: string }> {
   if (!isOfflineStorageAvailable()) return { error: "Este navegador não permite salvar dados no aparelho." };
+  idIndex = undefined;
 
   // The Bible is 31.194 verses; used only to scale the progress bar, so being off by a few is harmless.
   const EXPECTED_VERSES = 31200;
@@ -145,5 +179,6 @@ export async function downloadBible(onProgress?: (fraction: number) => void): Pr
 
 export async function removeOfflineBible(): Promise<void> {
   await idbClear(["bibleChapters", "bibleMeta"]);
+  idIndex = undefined;
   downloaded = false;
 }

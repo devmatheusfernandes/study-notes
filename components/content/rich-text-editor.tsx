@@ -56,7 +56,7 @@ import {
   NOTE_REFERENCE_TRIGGER,
   type NoteReference,
 } from "@/lib/notes/note-reference";
-import { prefetchNoteReference } from "@/lib/notes/reference-resolver";
+import { prefetchNoteReference, warmPastedReferences } from "@/lib/notes/reference-resolver";
 import { ReferenceSuggestionMenu } from "@/components/content/reference-suggestion-menu";
 import { isReferenceTitleIndexReady, searchReferenceTitles, warmReferenceTitleIndex } from "@/lib/notes/reference-title-index";
 
@@ -423,6 +423,16 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     []
   );
 
+  // Warms pasted citations once the note settles (see warmPastedReferences).
+  const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleWarm = useCallback((dom: HTMLElement) => {
+    if (warmTimer.current) clearTimeout(warmTimer.current);
+    warmTimer.current = setTimeout(() => void warmPastedReferences(dom), 1200);
+  }, []);
+  useEffect(() => () => {
+    if (warmTimer.current) clearTimeout(warmTimer.current);
+  }, []);
+
   const editor = useEditor({
     immediatelyRender: false,
     autofocus: autoFocus ? "end" : false,
@@ -514,7 +524,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         return true;
       },
     },
-    onUpdate: ({ editor }) => onChange(editor.getHTML()),
+    onCreate: ({ editor }) => scheduleWarm(editor.view.dom),
+    onUpdate: ({ editor }) => {
+      onChange(editor.getHTML());
+      scheduleWarm(editor.view.dom);
+    },
     // Themed to match the app's dark "Organic" tokens instead of Tiptap's defaults.
     editable: true,
   });
