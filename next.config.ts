@@ -63,6 +63,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // pdf-parse (PDF text extraction for vectorization, lib/vector/extractor.ts)
+  // runs pdf.js, which loads its own worker file by path at runtime. Bundled,
+  // that path points into .next/server/chunks, where the file doesn't exist —
+  // "Setting up fake worker failed" — and every PDF failed to vectorize with a
+  // generic "empty content" error. Left external, Node resolves it from
+  // node_modules (which the deployment traces and ships) as it normally would.
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"],
   experimental: {
     serverActions: {
       // Up to MAX_FILES_PER_BATCH (5) files at MAX_FILE_SIZE (15 MB) each,
