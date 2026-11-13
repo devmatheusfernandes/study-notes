@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, AudioLines, ImagePlus, PenLine, Pin, Share } from "lucide-react";
+import { ArrowLeft, AudioLines, ImagePlus, PenLine, Pin, Search, Share } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -671,6 +671,15 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                     className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   >
                     <Share className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editorRef.current?.openFind()}
+                    aria-label="Buscar na nota"
+                    title="Buscar na nota (Ctrl+F)"
+                    className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    <Search className="size-4" />
                   </button>
                   <button
                     type="button"

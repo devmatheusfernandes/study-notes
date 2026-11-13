@@ -316,6 +316,20 @@ input[type="search"]::-webkit-search-decoration {
   transition: background-color 0.15s ease;
 }
 
+/* Find in note (lib/tiptap/find-in-note.ts). Fixed dark text on the fill, like
+   the other highlight colours, so it clears contrast on both palettes. */
+.ProseMirror .find-match {
+  background-color: color-mix(in srgb, #e8c547 55%, transparent);
+  color: inherit;
+  border-radius: 0.2em;
+}
+.ProseMirror .find-match-active {
+  background-color: #e8c547;
+  color: #1c1917;
+  outline: 2px solid color-mix(in srgb, #1c1917 55%, transparent);
+  outline-offset: 0;
+}
+
 /* Collapsible sections (lib/tiptap/collapsible-headings.ts). The body of a
    collapsed heading is only hidden, never removed from the document. */
 .ProseMirror .note-collapsed {

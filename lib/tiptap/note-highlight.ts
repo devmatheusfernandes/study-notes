@@ -2,6 +2,9 @@ import { Mark, mergeAttributes } from "@tiptap/core";
 
 export const NOTE_HIGHLIGHT_MARK = "highlight";
 
+/** Yellow — what the shortcut uses until a colour has been picked from the bubble menu. */
+const DEFAULT_HIGHLIGHT_COLOR = "#e8c547";
+
 /** Pastel highlight colours carry fixed dark text so they read on both themes (see the Handwriting/highlight notes in CLAUDE.md). */
 export const NOTE_HIGHLIGHT_TEXT_COLOR = "#1c1917";
 
@@ -46,13 +49,31 @@ export const NoteHighlight = Mark.create({
     return ["mark", mergeAttributes({ class: "note-highlight" }, HTMLAttributes), 0];
   },
 
+  // The colour the shortcut applies: the last one chosen, so repeated
+  // highlighting in one colour is a single keystroke.
+  addStorage() {
+    return { lastColor: null as string | null };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      // Like Ctrl+B: highlights the selection, or removes the highlight if it already has one.
+      "Mod-Shift-h": ({ editor }) => {
+        if (editor.isActive(this.name)) return editor.commands.unsetNoteHighlight();
+        return editor.commands.setNoteHighlight(this.storage.lastColor ?? DEFAULT_HIGHLIGHT_COLOR);
+      },
+    };
+  },
+
   addCommands() {
     return {
       // One mark type: setting a colour over an existing highlight replaces it.
       setNoteHighlight:
         (color: string) =>
-        ({ commands }) =>
-          commands.setMark(this.name, { color }),
+        ({ commands }) => {
+          this.storage.lastColor = color;
+          return commands.setMark(this.name, { color });
+        },
       unsetNoteHighlight:
         () =>
         ({ commands }) =>

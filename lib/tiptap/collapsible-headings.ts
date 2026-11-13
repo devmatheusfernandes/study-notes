@@ -14,12 +14,12 @@ const COLLAPSIBLE_HEADINGS_KEY = new PluginKey("collapsibleHeadings");
 const CHEVRON_SVG =
   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
 
-interface TopLevelChild {
+export interface TopLevelChild {
   node: PMNode;
   pos: number;
 }
 
-function topLevelChildren(doc: PMNode): TopLevelChild[] {
+export function topLevelChildren(doc: PMNode): TopLevelChild[] {
   const children: TopLevelChild[] = [];
   doc.forEach((node, offset) => children.push({ node, pos: offset }));
   return children;
@@ -30,7 +30,7 @@ function topLevelChildren(doc: PMNode): TopLevelChild[] {
  * next heading of the same or a higher level (`h2` ends at the next `h2` or
  * `h1`), or the end of the document. Everything in between is its body.
  */
-function sectionEnd(children: TopLevelChild[], index: number): number {
+export function sectionEnd(children: TopLevelChild[], index: number): number {
   const level = children[index].node.attrs.level as number;
   let end = index + 1;
   while (end < children.length) {

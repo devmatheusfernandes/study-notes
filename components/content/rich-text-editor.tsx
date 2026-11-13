@@ -2,6 +2,8 @@
 
 import { NoteHighlight } from "@/lib/tiptap/note-highlight";
 import { CollapsibleHeadings } from "@/lib/tiptap/collapsible-headings";
+import { FindInNote } from "@/lib/tiptap/find-in-note";
+import { NoteFindBar } from "@/components/content/note-find-bar";
 import { useIsMobile } from "@/hooks/ui/use-device";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { convertPastedJwpubLinks } from "@/lib/notes/jwpub-paste";
@@ -132,6 +134,8 @@ function ToolbarButton({
 }
 
 export interface RichTextEditorHandle {
+  /** Opens the find-in-note bar (Ctrl+F does the same) — for a trigger button outside this component. */
+  openFind: () => void;
   /** Opens the native file picker to insert an image — for a trigger button that lives outside this component (see note-editor.tsx's header). */
   openImagePicker: () => void;
   /**
@@ -454,6 +458,13 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // than growing wider — it has to fit a phone.
   const [showHighlightColors, setShowHighlightColors] = useState(false);
 
+  // Find in note. Ctrl/Cmd+F opens it from anywhere on the note screen (the
+  // browser's own find can't see inside collapsed sections or step through
+  // them), Esc closes it.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findSeed, setFindSeed] = useState("");
+  const [findSignal, setFindSignal] = useState(0);
+
   const editor = useEditor({
     immediatelyRender: false,
     autofocus: autoFocus ? "end" : false,
@@ -468,7 +479,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       /* These three callbacks read refs, but only ever from a ProseMirror
          plugin event (a keystroke, a click) — never while rendering, which is
          what the rule is guarding against. */
-      /* eslint-disable react-hooks/refs */
+       
+      FindInNote,
       CollapsibleHeadings.configure({ isEnabled: () => !isMobileRef.current }),
       NoteReferenceMark.configure({ getKnownSymbols }),
       ReferenceSuggestion.configure({
@@ -476,7 +488,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         onUpdate: handleSuggestionUpdate,
         onKeyDown: handleSuggestionKeyDown,
       }),
-      /* eslint-enable react-hooks/refs */
+       
       // Last on purpose: ProseMirror tries each extension's Tab/Shift-Tab
       // binding in registration order and stops at the first one that
       // returns true, so list nesting (ListKeymap/TaskItem, via StarterKit
@@ -558,6 +570,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
   useImperativeHandle(ref, () => ({
     openImagePicker: () => fileInputRef.current?.click(),
+    openFind: () => openFindBar(),
     scrollToText: (text: string) => {
       const target = text.trim().toLowerCase();
       if (!editor || !target) return false;
@@ -603,10 +616,43 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     }
   }, [editor, content]);
 
+  function openFindBar() {
+    if (!editor) return;
+    const { from, to, empty } = editor.state.selection;
+    const selected = empty ? "" : editor.state.doc.textBetween(from, to, " ");
+    // A short, single-line selection seeds the box; a long one is a block, not a search term.
+    if (!findOpen) setFindSeed(selected.length > 0 && selected.length <= 80 && !/\n/.test(selected) ? selected : "");
+    setFindOpen(true);
+    setFindSignal((n) => n + 1);
+  }
+  const openFindBarRef = useRef(openFindBar);
+  useEffect(() => {
+    openFindBarRef.current = openFindBar;
+  });
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        openFindBarRef.current();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   if (!editor) return null;
 
   return (
     <div className={cn("relative", className)}>
+      {findOpen && (
+        <NoteFindBar
+          editor={editor}
+          initialQuery={findSeed}
+          focusSignal={findSignal}
+          onClose={() => setFindOpen(false)}
+        />
+      )}
       <BubbleMenu
         editor={editor}
         shouldShow={bubbleMenuShouldShow}
