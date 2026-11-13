@@ -9,6 +9,7 @@ import type { IngestProgress } from "@/lib/store/ingest-progress-store";
 import { notify } from "@/components/ui/toaster";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
+import { getWolArticle } from "@/app/(app)/wol-lookup-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
@@ -65,11 +66,40 @@ function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number
     }
   }
 
+  // The publication isn't in the library, but WOL has the text: show it now,
+  // and keep "Baixar" for when the user wants it in the library for good.
+  const [article, setArticle] = useState<{ id: number; html: string | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getWolArticle(mepsDocumentId)
+      .then((result) => {
+        if (!cancelled) setArticle({ id: mepsDocumentId, html: result.html ?? null });
+      })
+      .catch(() => {
+        if (!cancelled) setArticle({ id: mepsDocumentId, html: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mepsDocumentId]);
+  const loadingArticle = article?.id !== mepsDocumentId;
+
   return (
     <div className="flex flex-col items-start gap-3">
+      {loadingArticle ? (
+        <div className="w-full" role="status" aria-label="Carregando do WOL">
+          <ReferenceContentSkeleton paragraphs={4} withHeading />
+        </div>
+      ) : article?.html ? (
+        <div
+          className="w-full text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
+          dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(article.html) }}
+        />
+      ) : null}
       <p className="text-[13.5px] text-muted-foreground">
-        Essa publicação ainda não está na sua biblioteca. O jw.org disponibiliza o arquivo original —
-        dá para trazer ela para cá.
+        {article?.html
+          ? "Texto exibido a partir do WOL. Baixe a publicação para ter ela na sua biblioteca, com marcações e leitura offline."
+          : "Essa publicação ainda não está na sua biblioteca. O jw.org disponibiliza o arquivo original — dá para trazer ela para cá."}
       </p>
       <Button
         variant="outline"

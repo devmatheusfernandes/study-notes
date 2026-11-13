@@ -119,3 +119,34 @@ export async function lookupPerspicazTitle(title: string): Promise<{ hits?: WolH
   }
   return { hits };
 }
+
+const MAX_ARTICLE_CHARS = 600_000;
+
+/**
+ * The text of one WOL document, for a `pubref` whose publication isn't in the
+ * library — so the panel can show the cited article right away instead of
+ * requiring a download first. Links are flattened to plain text (they are
+ * relative to wol.jw.org and would 404 inside this app); the caller still runs
+ * `sanitizeChapterHtml` before rendering.
+ */
+export async function getWolArticle(mepsDocumentId: number): Promise<{ title?: string; html?: string; error?: string }> {
+  if (!(await requireUser())) return { error: "Sessão expirada." };
+  if (!Number.isInteger(mepsDocumentId) || mepsDocumentId < 1) return { error: "Documento inválido." };
+
+  const page = await fetchWol(`${WOL}/d/r5/lp-t/${mepsDocumentId}`);
+  if (!page) return { error: "Não foi possível carregar do WOL." };
+
+  const start = page.indexOf('<article id="article"');
+  const end = page.indexOf("</article>", start);
+  if (start === -1 || end === -1) return { error: "Conteúdo não encontrado no WOL." };
+
+  let html = page.slice(start, end + "</article>".length);
+  if (html.length > MAX_ARTICLE_CHARS) html = html.slice(0, MAX_ARTICLE_CHARS);
+  html = html
+    .replace(/<a\b[^>]*>/gi, "<span>")
+    .replace(/<\/a>/gi, "</span>")
+    .replace(/<(script|style|iframe)\b[\s\S]*?<\/\1>/gi, "");
+
+  const title = decode(/<(?:p|h1)\b[^>]*class="(?:st|title)[^"]*"[^>]*>([\s\S]*?)<\/(?:p|h1)>/.exec(html)?.[1] ?? "");
+  return { title: title || undefined, html };
+}

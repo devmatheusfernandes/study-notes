@@ -72,7 +72,7 @@ import { parseWolQueries } from "@/lib/notes/wol-query";
 import { lookupPerspicazTitle, lookupWolReference, type WolHit } from "@/app/(app)/wol-lookup-actions";
 
 const REFERENCE_SEARCH_DEBOUNCE_MS = 250;
-const WOL_DEBOUNCE_MS = 500;
+const WOL_DEBOUNCE_MS = 250;
 const EMPTY_SEARCH_RESULTS: ReferenceSearchResults = { chapters: [], videos: [] };
 
 // Module-level, not inline in JSX: BubbleMenu (@tiptap/react/menus) puts
@@ -257,10 +257,21 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const [wolHits, setWolHits] = useState<{ query: string; hits: WolHit[] }>({ query: "", hits: [] });
   const wolRequestRef = useRef(0);
   const wolQuery = suggestion?.query ?? "";
+  // True from the moment the text looks like a WOL reference until the answer
+  // (or failure) arrives — drives the menu's "buscando…" row.
+  const [wolPending, setWolPending] = useState(false);
   useEffect(() => {
     const candidates = parseWolQueries(wolQuery);
     const requestId = ++wolRequestRef.current;
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) {
+      queueMicrotask(() => {
+        if (wolRequestRef.current === requestId) setWolPending(false);
+      });
+      return;
+    }
+    queueMicrotask(() => {
+      if (wolRequestRef.current === requestId) setWolPending(true);
+    });
     const timer = setTimeout(() => {
       void Promise.all(
         candidates.map(async (candidate) => {
@@ -277,6 +288,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         const seen = new Set<number>();
         const hits = groups.flat().filter((h) => !seen.has(h.mepsDocumentId) && seen.add(h.mepsDocumentId));
         setWolHits({ query: wolQuery, hits });
+        setWolPending(false);
       });
     }, WOL_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -823,7 +835,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           items={items}
           activeIndex={activeIndex}
           rect={suggestion.rect}
-          isSearching={isSearching}
+          isSearching={isSearching || wolPending}
           onSelect={applyItem}
           onHover={setActiveIndex}
         />
