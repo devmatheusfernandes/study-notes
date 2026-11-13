@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useChatStore, type ChatSource } from "@/lib/store/chat-store";
 import { addUserMessage as addUserMessageAction } from "@/app/(app)/chat-actions";
@@ -29,7 +29,17 @@ export function ChatView({ conversationId }: ChatViewProps) {
   // effect-based window.location read in that effect, which only runs after
   // first paint) so the "pergunte algo" empty state below never has a chance
   // to flash in between this page mounting and that message actually landing.
-  const hasPendingQuery = !!useSearchParams().get("q")?.trim();
+  //
+  // Captured ONCE, at mount. The auto-send effect below strips `?q=` from the
+  // URL, and a live read would flip to "no question" a frame before the
+  // message reaches the store — flashing the empty state in between.
+  const searchParams = useSearchParams();
+  const [pendingQuestion] = useState(() => searchParams.get("q")?.trim() ?? "");
+  const hasPendingQuery = pendingQuestion !== "";
+  // Opened with a question that hasn't reached the store yet: the composer
+  // already reads as busy (as it did in the loading shell) instead of
+  // flashing back to idle for a frame.
+  const awaitingFirstSend = hasPendingQuery && messages.length === 0;
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -38,8 +48,6 @@ export function ChatView({ conversationId }: ChatViewProps) {
 
   const streamResponse = useCallback(
     async (questionText: string, allowedSourceTypes: string[]) => {
-      startStream();
-
       try {
         const response = await fetch(`/chats/${conversationId}/stream`, {
           method: "POST",
@@ -102,13 +110,17 @@ export function ChatView({ conversationId }: ChatViewProps) {
         failStream("Falha na conexão com o assistente.");
       }
     },
-    [conversationId, startStream, appendDelta, finishStream, failStream]
+    [conversationId, appendDelta, finishStream, failStream]
   );
 
   const sendMessage = useCallback(
     async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"]) => {
-      // 1. Optimistic user message
+      // 1. Optimistic user message, and the assistant's "thinking" placeholder
+      // right behind it — not after the persist below, which is a server round
+      // trip during which the person would otherwise see their message and
+      // nothing answering it.
       addUserMsg(content);
+      startStream();
 
       // 2. Persist user message server-side
       const result = await addUserMessageAction(conversationId, content);
@@ -120,7 +132,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
       // 3. Start streaming assistant response
       await streamResponse(content, allowedSourceTypes);
     },
-    [conversationId, addUserMsg, failStream, streamResponse]
+    [conversationId, addUserMsg, startStream, failStream, streamResponse]
   );
 
   // Auto-send initial question if navigated with ?q= (e.g. from ChatsDock or start page)
@@ -149,6 +161,15 @@ export function ChatView({ conversationId }: ChatViewProps) {
       {/* Scrollable conversation messages container */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-32 sm:px-6">
         <div className="mx-auto flex max-w-2xl sm:max-w-3xl flex-col gap-4">
+          {messages.length === 0 && hasPendingQuery && (
+            // The question this chat was opened with, until the auto-send
+            // below puts the real messages in the store. Same markup as
+            // chat-loading.tsx's shell, so nothing changes on screen.
+            <>
+              <ChatMessage role="user" content={pendingQuestion} sources={[]} instant />
+              <ChatMessage role="assistant" content="" sources={[]} isStreaming instant />
+            </>
+          )}
           {messages.length === 0 && !hasPendingQuery && (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
               <span className="flex size-12 items-center justify-center rounded-full bg-accent/15">
@@ -159,9 +180,10 @@ export function ChatView({ conversationId }: ChatViewProps) {
               </p>
             </div>
           )}
-          {messages.map((msg) => (
+          {messages.map((msg, index) => (
             <ChatMessage
               key={msg.id}
+              instant={hasPendingQuery && index < 2}
               role={msg.role}
               content={msg.content}
               sources={msg.sources}
@@ -179,8 +201,10 @@ export function ChatView({ conversationId }: ChatViewProps) {
           <SmartComposer
             variant="chat"
             onSend={sendMessage}
-            disabled={isStreaming}
-            statusText={isStreaming ? (streamStatus ?? "Escrevendo resposta…") : undefined}
+            disabled={isStreaming || awaitingFirstSend}
+            statusText={
+              isStreaming ? (streamStatus ?? "Escrevendo resposta…") : awaitingFirstSend ? "Enviando…" : undefined
+            }
             placeholder="Pergunte às suas notas ou vídeos…"
           />
         </div>

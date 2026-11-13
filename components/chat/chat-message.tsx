@@ -14,6 +14,8 @@ interface ChatMessageProps {
   /** Sources were retrieved, but the model itself couldn't confirm any of them actually answers the question. */
   sourcesUncertain?: boolean;
   isStreaming?: boolean;
+  /** Skip the entrance animation — for a message that is standing in for one already on screen (the loading shell → the real chat), which must not fade in a second time. */
+  instant?: boolean;
 }
 
 function extractExactPhrase(snippet?: string): string | undefined {
@@ -125,11 +127,11 @@ function renderMarkdown(text: string): string {
   return `<p>${html}</p>`;
 }
 
-export function ChatMessage({ role, content, sources, sourcesUncertain, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ role, content, sources, sourcesUncertain, isStreaming, instant }: ChatMessageProps) {
   if (role === "user") {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 8 }}
+        initial={instant ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         className="flex justify-end"
       >
@@ -142,7 +144,7 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      initial={instant ? false : { opacity: 0, y: 10, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
       className="flex flex-col gap-2"
