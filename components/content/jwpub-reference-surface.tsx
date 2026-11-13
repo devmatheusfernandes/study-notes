@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import type { IngestProgress } from "@/lib/store/ingest-progress-store";
 import { notify } from "@/components/ui/toaster";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
@@ -44,11 +46,13 @@ interface JwpubReferenceSurfaceProps {
 
 function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number; onResolved?: (mepsDocumentId: number, noteId: string) => void }) {
   const [isDownloading, setIsDownloading] = useState(false);
+  const [progress, setProgress] = useState<IngestProgress | null>(null);
 
   async function handleDownload() {
     setIsDownloading(true);
+    setProgress({ stage: "Iniciando", percent: 0 });
     try {
-      const result = await downloadAndIngestPublication(mepsDocumentId);
+      const result = await downloadAndIngestPublication(mepsDocumentId, setProgress);
       if (!result.ok || !result.noteId) {
         notify.error("Não foi possível baixar", result.error);
         return;
@@ -57,6 +61,7 @@ function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number
       onResolved?.(mepsDocumentId, result.noteId);
     } finally {
       setIsDownloading(false);
+      setProgress(null);
     }
   }
 
@@ -73,8 +78,16 @@ function DownloadPrompt({ mepsDocumentId, onResolved }: { mepsDocumentId: number
         leftIcon={<Download className="size-3.5 text-accent" />}
         onClick={() => void handleDownload()}
       >
-        Baixar publicação
+        {progress ? `Baixando… ${progress.percent}%` : "Baixar publicação"}
       </Button>
+      {progress && (
+        <div className="flex w-full max-w-xs flex-col gap-1.5" role="status" aria-live="polite">
+          <Progress value={progress.percent} />
+          <p className="font-mono text-[11px] text-muted-foreground">
+            {progress.percent}% · {progress.stage}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
