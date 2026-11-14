@@ -50,7 +50,7 @@ import {
   type NoteScriptureMention,
 } from "@/app/(app)/note-scripture-actions";
 import { BibleStudyPanel, type BibleStudyTab, type BiblePersonalNote } from "./bible-study-panel";
-import { BibleAppendixContent } from "./bible-appendix-surface";
+import { BibleAppendixPage } from "./bible-appendix-surface";
 import {
   GlobalPublicationReader,
   GLOBAL_PUBLICATION_LABELS,
@@ -199,7 +199,6 @@ export function BibleReader({
   // opened either from the book-grid entry point or from a link inside a
   // study note / another appendix.
   const [openAppendixId, setOpenAppendixId] = useState<number | null>(null);
-  const [appendixTitle, setAppendixTitle] = useState<string | null>(null);
 
   // The shared publications (Perspicaz, the 2026 Guia de Pesquisa) the book
   // grid offers, once they've actually been imported (Configurações).
@@ -849,29 +848,21 @@ export function BibleReader({
 
   if (screen === "appendix" && openAppendixId !== null) {
     return (
-      <>
-        <BibleTopHeader
-          title={appendixTitle ?? "Apêndice"}
-          onBack={() => setScreen(returnScreenRef.current)}
-          backLabel="Voltar"
-          userEmail={userEmail}
-          {...searchHeaderProps}
-        />
-        <div className="flex-1 px-4 py-6 sm:px-6">
-          <div className="mx-auto w-full max-w-3xl">
-            <BibleAppendixContent
-              key={openAppendixId}
-              variant="page"
-              mepsDocumentId={openAppendixId}
-              onLoaded={(appendix) =>
-                setAppendixTitle(appendix ? (appendix.section === "header" ? appendix.title : `Apêndice ${appendix.letter}`) : null)
-              }
-              onOpenAppendix={openAppendix}
-              onOpenBibleRef={(refBookOrder, refChapter, refVerse) => enterReading(refBookOrder, refChapter, refVerse)}
-            />
-          </div>
-        </div>
-      </>
+      <BibleAppendixPage
+        key={openAppendixId}
+        mepsDocumentId={openAppendixId}
+        renderHeader={(title) => (
+          <BibleTopHeader
+            title={title ?? "Apêndice"}
+            onBack={() => setScreen(returnScreenRef.current)}
+            backLabel="Voltar"
+            userEmail={userEmail}
+            {...searchHeaderProps}
+          />
+        )}
+        onOpenAppendix={openAppendix}
+        onOpenBibleRef={(refBookOrder, refChapter, refVerse) => enterReading(refBookOrder, refChapter, refVerse)}
+      />
     );
   }
 

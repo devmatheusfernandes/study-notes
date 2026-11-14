@@ -55,13 +55,13 @@ function isPalmContact(event: React.PointerEvent): boolean {
 }
 
 /** The element that actually scrolls behind the ink layer, or null when that's the page itself. */
-function scrollableAncestor(from: HTMLElement): HTMLElement | null {
+function scrollableAncestor(from: HTMLElement, axis: "x" | "y" = "y"): HTMLElement | null {
   let node = from.parentElement;
   while (node) {
-    const overflowY = getComputedStyle(node).overflowY;
-    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
-      return node;
-    }
+    const style = getComputedStyle(node);
+    const overflow = axis === "y" ? style.overflowY : style.overflowX;
+    const scrollable = axis === "y" ? node.scrollHeight > node.clientHeight : node.scrollWidth > node.clientWidth;
+    if ((overflow === "auto" || overflow === "scroll") && scrollable) return node;
     node = node.parentElement;
   }
   return null;
@@ -103,7 +103,7 @@ export function DrawingCanvas({
   const erasedThisGestureRef = useRef(false);
   const penReportedRef = useRef(false);
   const lastPenAtRef = useRef(-Infinity);
-  const touchScrollRef = useRef<{ pointerId: number; lastY: number; target: HTMLElement | null } | null>(null);
+  const touchScrollRef = useRef<{ pointerId: number; lastX: number; lastY: number; target: HTMLElement | null; targetX: HTMLElement | null } | null>(null);
   const liveDirtyRef = useRef<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
 
   useEffect(() => {
@@ -250,8 +250,11 @@ export function DrawingCanvas({
       event.currentTarget.setPointerCapture(event.pointerId);
       touchScrollRef.current = {
         pointerId: event.pointerId,
+        lastX: event.clientX,
         lastY: event.clientY,
         target: scrollableAncestor(event.currentTarget),
+        // A zoomed-in PDF page is wider than the screen, so the hand scrolls sideways too.
+        targetX: scrollableAncestor(event.currentTarget, "x"),
       };
       return;
     }
@@ -311,9 +314,12 @@ export function DrawingCanvas({
         return;
       }
       const delta = scrolling.lastY - event.clientY;
+      const deltaX = scrolling.lastX - event.clientX;
       scrolling.lastY = event.clientY;
+      scrolling.lastX = event.clientX;
       if (scrolling.target) scrolling.target.scrollBy(0, delta);
       else window.scrollBy(0, delta);
+      if (scrolling.targetX) scrolling.targetX.scrollBy(deltaX, 0);
       return;
     }
 

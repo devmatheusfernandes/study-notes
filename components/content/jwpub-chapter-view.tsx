@@ -10,7 +10,8 @@ import { JW_INDENT_CSS, JW_INDENT_SCOPE } from "@/lib/jwpub/indent";
 import { queueSaveAnswer } from "@/lib/offline/jwlibrary-mutations";
 import type { ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
-import { wrapTokenRange, getTokenRangeForSelection, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
+import { getTokenRangeForSelection } from "@/lib/jwlibrary/paragraph-tokens";
+import { drawParagraphHighlights } from "@/lib/jwlibrary/draw-highlights";
 
 interface JwpubChapterViewProps {
   html: string;
@@ -395,79 +396,13 @@ export function JwpubChapterView({
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [html, publicationId, documentId, answers]);
 
-  // Draws imported JW Library highlights (Fase 2.5) — see
-  // lib/jwlibrary/paragraph-tokens.ts for the word-token → DOM Range mapping
-  // — plus a margin marker for every highlight that has a note attached,
-  // matching the real app's own indicator: positioned at the exact line the
-  // highlight *starts* on (read off the just-created <mark>'s own position,
-  // not just the top of the paragraph) and colored to match that specific
-  // highlight, since one paragraph can carry several differently-colored
-  // ones. Reuses `data-jwlibrary-note-id`, which the click handler above
-  // already listens for, so the marker is clickable for free.
+  // Draws imported JW Library highlights (Fase 2.5) plus a margin square for
+  // every one that has a note attached — see lib/jwlibrary/draw-highlights.ts,
+  // shared with the appendix/Perspicaz/Guia readers.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    // Always unwrap first — this effect re-runs whenever `highlights`
-    // changes (color edit, note attached/detached, add/remove), but the DOM
-    // built by dangerouslySetInnerHTML isn't reset just because that array
-    // changed, so redrawing without unwrapping would nest marks instead of
-    // replacing them.
-    unwrapHighlightMarks(container);
-    if (highlights.length === 0) return;
-
-    for (const highlight of highlights) {
-      const el = container.querySelector<HTMLElement>(`[data-pid="${highlight.pid}"]`);
-      if (!el) continue;
-
-      // A note created via "Anotar sem destaque" has no UserMark at all
-      // (colorIndex/startToken/endToken all null) — nothing to wrap, so it
-      // only gets the neutral marker below, same as this exact "no color"
-      // case in bible-chapter-view.tsx/jwpub-bible-surface.tsx.
-      if (highlight.colorIndex === null || highlight.startToken === null || highlight.endToken === null) {
-        if (!highlight.note) continue;
-        el.style.position = "relative";
-        const marker = document.createElement("span");
-        marker.className = "jwlibrary-note-marker";
-        marker.dataset.jwlibraryNoteId = highlight.note.id;
-        Object.assign(marker.style, {
-          position: "absolute",
-          left: "-14px",
-          top: "0px",
-          width: "8px",
-          height: "8px",
-          borderRadius: "2px",
-          backgroundColor: "var(--muted-foreground)",
-          cursor: "pointer",
-        });
-        el.insertBefore(marker, el.firstChild);
-        continue;
-      }
-
-      const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
-      const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
-      // Stamped so a note-less highlight's click handler can show the
-      // highlighted text itself (there's no note to display instead) —
-      // see JwlibraryHighlightNotePanel's highlightText prop.
-      if (mark) mark.dataset.jwlibraryText = mark.textContent ?? "";
-
-      if (highlight.note && mark) {
-        el.style.position = "relative";
-        const marker = document.createElement("span");
-        marker.className = "jwlibrary-note-marker";
-        marker.dataset.jwlibraryNoteId = highlight.note.id;
-        Object.assign(marker.style, {
-          position: "absolute",
-          left: "-14px",
-          top: `${mark.offsetTop}px`,
-          width: "8px",
-          height: "8px",
-          borderRadius: "2px",
-          backgroundColor: colorHex,
-          cursor: "pointer",
-        });
-        el.insertBefore(marker, el.firstChild);
-      }
-    }
+    drawParagraphHighlights(container, highlights);
   }, [html, highlights]);
 
   // Auto-scroll & Highlight matching snippet from chat RAG source

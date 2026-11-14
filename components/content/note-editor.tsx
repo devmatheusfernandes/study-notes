@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, AudioLines, ImagePlus, PenLine, Pin, Search, Share } from "lucide-react";
+import { ArrowLeft, AudioLines, ImagePlus, Maximize2, Minimize2, PenLine, Pin, Search, Share } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
+import { useFullscreen } from "@/hooks/use-fullscreen";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { SyncStatusIndicator } from "@/components/content/sync-status";
@@ -88,6 +89,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const addNote = useNotesStore((s) => s.addNote);
   const updateNote = useNotesStore((s) => s.updateNote);
   const togglePin = useNotesStore((s) => s.togglePin);
+  const fullscreen = useFullscreen();
   const saveDrawingStrokes = useNotesStore((s) => s.saveDrawingStrokes);
 
   const existing = noteId ? (notes.find((n) => n.id === noteId) ?? initialNote) : undefined;
@@ -740,6 +742,17 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                   )}
                 >
                   <AudioLines className="size-4" />
+                </button>
+              )}
+              {fullscreen.supported && (
+                <button
+                  type="button"
+                  onClick={() => void fullscreen.toggle()}
+                  aria-label={fullscreen.isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                  title={fullscreen.isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                  className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  {fullscreen.isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                 </button>
               )}
               {current && (

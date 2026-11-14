@@ -348,6 +348,8 @@ export async function getGlobalPublicationChapterContent(
 
 export interface GlobalPublicationIndexEntry {
   documentId: number;
+  /** The document's global MepsDocumentId — what a highlight or note on it is filed under. */
+  mepsDocumentId: number | null;
   title: string;
   sectionNumber: number | null;
   docClass: number | null;
@@ -387,7 +389,7 @@ export async function getGlobalPublicationIndex(
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("global_publication_chapters")
-      .select("document_id, title, section_number, doc_class")
+      .select("document_id, meps_document_id, title, section_number, doc_class")
       .eq("publication_id", pub.id)
       .order("position", { ascending: true })
       .range(from, from + PAGE - 1);
@@ -395,6 +397,7 @@ export async function getGlobalPublicationIndex(
     for (const row of data ?? []) {
       entries.push({
         documentId: row.document_id,
+        mepsDocumentId: row.meps_document_id,
         title: row.title,
         sectionNumber: row.section_number,
         docClass: row.doc_class,

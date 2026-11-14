@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getBibleAppendix, type BibleAppendix } from "@/app/(app)/bible-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { HighlightableHtml } from "./highlightable-html";
+import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
+import { documentLocation, useDocumentAnnotations, type DocumentAnnotations } from "./document-annotations";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 interface BibleAppendixContentProps {
@@ -16,7 +19,15 @@ interface BibleAppendixContentProps {
   onLoaded?: (appendix: BibleAppendix | null) => void;
   /** `page` reads at the Bible text's size; `panel` at the side panel's smaller one. */
   variant?: "page" | "panel";
+  /**
+   * From the full page: lets the user select text to highlight/annotate it. Without it (the side panel)
+   * the appendix still shows the user's highlights, and tapping a note's square opens it in place.
+   */
+  annotations?: DocumentAnnotations;
 }
+
+/** Appendices are the revised NWT's own pages, filed under its symbol and Portuguese — see documentLocation. */
+const APPENDIX_SYMBOL = "nwt";
 
 /**
  * One row of `bible_appendices`, fetched and rendered — shared by the /bible
@@ -34,6 +45,7 @@ export function BibleAppendixContent({
   onOpenAppendix,
   onLoaded,
   variant = "panel",
+  annotations,
 }: BibleAppendixContentProps) {
   const [appendix, setAppendix] = useState<BibleAppendix | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,6 +110,9 @@ export function BibleAppendixContent({
   }, [onOpenBibleRef, onOpenAppendix]);
 
   const isPage = variant === "page";
+  const articleClass =
+    (isPage ? "text-[15px] leading-relaxed sm:text-base " : "text-[13.5px] leading-relaxed ") +
+    "text-foreground/90 [&_a]:cursor-pointer [&_a]:text-accent [&_a]:underline-offset-2 [&_a:hover]:underline [&_em]:italic [&_h1]:font-heading [&_h1]:text-lg [&_header]:hidden [&_p]:my-2 [&_strong]:font-semibold [&_strong]:text-foreground [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:p-1.5 [&_th]:border [&_th]:border-border [&_th]:p-1.5";
 
   return (
     <div ref={contentRef}>
@@ -115,15 +130,63 @@ export function BibleAppendixContent({
               {appendix.title}
             </h2>
           )}
-          <div
-            className={
-              (isPage ? "text-[15px] leading-relaxed sm:text-base " : "text-[13.5px] leading-relaxed ") +
-              "text-foreground/90 [&_a]:cursor-pointer [&_a]:text-accent [&_a]:underline-offset-2 [&_a:hover]:underline [&_em]:italic [&_h1]:font-heading [&_h1]:text-lg [&_header]:hidden [&_p]:my-2 [&_strong]:font-semibold [&_strong]:text-foreground [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:p-1.5 [&_th]:border [&_th]:border-border [&_th]:p-1.5"
-            }
-            dangerouslySetInnerHTML={{ __html: appendix.contentHtml }}
-          />
+          {annotations ? (
+            <HighlightableHtml html={appendix.contentHtml} className={articleClass} {...annotations.htmlProps} />
+          ) : (
+            <SidebarHighlightedHtml
+              html={appendix.contentHtml}
+              mepsDocumentId={mepsDocumentId}
+              className={articleClass}
+            />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+interface BibleAppendixPageProps {
+  mepsDocumentId: number;
+  /** The host's own page header (it owns search, back, etc.) — told the appendix's title once it has loaded. */
+  renderHeader: (title: string | null) => ReactNode;
+  onOpenBibleRef: (bookOrder: number, chapter: number, verse: number) => void;
+  onOpenAppendix: (mepsDocumentId: number) => void;
+}
+
+/**
+ * The /bible reader's full appendix page, with the highlight layer: select text
+ * to highlight or annotate it, tap a note's square to read it in the side panel.
+ * The panels are flex siblings of the page column (that is what a side panel is),
+ * so the layout lives here rather than in the host.
+ */
+export function BibleAppendixPage({ mepsDocumentId, renderHeader, onOpenBibleRef, onOpenAppendix }: BibleAppendixPageProps) {
+  const [title, setTitle] = useState<string | null>(null);
+  const annotations = useDocumentAnnotations(
+    documentLocation(APPENDIX_SYMBOL, mepsDocumentId),
+    title ?? "Apêndice"
+  );
+
+  return (
+    <div className="flex min-h-dvh w-full flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        {renderHeader(title)}
+        <div className="flex-1 px-4 py-6 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl">
+            <BibleAppendixContent
+              key={mepsDocumentId}
+              variant="page"
+              mepsDocumentId={mepsDocumentId}
+              annotations={annotations}
+              onLoaded={(appendix) =>
+                setTitle(appendix ? (appendix.section === "header" ? appendix.title : `Apêndice ${appendix.letter}`) : null)
+              }
+              onOpenAppendix={onOpenAppendix}
+              onOpenBibleRef={onOpenBibleRef}
+            />
+          </div>
+        </div>
+      </div>
+      {annotations.panels}
     </div>
   );
 }

@@ -551,6 +551,7 @@ export function JwpubReader({
       publicationTitle: resolved.publicationTitle,
       chapterTitle: resolved.chapterTitle,
       documentId: resolved.documentId,
+      mepsDocumentId: resolved.mepsDocumentId,
       pid,
     });
     if (resolved.isGlobal) {
@@ -645,6 +646,7 @@ export function JwpubReader({
         publicationTitle: resolved.publicationTitle,
         chapterTitle: resolved.chapterTitle,
         documentId: resolved.documentId,
+        mepsDocumentId: resolved.mepsDocumentId,
       });
       void loadChapter(resolved.publicationId, resolved.documentId).then((chapterResult) => {
         setReferenceHtml(chapterResult.html ?? null);

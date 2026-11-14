@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { getWolArticle } from "@/app/(app)/wol-lookup-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 export interface JwpubReferenceTarget {
@@ -19,6 +20,8 @@ export interface JwpubReferenceTarget {
   publicationTitle: string;
   chapterTitle: string;
   documentId: number;
+  /** The document's global MepsDocumentId — lets the panel show the user's highlights and notes on it. */
+  mepsDocumentId?: number | null;
   /** The cited paragraph, if the reference carried one — scrolled to and briefly highlighted once the content renders. Best-effort: a miss just means no scroll, not a bug. */
   pid?: string;
 }
@@ -190,6 +193,7 @@ function Body({
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
+  const safeHtml = useMemo(() => (html ? sanitizeChapterHtml(html) : ""), [html]);
 
   // Same scroll-and-flash treatment JwpubChapterView gives its own `?pid=`
   // deep link — best-effort, since the cited paragraph number isn't
@@ -234,11 +238,14 @@ function Body({
           Abrir publicação completa
         </Button>
       )}
-      <div
-        ref={containerRef}
-        className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
-        dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(html) }}
-      />
+      <div ref={containerRef}>
+        {/* The user's own highlights, with a square in the margin for each note — tapping one opens it right here (see SidebarHighlightedHtml). */}
+        <SidebarHighlightedHtml
+          html={safeHtml}
+          mepsDocumentId={target.mepsDocumentId ?? null}
+          className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
+        />
+      </div>
     </div>
   );
 }

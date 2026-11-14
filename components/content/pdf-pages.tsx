@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
@@ -13,6 +13,13 @@ const PAPER_APPEARANCE = "light" as const;
 
 /** A canvas bigger than this (device pixels) is refused by some mobile browsers, which then paint a blank page. */
 const MAX_PAGE_PIXELS = 8_000_000;
+
+export const MIN_ZOOM = 1;
+export const MAX_ZOOM = 3;
+export const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+
+/** Widest a page gets at 100% - a sheet of paper, not a wall. */
+const MAX_PAGE_CSS_WIDTH = 896;
 
 export interface PdfInk {
   active: boolean;
@@ -30,6 +37,9 @@ interface PdfPagesProps {
   initialPage?: number;
   strokes: Stroke[];
   ink: PdfInk;
+  /** 1 fits the page to the screen; above that the pages grow and the view scrolls sideways. */
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
   /** Fired when the document can't be opened — the reader shows its own retry/"open in new tab" fallback. */
   onError: (message: string) => void;
 }
@@ -41,7 +51,7 @@ interface PdfPagesProps {
  * relying on the browser's own viewer only ever worked on desktop. Drawing the
  * pages ourselves also gives each one a surface to write on.
  */
-export function PdfPages({ url, initialPage, strokes, ink, onError }: PdfPagesProps) {
+export function PdfPages({ url, initialPage, strokes, ink, zoom, onZoomChange, onError }: PdfPagesProps) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
 
@@ -93,10 +103,95 @@ export function PdfPages({ url, initialPage, strokes, ink, onError }: PdfPagesPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
 
+  // Zoom: a zoomed page is wider than the screen, so the pages live in a column
+  // whose width is `zoom` times the fitted one, inside a sideways-scrolling frame.
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [viewWidth, setViewWidth] = useState(0);
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const observer = new ResizeObserver(() => setViewWidth(scroller.clientWidth));
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [doc]);
+
+  const pad = viewWidth >= 640 ? 24 : 8;
+  const fittedWidth = Math.min(Math.max(viewWidth - pad * 2, 0), MAX_PAGE_CSS_WIDTH);
+  const columnWidth = fittedWidth * zoom;
+
+  // Zooming keeps whatever was in the middle of the screen in the middle.
+  const previousZoom = useRef(zoom);
+  useLayoutEffect(() => {
+    const before = previousZoom.current;
+    previousZoom.current = zoom;
+    if (before === zoom) return;
+    const ratio = zoom / before;
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollLeft = (scroller.scrollLeft + scroller.clientWidth / 2) * ratio - scroller.clientWidth / 2;
+    const half = window.innerHeight / 2;
+    window.scrollTo(0, (window.scrollY + half) * ratio - half);
+  }, [zoom]);
+
+  // Pinch with two fingers, or ctrl + wheel (also what a laptop trackpad pinch sends).
+  const zoomRef = useRef(zoom);
+  useEffect(() => {
+    zoomRef.current = zoom;
+  });
+  const onZoomRef = useRef(onZoomChange);
+  useEffect(() => {
+    onZoomRef.current = onZoomChange;
+  });
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    let startDistance = 0;
+    let startZoom = 1;
+    const distance = (touches: TouchList) =>
+      Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+    function onTouchStart(event: TouchEvent) {
+      if (event.touches.length === 2) {
+        startDistance = distance(event.touches);
+        startZoom = zoomRef.current;
+      }
+    }
+    function onTouchMove(event: TouchEvent) {
+      if (event.touches.length !== 2 || startDistance === 0) return;
+      event.preventDefault();
+      onZoomRef.current(clampZoom(startZoom * (distance(event.touches) / startDistance)));
+    }
+    function onTouchEnd(event: TouchEvent) {
+      if (event.touches.length < 2) startDistance = 0;
+    }
+    function onWheel(event: WheelEvent) {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      onZoomRef.current(clampZoom(zoomRef.current * Math.exp(-event.deltaY * 0.01)));
+    }
+
+    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+    scroller.addEventListener("touchmove", onTouchMove, { passive: false });
+    scroller.addEventListener("touchend", onTouchEnd);
+    scroller.addEventListener("touchcancel", onTouchEnd);
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      scroller.removeEventListener("touchstart", onTouchStart);
+      scroller.removeEventListener("touchmove", onTouchMove);
+      scroller.removeEventListener("touchend", onTouchEnd);
+      scroller.removeEventListener("touchcancel", onTouchEnd);
+      scroller.removeEventListener("wheel", onWheel);
+    };
+  }, [doc]);
+
   if (!doc) return <PdfSkeleton progress={progress} />;
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-2 py-4 sm:px-6">
+    // The browser's own pinch would zoom the whole app; this frame handles it instead.
+    <div ref={scrollerRef} className="w-full overflow-x-auto overscroll-x-contain" style={{ touchAction: "pan-x pan-y" }}>
+      <div
+        className="flex flex-col gap-4 py-4"
+        style={{ width: columnWidth > 0 ? columnWidth + pad * 2 : undefined, paddingInline: pad, marginInline: "auto" }}
+      >
       {Array.from({ length: doc.numPages }, (_, index) => (
         <PdfPage
           key={index + 1}
@@ -107,6 +202,7 @@ export function PdfPages({ url, initialPage, strokes, ink, onError }: PdfPagesPr
           ink={ink}
         />
       ))}
+      </div>
     </div>
   );
 }
@@ -152,9 +248,26 @@ const PdfPage = memo(function PdfPage({ doc, pageNumber, scrollTo, strokes: allS
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const observer = new ResizeObserver(() => setWidth(Math.round(host.getBoundingClientRect().width)));
+    // The first measurement lands at once; later ones (pinching, zoom buttons) wait for the
+    // gesture to settle so the page isn't re-rasterised on every frame - meanwhile the
+    // existing pixels are just stretched.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let measured = false;
+    const observer = new ResizeObserver(() => {
+      const next = Math.round(host.getBoundingClientRect().width);
+      if (!measured) {
+        measured = true;
+        setWidth(next);
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setWidth(next), 160);
+    });
     observer.observe(host);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -169,7 +282,8 @@ const PdfPage = memo(function PdfPage({ doc, pageNumber, scrollTo, strokes: allS
       // Give the pixels back; the page re-renders when it scrolls into range.
       canvas.width = 0;
       canvas.height = 0;
-      return;
+      // Runs when the page comes back into range, by which point the canvas is blank.
+      return () => setRendered(false);
     }
 
     let cancelled = false;
@@ -187,11 +301,18 @@ const PdfPage = memo(function PdfPage({ doc, pageNumber, scrollTo, strokes: allS
         const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(MAX_PAGE_PIXELS / area)));
         const viewport = page.getViewport({ scale: cssScale * dpr });
 
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        task = page.render({ canvas, viewport });
+        // Drawn off screen and copied over in one go: resizing the visible canvas
+        // clears it, which made the page flash to its skeleton on every zoom.
+        const offscreen = document.createElement("canvas");
+        offscreen.width = Math.floor(viewport.width);
+        offscreen.height = Math.floor(viewport.height);
+        task = page.render({ canvas: offscreen, viewport });
         await task.promise;
-        if (!cancelled) setRendered(true);
+        if (cancelled) return;
+        canvas.width = offscreen.width;
+        canvas.height = offscreen.height;
+        canvas.getContext("2d")?.drawImage(offscreen, 0, 0);
+        setRendered(true);
       } catch (error) {
         // A cancelled render (the page scrolled away, or the width changed
         // mid-render) rejects on purpose; anything else leaves the skeleton up.
@@ -204,9 +325,6 @@ const PdfPage = memo(function PdfPage({ doc, pageNumber, scrollTo, strokes: allS
     return () => {
       cancelled = true;
       task?.cancel();
-      // Resizing (or leaving the viewport) wipes the canvas, so the skeleton
-      // has to come back until the next render lands.
-      setRendered(false);
     };
   }, [doc, pageNumber, near, width]);
 
@@ -215,7 +333,12 @@ const PdfPage = memo(function PdfPage({ doc, pageNumber, scrollTo, strokes: allS
       ref={hostRef}
       data-pdf-page={pageNumber}
       style={{ aspectRatio: aspect }}
-      className="relative w-full overflow-hidden rounded-lg bg-white shadow-[0_8px_28px_var(--shadow)] ring-1 ring-border"
+      // Square corners, like a printed sheet. Paper is white once drawn; until then it
+      // follows the theme so the skeleton doesn't glare in dark mode.
+      className={cn(
+        "relative w-full overflow-hidden shadow-[0_8px_28px_var(--shadow)] ring-1 ring-border",
+        rendered ? "bg-white" : "bg-card"
+      )}
     >
       <canvas ref={canvasRef} className={cn("absolute inset-0 size-full transition-opacity duration-300", rendered ? "opacity-100" : "opacity-0")} />
 
@@ -246,17 +369,17 @@ const PdfPage = memo(function PdfPage({ doc, pageNumber, scrollTo, strokes: allS
 /** Placeholder lines standing in for a page's text until its pixels arrive. */
 function PageShimmer() {
   return (
-    <div className="absolute inset-0 flex flex-col gap-3 bg-white p-[8%]" aria-hidden>
-      <Skeleton className="h-5 w-2/5 bg-black/10" />
+    <div className="absolute inset-0 flex flex-col gap-3 bg-card p-[8%]" aria-hidden>
+      <Skeleton className="h-5 w-2/5 rounded-md bg-foreground/10" />
       <div className="flex flex-col gap-2 pt-4">
         {[96, 100, 92, 98, 70, 100, 94, 88, 100, 60].map((w, i) => (
-          <Skeleton key={i} className="h-2.5 bg-black/[0.07]" style={{ width: `${w}%` }} />
+          <Skeleton key={i} className="h-2.5 rounded-sm bg-foreground/[0.07]" style={{ width: `${w}%` }} />
         ))}
       </div>
-      <Skeleton className="mt-3 h-[22%] w-full bg-black/[0.07]" />
+      <Skeleton className="mt-3 h-[22%] w-full rounded-sm bg-foreground/[0.07]" />
       <div className="flex flex-col gap-2 pt-2">
         {[100, 90, 97, 64].map((w, i) => (
-          <Skeleton key={i} className="h-2.5 bg-black/[0.07]" style={{ width: `${w}%` }} />
+          <Skeleton key={i} className="h-2.5 rounded-sm bg-foreground/[0.07]" style={{ width: `${w}%` }} />
         ))}
       </div>
     </div>
@@ -270,14 +393,14 @@ export function PdfSkeleton({ progress }: { progress: number | null }) {
       <div className="flex items-center gap-3 px-1">
         <Progress value={progress === null ? null : Math.round(progress * 100)} className="h-1.5 flex-1" />
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-          {progress === null ? "Abrindo…" : `${Math.round(progress * 100)}%`}
+          {progress === null ? null : `${Math.round(progress * 100)}%`}
         </span>
       </div>
       {[0, 1].map((i) => (
         <div
           key={i}
           style={{ aspectRatio: 1 / 1.4142 }}
-          className="relative w-full overflow-hidden rounded-lg bg-white shadow-[0_8px_28px_var(--shadow)] ring-1 ring-border"
+          className="relative w-full overflow-hidden bg-card shadow-[0_8px_28px_var(--shadow)] ring-1 ring-border"
         >
           <PageShimmer />
         </div>

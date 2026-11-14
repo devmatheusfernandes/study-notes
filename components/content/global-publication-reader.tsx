@@ -24,6 +24,8 @@ import { JwpubExtractSurface, type JwpubExtractItem } from "./jwpub-extract-surf
 import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
 import { JwpubChapterSkeleton } from "./jwpub-chapter-skeleton";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
+import { HighlightableHtml } from "./highlightable-html";
+import { documentLocation, useDocumentAnnotations } from "./document-annotations";
 
 export type GlobalPublicationSymbol = "it" | "rsg";
 
@@ -178,6 +180,9 @@ export function GlobalPublicationReader({
     <PublicationArticle
       key={documentId}
       header={header}
+      symbol={symbol}
+      mepsDocumentId={activeEntry?.mepsDocumentId ?? null}
+      articleTitle={title}
       publicationId={index?.publicationId ?? null}
       documentId={documentId}
       onOpenDocument={openDocument}
@@ -330,6 +335,9 @@ function PublicationIndex({
 
 function PublicationArticle({
   header,
+  symbol,
+  mepsDocumentId,
+  articleTitle,
   publicationId,
   documentId,
   onOpenDocument,
@@ -337,6 +345,10 @@ function PublicationArticle({
   onOpenBibleVerse,
 }: {
   header: ReactNode;
+  symbol: GlobalPublicationSymbol;
+  /** The article's global MepsDocumentId — null until the index has loaded. Highlights are filed under it. */
+  mepsDocumentId: number | null;
+  articleTitle: string;
   publicationId: string | null;
   documentId: number;
   onOpenDocument: (documentId: number) => void;
@@ -348,6 +360,10 @@ function PublicationArticle({
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<SidePanel | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const annotations = useDocumentAnnotations(
+    mepsDocumentId !== null ? documentLocation(symbol, mepsDocumentId) : null,
+    `${PUBLICATIONS[symbol].label} — ${articleTitle}`
+  );
 
   useEffect(() => {
     if (!publicationId || !cacheKey || contentCache.has(cacheKey)) return;
@@ -389,6 +405,7 @@ function PublicationArticle({
           publicationTitle: hit.publicationTitle,
           chapterTitle: hit.chapterTitle,
           documentId: hit.documentId,
+          mepsDocumentId: hit.mepsDocumentId,
           pid,
         };
         if (hit.isGlobal) {
@@ -475,11 +492,19 @@ function PublicationArticle({
             ) : (
               // Trusted markup: rewritten and run through DOMPurify at import
               // time (GlobalPublicationUploadCard), before ever being stored.
-              <div ref={contentRef} className={ARTICLE_CLASS} dangerouslySetInnerHTML={{ __html: html }} />
+              <div ref={contentRef}>
+                <HighlightableHtml
+                  html={html}
+                  className={ARTICLE_CLASS}
+                  {...(mepsDocumentId !== null ? annotations.htmlProps : { highlights: [] })}
+                />
+              </div>
             )}
           </div>
         </div>
       </div>
+
+      {annotations.panels}
 
       <JwpubExtractSurface
         open={panel?.kind === "extract"}

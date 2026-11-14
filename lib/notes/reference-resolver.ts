@@ -40,6 +40,7 @@ export interface ResolvedPublicationTarget {
   publicationTitle: string;
   chapterTitle: string;
   documentId: number;
+  mepsDocumentId?: number | null;
 }
 
 /** A video, in the shape NoteVideoSurface's `video` wants. */
@@ -189,6 +190,7 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
         publicationTitle: hit.publicationTitle,
         chapterTitle: hit.chapterTitle,
         documentId: hit.documentId,
+        mepsDocumentId: hit.mepsDocumentId,
       },
       html,
     };

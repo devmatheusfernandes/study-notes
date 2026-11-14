@@ -63,6 +63,7 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
       publicationTitle: resolved.publicationTitle,
       chapterTitle: resolved.chapterTitle,
       documentId: resolved.documentId,
+      mepsDocumentId: resolved.mepsDocumentId,
     });
     if (resolved.isGlobal) {
       setReferenceHtml(resolved.contentHtml ?? null);

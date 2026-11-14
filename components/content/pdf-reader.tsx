@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, ExternalLink, FileText, PenLine, RefreshCw } from "lucide-react";
+import { ArrowLeft, FileText, Maximize2, Minimize2, PenLine, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { notify } from "@/components/ui/toaster";
+import { useFullscreen } from "@/hooks/use-fullscreen";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { DrawingToolbar } from "@/components/content/drawing-toolbar";
-import { PdfPages, PdfSkeleton } from "@/components/content/pdf-pages";
+import { PdfPages, PdfSkeleton, clampZoom, MAX_ZOOM, MIN_ZOOM } from "@/components/content/pdf-pages";
 import {
   INK_COLORS,
   HIGHLIGHTER_SIZE,
@@ -135,6 +136,8 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
   const penOnly = usePreferencesStore((s) => s.penOnly);
   const setPenOnly = usePreferencesStore((s) => s.setPenOnly);
   const [penMode, setPenMode] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const fullscreen = useFullscreen();
   const [strokes, setStrokes] = useState<Stroke[]>(() => parseDoc(initialDrawing?.strokes).strokes);
   const [past, setPast] = useState<Stroke[][]>([]);
   const [future, setFuture] = useState<Stroke[][]>([]);
@@ -267,22 +270,51 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
             </Button>
           )}
 
-          {url && (
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0"
-            >
+          {url && !error && (
+            <div className="flex shrink-0 items-center">
               <Button
                 variant="ghost"
                 size="sm"
-                leftIcon={<ExternalLink className="size-4" />}
-                className="max-sm:px-2"
+                aria-label="Diminuir zoom"
+                disabled={zoom <= MIN_ZOOM}
+                onClick={() => setZoom((z) => clampZoom(Math.round((z - 0.25) * 100) / 100))}
+                className="px-2"
               >
-                <span className="hidden sm:inline">Abrir em nova aba</span>
+                <ZoomOut className="size-4" />
               </Button>
-            </a>
+              <button
+                type="button"
+                aria-label="Voltar ao zoom ajustado"
+                title="Voltar ao zoom ajustado"
+                onClick={() => setZoom(1)}
+                className="min-w-11 rounded-full px-1 py-1 text-center font-mono text-[11px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Aumentar zoom"
+                disabled={zoom >= MAX_ZOOM}
+                onClick={() => setZoom((z) => clampZoom(Math.round((z + 0.25) * 100) / 100))}
+                className="px-2"
+              >
+                <ZoomIn className="size-4" />
+              </Button>
+            </div>
+          )}
+
+          {fullscreen.supported && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={fullscreen.isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+              title={fullscreen.isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+              onClick={() => void fullscreen.toggle()}
+              className="shrink-0 px-2"
+            >
+              {fullscreen.isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
           )}
         </header>
 
@@ -331,6 +363,8 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
               initialPage={initialPage}
               strokes={strokes}
               ink={ink}
+              zoom={zoom}
+              onZoomChange={setZoom}
               onError={(message) => setError(`Não foi possível exibir o PDF. ${message}`)}
             />
           )}

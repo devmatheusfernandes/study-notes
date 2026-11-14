@@ -753,7 +753,7 @@ export interface ParagraphHighlight {
  * for these instead of a colored `<mark>` (there's no span to wrap).
  */
 export async function getChapterHighlights(
-  symbol: string,
+  symbol: string | null,
   mepsLanguage: number | null,
   issueTagNumber: number | null,
   mepsDocumentId: number | null
@@ -762,29 +762,32 @@ export async function getChapterHighlights(
   if (!user) return { error: "Sessão expirada." };
   if (mepsDocumentId === null) return { highlights: [] };
 
+  // A null `symbol` means "match the document alone" (see getDocumentHighlights):
+  // a MepsDocumentId is unique on its own, so language/issue add nothing there.
   let markQuery = supabase
     .from("jwlibrary_usermarks")
     .select("id, color_index")
-    .eq("key_symbol", symbol)
     .eq("meps_document_id", mepsDocumentId);
-  markQuery =
-    mepsLanguage === null ? markQuery.is("meps_language", null) : markQuery.eq("meps_language", mepsLanguage);
-  markQuery =
-    issueTagNumber === null ? markQuery.is("issue_tag_number", null) : markQuery.eq("issue_tag_number", issueTagNumber);
-
   let looseNoteQuery = supabase
     .from("jwlibrary_notes")
     .select("id, block_identifier, title, content")
-    .eq("key_symbol", symbol)
     .eq("meps_document_id", mepsDocumentId)
     .eq("block_type", 1)
     .is("user_mark_id", null);
-  looseNoteQuery =
-    mepsLanguage === null ? looseNoteQuery.is("meps_language", null) : looseNoteQuery.eq("meps_language", mepsLanguage);
-  looseNoteQuery =
-    issueTagNumber === null
-      ? looseNoteQuery.is("issue_tag_number", null)
-      : looseNoteQuery.eq("issue_tag_number", issueTagNumber);
+  if (symbol !== null) {
+    markQuery = markQuery.eq("key_symbol", symbol);
+    markQuery =
+      mepsLanguage === null ? markQuery.is("meps_language", null) : markQuery.eq("meps_language", mepsLanguage);
+    markQuery =
+      issueTagNumber === null ? markQuery.is("issue_tag_number", null) : markQuery.eq("issue_tag_number", issueTagNumber);
+    looseNoteQuery = looseNoteQuery.eq("key_symbol", symbol);
+    looseNoteQuery =
+      mepsLanguage === null ? looseNoteQuery.is("meps_language", null) : looseNoteQuery.eq("meps_language", mepsLanguage);
+    looseNoteQuery =
+      issueTagNumber === null
+        ? looseNoteQuery.is("issue_tag_number", null)
+        : looseNoteQuery.eq("issue_tag_number", issueTagNumber);
+  }
 
   const [{ data: usermarks, error }, { data: looseNotes, error: looseNotesError }] = await Promise.all([
     markQuery,
@@ -841,6 +844,19 @@ export async function getChapterHighlights(
       ...looseNoteHighlights,
     ],
   };
+}
+
+/**
+ * Highlights and notes on one document, found by its MepsDocumentId alone.
+ * That id is unique across the whole catalogue, so a reference panel that only
+ * knows "this is document 1001070202" (an appendix, a Perspicaz article, a
+ * chapter cited from elsewhere) can show the user's marks without having to
+ * guess which publication symbol/language/issue they were saved under.
+ */
+export async function getDocumentHighlights(
+  mepsDocumentId: number
+): Promise<{ highlights?: ParagraphHighlight[]; error?: string }> {
+  return getChapterHighlights(null, null, null, mepsDocumentId);
 }
 
 export interface PublicationHighlight extends ParagraphHighlight {
