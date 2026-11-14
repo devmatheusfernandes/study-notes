@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Maximize2, Minimize2, PenLine, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, FileText, Maximize2, Minimize2, PenLine, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { notify } from "@/components/ui/toaster";
 import { useFullscreen } from "@/hooks/use-fullscreen";
+import { useHideOnScroll } from "@/hooks/use-hide-on-scroll";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { DrawingToolbar } from "@/components/content/drawing-toolbar";
-import { PdfPages, PdfSkeleton, clampZoom, MAX_ZOOM, MIN_ZOOM } from "@/components/content/pdf-pages";
+import { PdfPages, PdfSkeleton } from "@/components/content/pdf-pages";
 import {
   INK_COLORS,
   HIGHLIGHTER_SIZE,
@@ -138,6 +139,8 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
   const [penMode, setPenMode] = useState(false);
   const [zoom, setZoom] = useState(1);
   const fullscreen = useFullscreen();
+  // In fullscreen the bars tuck away on scrolling down and return on scrolling up; while writing they stay put.
+  const barsHidden = useHideOnScroll(fullscreen.isFullscreen && !penMode);
   const [strokes, setStrokes] = useState<Stroke[]>(() => parseDoc(initialDrawing?.strokes).strokes);
   const [past, setPast] = useState<Stroke[][]>([]);
   const [future, setFuture] = useState<Stroke[][]>([]);
@@ -223,7 +226,10 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
         transition={{ duration: 0.3, ease: "easeOut" }}
         className="flex min-w-0 flex-1 flex-col"
       >
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6">
+        <div
+          className={`sticky top-0 z-20 transition-transform duration-200 ${barsHidden ? "-translate-y-full" : "translate-y-0"}`}
+        >
+        <header className="flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6">
           <Button
             variant="ghost"
             size="sm"
@@ -270,40 +276,6 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
             </Button>
           )}
 
-          {url && !error && (
-            <div className="flex shrink-0 items-center">
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label="Diminuir zoom"
-                disabled={zoom <= MIN_ZOOM}
-                onClick={() => setZoom((z) => clampZoom(Math.round((z - 0.25) * 100) / 100))}
-                className="px-2"
-              >
-                <ZoomOut className="size-4" />
-              </Button>
-              <button
-                type="button"
-                aria-label="Voltar ao zoom ajustado"
-                title="Voltar ao zoom ajustado"
-                onClick={() => setZoom(1)}
-                className="min-w-11 rounded-full px-1 py-1 text-center font-mono text-[11px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                {Math.round(zoom * 100)}%
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-label="Aumentar zoom"
-                disabled={zoom >= MAX_ZOOM}
-                onClick={() => setZoom((z) => clampZoom(Math.round((z + 0.25) * 100) / 100))}
-                className="px-2"
-              >
-                <ZoomIn className="size-4" />
-              </Button>
-            </div>
-          )}
-
           {fullscreen.supported && (
             <Button
               variant="ghost"
@@ -319,7 +291,7 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
         </header>
 
         {penMode && url && !error && (
-          <div className="sticky top-14 z-20 flex items-center border-b border-border bg-background/85 px-4 py-1.5 backdrop-blur-md sm:px-6">
+          <div className="flex items-center border-b border-border bg-background/85 px-4 py-1.5 backdrop-blur-md sm:px-6">
             <DrawingToolbar
               tool={tool}
               color={inkColor}
@@ -338,6 +310,7 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
             />
           </div>
         )}
+        </div>
 
         <div className="flex flex-1 flex-col">
           {isLoading ? (

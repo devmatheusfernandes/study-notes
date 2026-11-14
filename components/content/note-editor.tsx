@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
 import { useFullscreen } from "@/hooks/use-fullscreen";
+import { useHideOnScroll } from "@/hooks/use-hide-on-scroll";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { SyncStatusIndicator } from "@/components/content/sync-status";
@@ -131,6 +132,8 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // Any note can carry ink over its text — there is no separate "drawing note"
   // type, the same way Samsung Notes lets one page hold both.
   const [penMode, setPenMode] = useState(false);
+  // In fullscreen the bars tuck away on scrolling down and return on scrolling up; while writing they stay put.
+  const barsHidden = useHideOnScroll(fullscreen.isFullscreen && !penMode);
   const [strokes, setStrokes] = useState<Stroke[]>(() => parseDoc(initialDrawing?.strokes).strokes);
   const [past, setPast] = useState<Stroke[][]>([]);
   const [future, setFuture] = useState<Stroke[][]>([]);
@@ -600,7 +603,12 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             which has to stay reachable while writing down a long note. The
             player rides along in the same block so it never has to guess the
             header's height. */}
-        <div className="sticky top-0 z-20 bg-background/85 backdrop-blur-md">
+        <div
+          className={cn(
+            "sticky top-0 z-20 bg-background/85 backdrop-blur-md transition-transform duration-200",
+            barsHidden ? "-translate-y-full" : "translate-y-0"
+          )}
+        >
           <header className="flex items-center gap-2 px-4 py-2 sm:px-6">
             <Button
               variant="ghost"

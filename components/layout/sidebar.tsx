@@ -35,8 +35,9 @@ export function Sidebar() {
           every ancestor's overflow and on the page's own scroll, and on the
           Bible screen it scrolled away with the content. This spacer holds the
           sidebar's column in the flex row so the content keeps its offset. */}
-      <div aria-hidden className={cn("hidden shrink-0 transition-[width] duration-200 md:block", width)} />
+      <div aria-hidden data-app-sidebar className={cn("hidden shrink-0 transition-[width] duration-200 md:block", width)} />
       <aside
+        data-app-sidebar
         // No visible collapse/expand button anymore — the sidebar itself is
         // the toggle target instead. `e.target === e.currentTarget` only fires
         // for clicks that land on the aside's own empty space (the gaps

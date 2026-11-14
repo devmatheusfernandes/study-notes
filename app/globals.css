@@ -381,3 +381,9 @@ input[type="search"]::-webkit-search-decoration {
   background-color: color-mix(in oklab, var(--primary) 55%, transparent);
   color: var(--foreground);
 }
+
+
+/* Tela cheia (leitor de PDF / editor de nota): o menu lateral some junto com a barra do navegador. */
+html[data-immersive] [data-app-sidebar] {
+  display: none !important;
+}

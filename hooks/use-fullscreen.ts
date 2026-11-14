@@ -14,12 +14,20 @@ export function useFullscreen() {
   const [supported, setSupported] = useState(false);
 
   useEffect(() => {
-    const sync = () => setIsFullscreen(document.fullscreenElement !== null);
+    const sync = () => {
+      const on = document.fullscreenElement !== null;
+      setIsFullscreen(on);
+      // The app's sidebar hides itself on this flag (see globals.css).
+      document.documentElement.toggleAttribute("data-immersive", on);
+    };
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSupported(typeof document.documentElement.requestFullscreen === "function");
     sync();
     document.addEventListener("fullscreenchange", sync);
-    return () => document.removeEventListener("fullscreenchange", sync);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.documentElement.removeAttribute("data-immersive");
+    };
   }, []);
 
   const toggle = useCallback(async () => {
