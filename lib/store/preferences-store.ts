@@ -24,7 +24,8 @@ export const usePreferencesStore = create<PreferencesStore>()(
       viewMode: "grid",
       jwlibraryViewMode: "list",
       selectedSourceFilters: ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"],
-      penOnly: false,
+      // On by default: a stylus is the common reason to open the pen at all, and with it off a resting palm draws.
+      penOnly: true,
 
       setViewMode: (viewMode) => {
         set({ viewMode });
@@ -47,6 +48,12 @@ export const usePreferencesStore = create<PreferencesStore>()(
         }));
       },
     }),
-    { name: "study-notes:preferences", skipHydration: true }
+    {
+      name: "study-notes:preferences",
+      skipHydration: true,
+      // v1 flips the default to pen-only; a device that stored the old `false` is carried over too.
+      version: 1,
+      migrate: (persisted) => ({ ...(persisted as object), penOnly: true }),
+    }
   )
 );
