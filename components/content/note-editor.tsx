@@ -615,7 +615,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               size="sm"
               leftIcon={<ArrowLeft />}
               onClick={() => void leaveNote()}
-              className={cn(penMode && "max-sm:px-2")}
+              className={cn("shrink-0", penMode && "max-sm:px-2")}
             >
               <span className={cn(penMode && "max-sm:hidden")}>Voltar</span>
             </Button>
@@ -667,7 +667,17 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               />
             )}
 
-            <div className={cn("flex shrink-0 items-center gap-1", !penMode && "ml-auto")}>
+            {/* Out of pen mode there are too many buttons for a phone: this
+                group scrolls sideways on its own (Voltar stays put) instead of
+                widening the page. */}
+            <div
+              className={cn(
+                "flex items-center gap-1 [&>*]:shrink-0",
+                penMode
+                  ? "shrink-0"
+                  : "ml-auto min-w-0 overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              )}
+            >
               {/* Sharing and image insert belong to typing — while the pen is
                   out they'd only crowd the toolbar beside them. */}
               {!penMode && (
