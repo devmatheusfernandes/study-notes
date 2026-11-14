@@ -5,6 +5,7 @@ import { useNotesStore } from "@/lib/store/notes-store";
 import { useLockStore } from "@/lib/store/lock-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import { deleteOfflineDatabase } from "@/lib/offline/idb";
+import { forgetThisDevice } from "@/lib/offline/device-inventory";
 
 const SYNC_GRACE_MS = 4000;
 
@@ -28,6 +29,9 @@ export async function signOutAndWipeLocalData() {
   } catch {
     // Offline or failing — sign out anyway; the wipe below is the point.
   }
+
+  // Still signed in here, which the call needs; the downloads below are about to be wiped.
+  await Promise.race([forgetThisDevice(), new Promise((r) => setTimeout(r, 2000))]);
 
   // The in-memory store survives a client-side redirect (no reload), and the next
   // account to sign in would merge with it — empty it before wiping storage.

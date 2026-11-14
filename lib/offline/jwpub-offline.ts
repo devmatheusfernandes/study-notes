@@ -16,6 +16,7 @@ import {
   idbPutMany,
   isOfflineStorageAvailable,
 } from "./idb";
+import { notifyInventoryChanged } from "./inventory-events";
 
 /**
  * Whole publications kept on the device so they read with no connection.
@@ -303,6 +304,7 @@ export async function downloadPublication(
     // Not supported.
   }
 
+  notifyInventoryChanged();
   return record;
 }
 
@@ -315,6 +317,7 @@ export async function removeOfflinePublication(noteId: string): Promise<void> {
   await idbDelete("answers", id);
   await idbDelete("marks", publicationMarksKey(record.publication));
   await idbDelete("publications", noteId);
+  notifyInventoryChanged();
 
   // Illustrations another downloaded publication still uses stay.
   try {

@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useDeviceStore, type BeforeInstallPromptEvent } from "@/hooks/ui/use-device";
 import { useNotesStore, usePendingSyncCount } from "@/lib/store/notes-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
+import { OFFLINE_INVENTORY_CHANGED_EVENT } from "@/lib/offline/inventory-events";
+import { publishInventory } from "@/lib/offline/device-inventory";
 
 const MOBILE_QUERY = "(max-width: 767px)";
 const STANDALONE_QUERY = "(display-mode: standalone)";
@@ -32,6 +34,28 @@ export function DeviceListener() {
       standaloneQuery.removeEventListener("change", syncStandalone);
     };
   }, [setIsMobile, setStandalone]);
+
+  // Tells the server what this device has downloaded (so Settings can list it per
+  // device): shortly after the app opens, whenever a download is added or removed,
+  // and when the connection comes back.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = (delay: number) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (navigator.onLine) void publishInventory().catch(() => {});
+      }, delay);
+    };
+    schedule(4000);
+    const onChange = () => schedule(1500);
+    window.addEventListener(OFFLINE_INVENTORY_CHANGED_EVENT, onChange);
+    window.addEventListener("online", onChange);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener(OFFLINE_INVENTORY_CHANGED_EVENT, onChange);
+      window.removeEventListener("online", onChange);
+    };
+  }, []);
 
   useEffect(() => {
     const goOnline = () => {

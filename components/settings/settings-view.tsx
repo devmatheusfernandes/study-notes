@@ -32,6 +32,7 @@ import { PrivacyLockCard } from "@/components/settings/privacy-lock-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
 import { OfflinePublicationsCard } from "@/components/settings/offline-publications-card";
+import { OfflineDevicesCard } from "@/components/settings/offline-devices-card";
 import { OfflineBibleCard } from "@/components/settings/offline-bible-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 
@@ -242,6 +243,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                 />
                 <OfflineBibleCard />
                 <OfflinePublicationsCard />
+                <OfflineDevicesCard />
               </>
             )}
 

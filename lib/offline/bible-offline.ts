@@ -1,4 +1,5 @@
 import { getBibleChapterVerses, getBibleDownloadSlice, type BibleVerseRow } from "@/app/(app)/bible-actions";
+import { notifyInventoryChanged } from "./inventory-events";
 import { idbClear, idbGet, idbGetAll, idbPut, idbPutMany, isOfflineStorageAvailable } from "./idb";
 
 /**
@@ -171,6 +172,7 @@ export async function downloadBible(onProgress?: (fraction: number) => void): Pr
 
     downloaded = true;
     onProgress?.(1);
+    notifyInventoryChanged();
     return {};
   } catch {
     return { error: "Não foi possível baixar a Bíblia. Verifique a conexão e tente de novo." };
@@ -181,4 +183,5 @@ export async function removeOfflineBible(): Promise<void> {
   await idbClear(["bibleChapters", "bibleMeta"]);
   idIndex = undefined;
   downloaded = false;
+  notifyInventoryChanged();
 }

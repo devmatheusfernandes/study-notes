@@ -6,17 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { notify } from "@/components/ui/toaster";
+import { formatBytes } from "@/lib/format-bytes";
 import {
   downloadBible,
   getBibleOfflineInfo,
   removeOfflineBible,
   type BibleOfflineInfo,
 } from "@/lib/offline/bible-offline";
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 /** Keeps the whole Bible on this device so citations (@) and the reader resolve instantly, with no connection. */
 export function OfflineBibleCard() {
