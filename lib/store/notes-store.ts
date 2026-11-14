@@ -120,7 +120,7 @@ function toTag(row: TagRow): Tag {
  * op "the same slot": a second `updateNote` for the same note replaces the
  * first instead of stacking, so a burst of offline keystrokes queues once.
  */
-type PendingOp =
+type PendingOpBody =
   | { key: string; entityId: string; kind: "createNote"; payload: { id: string; title: string; body: string; folderId?: string } }
   | { key: string; entityId: string; kind: "updateNote"; payload: { id: string; patch: { title?: string; body?: string } } }
   | { key: string; entityId: string; kind: "setNotePinned"; payload: { id: string; pinned: boolean } }
@@ -140,6 +140,17 @@ type PendingOp =
   | { key: string; entityId: string; kind: "addTagToNote"; payload: { noteId: string; tagId: string } }
   | { key: string; entityId: string; kind: "removeTagFromNote"; payload: { noteId: string; tagId: string } };
 
+export type PendingOp = PendingOpBody & {
+  /** Why the last attempt threw (not a server rejection — the request failed outright). Shown in the sync panel, since "waiting" for hours means something is failing, not merely offline. */
+  lastError?: string;
+  attempts?: number;
+};
+
+function errorMessage(error: unknown): string {
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return text.slice(0, 200);
+}
+
 interface NotesStore {
   notes: Note[];
   folders: Folder[];
@@ -152,6 +163,14 @@ interface NotesStore {
   hydrate: (notes: NoteRow[], folders: FolderRow[], tags: TagRow[]) => void;
   /** Replays every queued op in order; stops at the first one that still can't reach the server. */
   syncPendingOps: () => Promise<void>;
+  /**
+   * "Sincronizar agora": like syncPendingOps, but one op that keeps failing no longer holds the rest
+   * back — it (and anything else on the same note/folder) is skipped and the others are sent. A failing
+   * *create* still stops the pass, since later ops may depend on the row it was meant to make.
+   */
+  forceSyncPendingOps: () => Promise<{ stuck: number }>;
+  /** Drops a queued op for good — the local copy keeps the change, the server never gets it. */
+  discardPendingOp: (key: string) => void;
 
   createFolder: (name: string, parentId?: string) => string;
   renameFolder: (id: string, name: string) => void;
@@ -226,8 +245,8 @@ async function runOrQueue(
     });
     if (res.error) return "rejected";
     return "synced";
-  } catch {
-    enqueueOp(set, op);
+  } catch (error) {
+    enqueueOp(set, { ...op, lastError: errorMessage(error), attempts: (op.attempts ?? 0) + 1 });
     return "queued";
   }
 }
@@ -372,6 +391,33 @@ export const useNotesStore = create<NotesStore>()(
           }
         }
       },
+
+      forceSyncPendingOps: async () => {
+        const blocked = new Set<string>();
+        for (const op of Object.values(get().pendingOps)) {
+          if (!get().pendingOps[op.key]) continue;
+          if (blocked.has(op.entityId)) continue;
+          const outcome = await runOrQueue(set, get, op, opAction(op));
+          if (outcome === "queued") {
+            const isCreate = op.kind === "createNote" || op.kind === "createFolder" || op.kind === "createTag";
+            if (isCreate) break; // later ops may need the row this one was meant to create
+            blocked.add(op.entityId);
+            continue;
+          }
+          if (outcome === "rejected") notify.error("Não foi possível sincronizar uma alteração");
+          if (op.kind === "createNote" || op.kind === "updateNote") {
+            set((s) => ({ notes: s.notes.map((n) => (n.id === op.entityId ? { ...n, syncStatus: outcome === "synced" ? "synced" : n.syncStatus } : n)) }));
+          }
+        }
+        return { stuck: Object.keys(get().pendingOps).length };
+      },
+
+      discardPendingOp: (key) =>
+        set((s) => {
+          const next = { ...s.pendingOps };
+          delete next[key];
+          return { pendingOps: next };
+        }),
 
       createFolder: (name, parentId) => {
         const id = crypto.randomUUID();

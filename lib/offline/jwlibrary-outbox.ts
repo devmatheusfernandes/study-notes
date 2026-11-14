@@ -27,7 +27,7 @@ import { refreshOfflineUserData } from "./jwpub-offline";
 
 export const JW_MARKS_CHANGED_EVENT = "jwlibrary:marks-changed";
 
-export type JwOp = { opId: string } & (
+export type JwOp = { opId: string; lastError?: string; attempts?: number } & (
   | { kind: "createHighlight"; entityId: string; input: CreateJwlibraryHighlightInput }
   | { kind: "setHighlightColor"; entityId: string; colorIndex: number }
   | { kind: "deleteHighlight"; entityId: string }
@@ -43,8 +43,10 @@ export type NewJwOp = JwOp extends infer O ? (O extends JwOp ? Omit<O, "opId"> :
 interface JwOutboxState {
   ops: JwOp[];
   submit: (op: NewJwOp) => void;
-  /** Replays the queue in order; stops at the first op that can't reach the server. */
-  sync: () => Promise<void>;
+  /** Replays the queue in order; stops at the first op that can't reach the server. With `force`, an op that keeps failing no longer holds the rest back (see runPass). */
+  sync: (options?: { force?: boolean }) => Promise<void>;
+  /** Drops a queued op for good. */
+  discard: (opId: string) => void;
 }
 
 /** The op currently being sent. A coalescing edit must not rewrite it — its result would be removed from the queue along with the edit. */
@@ -162,21 +164,34 @@ type StoreGet = () => JwOutboxState;
 type StoreSet = (update: (state: JwOutboxState) => Partial<JwOutboxState>) => void;
 
 /** Sends queued ops in order until the queue is empty or one can't reach the server. */
-async function runPass(get: StoreGet, set: StoreSet): Promise<void> {
+async function runPass(get: StoreGet, set: StoreSet, force = false): Promise<void> {
   let sentAny = false;
   let rejectedAny = false;
+  // Forced pass only: ops already tried, and notes/highlights with a failing op whose later ops must wait.
+  const tried = new Set<string>();
+  const blocked = new Set<string>();
 
   try {
     for (;;) {
-      const op = get().ops[0];
+      const op = force ? get().ops.find((o) => !tried.has(o.opId) && !blocked.has(o.entityId)) : get().ops[0];
       if (!op) break;
+      tried.add(op.opId);
 
       let result: { error?: string };
       inflightOpId = op.opId;
       try {
         result = await runOp(op);
-      } catch {
-        break; // The request never reached the server (offline) — keep everything, try again later.
+      } catch (error) {
+        // The request threw — offline, or something failing every time. Say which, so the sync panel can.
+        const message = (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 200);
+        set((s) => ({
+          ops: s.ops.map((o) => (o.opId === op.opId ? { ...o, lastError: message, attempts: (o.attempts ?? 0) + 1 } : o)),
+        }));
+        // Normal pass: keep everything in order and try again later. Forced: skip this one, but a failing
+        // create still stops the pass — later ops may refer to the row it was meant to make.
+        if (!force || op.kind === "createHighlight" || op.kind === "createNote") break;
+        blocked.add(op.entityId);
+        continue;
       } finally {
         inflightOpId = null;
       }
@@ -221,12 +236,14 @@ export const useJwOutbox = create<JwOutboxState>()(
       },
 
       // A call made while a pass is running joins it, so `await sync()` also means "everything queued so far has been tried".
-      sync: () => {
+      sync: (options) => {
         if (syncing) return activePass ?? Promise.resolve();
         syncing = true;
-        activePass = runPass(get, set);
+        activePass = runPass(get, set, options?.force === true);
         return activePass;
       },
+
+      discard: (opId) => set((s) => ({ ops: s.ops.filter((o) => o.opId !== opId) })),
     }),
     {
       name: "study-notes:jw-outbox",

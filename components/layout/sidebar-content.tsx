@@ -12,6 +12,7 @@ import { useDeviceStore } from "@/hooks/ui/use-device";
 import { ChatList } from "@/components/chat/chat-list";
 import { InstallNudgeCard } from "./install-nudge-card";
 import { UpdateNudgeCard } from "./update-nudge-card";
+import { SyncStatusCard } from "./sync-status-card";
 
 interface SidebarContentProps {
   collapsed?: boolean;
@@ -153,23 +154,7 @@ export function SidebarContent({ collapsed = false, onNavigate, onToggleCollapse
         )}
 
         <div className="mt-auto flex flex-col gap-3">
-          {!collapsed && (
-            <div className="flex flex-col gap-1.5 rounded-3xl bg-secondary p-3.5">
-              <span
-                className={cn(
-                  "font-mono text-[10px] font-medium tracking-[0.08em]",
-                  isOnline ? "text-success" : "text-accent"
-                )}
-              >
-                {isOnline ? "OFFLINE-FIRST" : "SEM CONEXÃO"}
-              </span>
-              <span className="text-[12px] leading-relaxed text-muted-foreground">
-                {pendingCount > 0
-                  ? `${pendingCount} alteraç${pendingCount === 1 ? "ão" : "ões"} aguardando sincronização.`
-                  : "Suas notas continuam disponíveis sem conexão."}
-              </span>
-            </div>
-          )}
+          {!collapsed && <SyncStatusCard isOnline={isOnline} pendingCount={pendingCount} />}
           {!collapsed && <UpdateNudgeCard />}
           {!collapsed && <InstallNudgeCard />}
           <NavLink
