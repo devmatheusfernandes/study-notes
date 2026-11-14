@@ -15,6 +15,8 @@ interface SidebarHighlightedHtmlProps {
   html: string;
   /** The document being shown, or null when it isn't one a highlight can be filed under. */
   mepsDocumentId: number | null;
+  /** For an excerpt: its article's title, so marks filed under a twin document of the same article are found too. */
+  titleHint?: string | null;
   className?: string;
 }
 
@@ -40,8 +42,8 @@ function scrollParent(from: HTMLElement | null): HTMLElement | null {
  * text stays mounted underneath the note (just hidden), so going back doesn't
  * re-render the article or lose its scroll position.
  */
-export function SidebarHighlightedHtml({ html, mepsDocumentId, className }: SidebarHighlightedHtmlProps) {
-  const { highlights, refresh } = useDocumentHighlights(mepsDocumentId);
+export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, className }: SidebarHighlightedHtmlProps) {
+  const { highlights, refresh } = useDocumentHighlights(mepsDocumentId, titleHint);
   const wrapRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef(0);
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);

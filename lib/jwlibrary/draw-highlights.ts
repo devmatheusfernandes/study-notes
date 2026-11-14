@@ -30,6 +30,11 @@ export function drawParagraphHighlights(container: HTMLElement, highlights: Para
     }
 
     const colorHex = JWLIBRARY_HIGHLIGHT_COLORS[highlight.colorIndex]?.hex ?? JWLIBRARY_HIGHLIGHT_COLORS[1].hex;
+    // Positioned BEFORE the mark's offsetTop is read: offsetTop is relative to the
+    // nearest positioned ancestor, so measuring first put the square thousands of
+    // pixels away (invisible) on the first paint wherever the paragraph wasn't
+    // already positioned by the page's own CSS.
+    if (highlight.note) el.style.position = "relative";
     const mark = wrapTokenRange(el, highlight.startToken, highlight.endToken, colorHex, highlight.id, highlight.note?.id);
     // Stamped so a note-less highlight's click handler can show the
     // highlighted text itself (there's no note to display instead).

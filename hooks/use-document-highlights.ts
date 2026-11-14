@@ -14,7 +14,7 @@ import { JW_MARKS_CHANGED_EVENT, useJwOutbox } from "@/lib/offline/jwlibrary-out
  * Offline it quietly returns nothing rather than failing: these documents
  * come from the server anyway, so there is no local copy to read marks from.
  */
-export function useDocumentHighlights(mepsDocumentId: number | null) {
+export function useDocumentHighlights(mepsDocumentId: number | null, titleHint?: string | null) {
   const [highlights, setHighlights] = useState<ParagraphHighlight[]>([]);
 
   const refresh = useCallback(async () => {
@@ -22,12 +22,12 @@ export function useDocumentHighlights(mepsDocumentId: number | null) {
     try {
       // The server only knows what the outbox has already sent.
       await useJwOutbox.getState().sync();
-      const result = await getDocumentHighlights(mepsDocumentId);
+      const result = await getDocumentHighlights(mepsDocumentId, titleHint);
       if (result.highlights) setHighlights(result.highlights);
     } catch {
       // No connection: keep whatever is on screen.
     }
-  }, [mepsDocumentId]);
+  }, [mepsDocumentId, titleHint]);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +35,7 @@ export function useDocumentHighlights(mepsDocumentId: number | null) {
       if (mepsDocumentId === null) return;
       try {
         await useJwOutbox.getState().sync();
-        const result = await getDocumentHighlights(mepsDocumentId);
+        const result = await getDocumentHighlights(mepsDocumentId, titleHint);
         if (!cancelled && result.highlights) setHighlights(result.highlights);
       } catch {
         // Offline — see above.
@@ -44,7 +44,7 @@ export function useDocumentHighlights(mepsDocumentId: number | null) {
     return () => {
       cancelled = true;
     };
-  }, [mepsDocumentId]);
+  }, [mepsDocumentId, titleHint]);
 
   // The outbox finished replaying (or the server refused one of its writes):
   // what is really saved may differ from what this screen drew optimistically.

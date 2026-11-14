@@ -854,9 +854,41 @@ export async function getChapterHighlights(
  * guess which publication symbol/language/issue they were saved under.
  */
 export async function getDocumentHighlights(
-  mepsDocumentId: number
+  mepsDocumentId: number,
+  /**
+   * The article's title, for an excerpt: the same text can be filed under two
+   * MepsDocumentIds (an excerpt cites the publication's own document, while the
+   * app's appendix page is seeded from another one — "A2 Características desta
+   * revisão" is both 1001061202 and 1001070202), and the user's marks sit under
+   * whichever they were made on. Marks on a same-titled appendix count too.
+   */
+  titleHint?: string | null
 ): Promise<{ highlights?: ParagraphHighlight[]; error?: string }> {
-  return getChapterHighlights(null, null, null, mepsDocumentId);
+  const primary = await getChapterHighlights(null, null, null, mepsDocumentId);
+  const title = titleHint?.trim();
+  if (!title || primary.error) return primary;
+
+  const { supabase, user } = await requireUser();
+  if (!user) return primary;
+  const { data: aliases } = await supabase
+    .from("bible_appendices")
+    .select("meps_document_id")
+    .eq("title", title)
+    .neq("meps_document_id", mepsDocumentId)
+    .limit(3);
+
+  const merged = [...(primary.highlights ?? [])];
+  const seen = new Set(merged.map((h) => h.id));
+  for (const alias of aliases ?? []) {
+    const extra = await getChapterHighlights(null, null, null, Number(alias.meps_document_id));
+    for (const highlight of extra.highlights ?? []) {
+      if (!seen.has(highlight.id)) {
+        seen.add(highlight.id);
+        merged.push(highlight);
+      }
+    }
+  }
+  return { highlights: merged };
 }
 
 export interface PublicationHighlight extends ParagraphHighlight {

@@ -4,6 +4,13 @@ import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
+import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
+
+/** The cited article's name out of `Extract.Caption`'s `<span class="etitle">…</span>`. */
+function captionTitle(caption: string | null): string | null {
+  const match = caption?.match(/class="etitle"[^>]*>([^<]*)</);
+  return match ? match[1].replace(/&nbsp;/g, " ").trim() || null : null;
+}
 
 /** One embedded excerpt, already sanitized at write time. Mirrors JwpubExtract in lib/jwpub/types.ts. */
 export interface JwpubExtractItem {
@@ -76,9 +83,12 @@ export function JwpubExtractSurface({
                 <p className="mb-2 font-heading text-[14px]">{extract.refTitle}</p>
               ) : null}
 
-              <div
+              {/* The user's highlights and a margin square for each note, which opens in place with a "Voltar ao trecho" (see SidebarHighlightedHtml). */}
+              <SidebarHighlightedHtml
+                html={extract.html}
+                mepsDocumentId={extract.refMepsDocumentId}
+                titleHint={captionTitle(extract.caption)}
                 className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
-                dangerouslySetInnerHTML={{ __html: extract.html }}
               />
 
               {onOpenSource && extract.refMepsDocumentId !== null && (
