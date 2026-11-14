@@ -3,6 +3,7 @@ import { AssistantSurface } from "@/components/assistant/assistant-surface";
 import { SidePanelStackProvider } from "@/components/content/side-panel-stack";
 import { FloatingWindowsHost } from "@/components/content/floating-windows-host";
 import { StoreHydration } from "@/components/providers/store-hydration";
+import { DockedChat } from "@/components/chat/docked-chat";
 import { ChatHydration } from "@/components/chat/chat-hydration";
 import { LockProvider } from "@/components/lock/lock-provider";
 import { listUserContent } from "./notes-actions";
@@ -42,6 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <LockProvider />
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <DockedChat />
         <AssistantSurface />
         <FloatingWindowsHost />
       </div>

@@ -3,6 +3,8 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { getConversationMessages } from "@/app/(app)/chat-actions";
 import { ChatView } from "@/components/chat/chat-view";
+import { DockChatButton } from "@/components/chat/dock-chat-button";
+import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { ChatMessagesHydration } from "@/components/chat/chat-messages-hydration";
 import type { ChatMessage } from "@/lib/store/chat-store";
 
@@ -43,7 +45,9 @@ export default async function ChatPage({ params }: ChatPageProps) {
         >
           <ArrowLeft className="size-4" />
         </Link>
-        <h1 className="truncate font-heading text-base">{title}</h1>
+        <h1 className="mr-auto min-w-0 truncate font-heading text-base">{title}</h1>
+        <DockChatButton conversationId={id} />
+        <HistoryVaultButton className="inline-flex" />
       </header>
 
       <ChatView conversationId={id} />

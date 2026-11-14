@@ -6,12 +6,16 @@ import { useChatStore, type ChatSource } from "@/lib/store/chat-store";
 import { addUserMessage as addUserMessageAction } from "@/app/(app)/chat-actions";
 import { ChatMessage } from "./chat-message";
 import { SmartComposer } from "@/components/ui/smart-composer";
+import { useChatDockStore } from "@/lib/store/chat-dock-store";
+import { cn } from "@/lib/utils";
 
 interface ChatViewProps {
   conversationId: string;
+  /** Rendered inside the docked side panel (components/chat/docked-chat.tsx) instead of as a page: fills its container, and never reads `?q=` from whatever page happens to be open. */
+  docked?: boolean;
 }
 
-export function ChatView({ conversationId }: ChatViewProps) {
+export function ChatView({ conversationId, docked = false }: ChatViewProps) {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamStatus = useChatStore((s) => s.streamStatus);
@@ -34,7 +38,7 @@ export function ChatView({ conversationId }: ChatViewProps) {
   // URL, and a live read would flip to "no question" a frame before the
   // message reaches the store — flashing the empty state in between.
   const searchParams = useSearchParams();
-  const [pendingQuestion] = useState(() => searchParams.get("q")?.trim() ?? "");
+  const [pendingQuestion] = useState(() => (docked ? "" : (searchParams.get("q")?.trim() ?? "")));
   const hasPendingQuery = pendingQuestion !== "";
   // Opened with a question that hasn't reached the store yet: the composer
   // already reads as busy (as it did in the loading shell) instead of
@@ -139,7 +143,8 @@ export function ChatView({ conversationId }: ChatViewProps) {
   const initialQueryFired = useRef(false);
 
   useEffect(() => {
-    if (initialQueryFired.current) return;
+    // The dock lives across every page, so `?q=` there belongs to some other screen.
+    if (docked || initialQueryFired.current) return;
     const searchParams = new URLSearchParams(window.location.search);
     const initialQuery = searchParams.get("q")?.trim();
     if (!initialQuery) return;
@@ -154,10 +159,22 @@ export function ChatView({ conversationId }: ChatViewProps) {
     window.history.replaceState(null, "", window.location.pathname);
 
     void sendMessage(initialQuery, allowedSourceTypes);
-  }, [sendMessage]);
+  }, [sendMessage, docked]);
+
+  // The chat store holds ONE conversation's messages, so a chat opened as a
+  // page takes over from the docked one (opening the docked chat full-screen
+  // is exactly this).
+  useEffect(() => {
+    if (!docked) useChatDockStore.getState().close();
+  }, [docked]);
 
   return (
-    <div className="relative flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden">
+    <div
+      className={cn(
+        "relative flex flex-col overflow-hidden",
+        docked ? "h-full" : "h-[calc(100vh-3.5rem)]"
+      )}
+    >
       {/* Scrollable conversation messages container */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-32 sm:px-6">
         <div className="mx-auto flex max-w-2xl sm:max-w-3xl flex-col gap-4">
