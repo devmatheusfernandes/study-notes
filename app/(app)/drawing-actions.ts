@@ -42,7 +42,23 @@ export async function getDrawing(noteId: string): Promise<DrawingRow | null> {
   };
 }
 
-export async function saveDrawing(noteId: string, strokes: string): Promise<{ error?: string }> {
+/**
+ * `transient` marks a failure on the server's side (an exception), as opposed to a refusal of this
+ * particular save: the caller keeps the change queued instead of discarding it, and shows `error`.
+ * Production hides the text of a thrown Server Action error behind "Minified React error #441", so
+ * returning the reason is the only way for it to reach the sync panel.
+ */
+export async function saveDrawing(noteId: string, strokes: string): Promise<{ error?: string; transient?: boolean }> {
+  try {
+    return await saveDrawingRow(noteId, strokes);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[saveDrawing] falhou", { noteId, bytes: typeof strokes === "string" ? strokes.length : null, message, error });
+    return { error: `Falha no servidor: ${message}`.slice(0, 200), transient: true };
+  }
+}
+
+async function saveDrawingRow(noteId: string, strokes: string): Promise<{ error?: string }> {
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada. Entre novamente." };
 

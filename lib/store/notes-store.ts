@@ -234,10 +234,15 @@ async function runOrQueue(
   set: SetFn,
   get: GetFn,
   op: PendingOp,
-  action: () => Promise<{ error?: string }>
+  action: () => Promise<{ error?: string; transient?: boolean }>
 ): Promise<"synced" | "queued" | "rejected"> {
   try {
     const res = await action();
+    if (res.transient) {
+      // The server failed (not this change's fault): keep it queued and remember why.
+      enqueueOp(set, { ...op, lastError: res.error, attempts: (op.attempts ?? 0) + 1 });
+      return "queued";
+    }
     set((s) => {
       const next = { ...s.pendingOps };
       delete next[op.key];

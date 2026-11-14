@@ -1,5 +1,6 @@
 import type { Folder, Note, PendingOp, Tag } from "@/lib/store/notes-store";
 import type { JwOp } from "@/lib/offline/jwlibrary-outbox";
+import { formatBytes } from "@/lib/format-bytes";
 
 export interface PendingItem {
   /** Stable key for the list and for discarding: the notes-store op key, or the outbox op id. */
@@ -43,7 +44,8 @@ export function describeNotesOp(op: PendingOp, notes: Note[], folders: Folder[],
       break;
     case "saveDrawing":
       label = "Salvar escrita à mão";
-      subject = noteTitle(op.entityId);
+      // Size and whether the note is still here: the two things that help tell why a save keeps failing.
+      subject = `${noteTitle(op.entityId) ?? "nota que não está mais neste aparelho"} · ${formatBytes(op.payload.strokes.length)}`;
       break;
     case "setNotePinned":
       label = op.payload.pinned ? "Fixar nota" : "Desafixar nota";
