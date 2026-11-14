@@ -57,7 +57,14 @@ const PALM_CONTACT_PX = 32;
  * button and bit 32 the eraser, per the Pointer Events spec.
  */
 function isPenEraserGesture(event: React.PointerEvent): boolean {
-  return event.pointerType === "pen" && ((event.buttons & 2) !== 0 || (event.buttons & 32) !== 0);
+  // Deliberately not limited to `pointerType === "pen"`: some Android builds report a stylus as a
+  // "mouse" while its side button is down. A real mouse's right button then erases too, which is harmless.
+  // `button` covers a browser that announces the press as its own pointerdown rather than through `buttons`.
+  return (
+    (event.buttons & 2) !== 0 ||
+    (event.buttons & 32) !== 0 ||
+    (event.type === "pointerdown" && (event.button === 2 || event.button === 5))
+  );
 }
 
 function isPalmContact(event: React.PointerEvent): boolean {
@@ -112,6 +119,18 @@ export function DrawingCanvas({
   const erasingRef = useRef(false);
   const erasedThisGestureRef = useRef(false);
   const penReportedRef = useRef(false);
+  // The side button can be pressed while the pen is still in the air, before any pointerdown.
+  const penButtonHeldRef = useRef(false);
+  // `?penDebug=1` shows what the browser actually reports for the pen — for when the button does nothing.
+  const [debugText, setDebugText] = useState<string | null>(null);
+  const [debugEnabled] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("penDebug")
+  );
+  function debug(event: React.PointerEvent | React.MouseEvent, label: string) {
+    if (!debugEnabled) return;
+    const e = event as React.PointerEvent;
+    setDebugText(`${label} · ${e.pointerType ?? "mouse"} · button ${e.button} · buttons ${e.buttons}`);
+  }
   const lastPenAtRef = useRef(-Infinity);
   const touchScrollRef = useRef<{ pointerId: number; lastX: number; lastY: number; target: HTMLElement | null; targetX: HTMLElement | null } | null>(null);
   const liveDirtyRef = useRef<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
@@ -247,6 +266,7 @@ export function DrawingCanvas({
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!active) return;
+    debug(event, "down");
     notePenActivity(event);
     // Palm rejection: with pen-only on, a hand resting on a tablet scrolls the
     // note rather than painting over the writing. The scrolling is done by
@@ -273,7 +293,7 @@ export function DrawingCanvas({
     activePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
 
-    if (tool === "eraser" || isPenEraserGesture(event)) {
+    if (tool === "eraser" || isPenEraserGesture(event) || (penButtonHeldRef.current && penIsNear())) {
       erasingRef.current = true;
       erasedThisGestureRef.current = false;
       const point = toPagePoint(event.clientX, event.clientY);
@@ -333,7 +353,20 @@ export function DrawingCanvas({
       return;
     }
 
+    if (active) debug(event, "move");
+    if (event.pointerType !== "touch") penButtonHeldRef.current = isPenEraserGesture(event);
+
     if (!active || activePointerRef.current !== event.pointerId) return;
+
+    // The button went down after the nib was already writing: drop the half-drawn line and erase from here.
+    if (!erasingRef.current && isPenEraserGesture(event)) {
+      pointsRef.current = [];
+      strokeStartRef.current = null;
+      clearLive();
+      liveDirtyRef.current = null;
+      erasingRef.current = true;
+      erasedThisGestureRef.current = false;
+    }
 
     if (erasingRef.current) {
       const point = toPagePoint(event.clientX, event.clientY);
@@ -362,6 +395,8 @@ export function DrawingCanvas({
   }
 
   function endStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+    debug(event, event.type === "pointercancel" ? "cancel" : "up");
+    if (event.pointerType !== "touch") penButtonHeldRef.current = false;
     if (touchScrollRef.current?.pointerId === event.pointerId) {
       touchScrollRef.current = null;
       return;
@@ -402,6 +437,11 @@ export function DrawingCanvas({
     // the live canvas opts back in, and only while drawing is active.
     <div ref={wrapRef} className={cn("pointer-events-none absolute inset-0", className)} aria-hidden={!active}>
       <canvas ref={baseRef} className="absolute inset-0 size-full" />
+      {debugEnabled && debugText && (
+        <div className="pointer-events-none fixed bottom-3 left-3 z-50 rounded-lg bg-black/80 px-2.5 py-1.5 font-mono text-[11px] text-white">
+          {debugText}
+        </div>
+      )}
       <canvas
         ref={liveRef}
         className={cn(
@@ -426,6 +466,7 @@ export function DrawingCanvas({
         // The barrel button is a right click to the browser — without this it
         // would pop a menu over the stroke it is meant to erase.
         onContextMenu={(event) => {
+          debug(event, "contextmenu");
           if (active) event.preventDefault();
         }}
       />
