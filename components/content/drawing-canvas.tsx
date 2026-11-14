@@ -9,6 +9,7 @@ import {
   strokesHitBy,
   type DrawPoint,
   type DrawTool,
+  type InkAppearance,
   type Stroke,
 } from "@/lib/drawing/strokes";
 import { useInkAppearance } from "@/hooks/ui/use-ink-appearance";
@@ -31,6 +32,8 @@ interface DrawingCanvasProps {
   onCommitStroke: (stroke: Stroke) => void;
   /** `startsGesture` marks the first erase of a drag, so one sweep of the eraser is one undo step rather than one per frame. */
   onEraseStrokes: (ids: string[], startsGesture: boolean) => void;
+  /** Overrides the theme-derived ink appearance — a PDF page is white paper in either theme. */
+  appearance?: InkAppearance;
   className?: string;
 }
 
@@ -40,6 +43,16 @@ interface DrawingCanvasProps {
  * browser for a buffer it won't give.
  */
 const MAX_CANVAS_PIXELS = 12_000_000;
+
+/** How long after the stylus last reported (hover or contact) a touch is still treated as the writing hand. */
+const PEN_GRACE_MS = 700;
+
+/** A fingertip reports a contact of roughly 10-20 CSS px; a resting palm or knuckle is far wider. */
+const PALM_CONTACT_PX = 32;
+
+function isPalmContact(event: React.PointerEvent): boolean {
+  return Math.max(event.width, event.height) >= PALM_CONTACT_PX;
+}
 
 /** The element that actually scrolls behind the ink layer, or null when that's the page itself. */
 function scrollableAncestor(from: HTMLElement): HTMLElement | null {
@@ -72,12 +85,14 @@ export function DrawingCanvas({
   recordingElapsed,
   onCommitStroke,
   onEraseStrokes,
+  appearance: appearanceOverride,
   className,
 }: DrawingCanvasProps) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const appearance = useInkAppearance();
+  const themeAppearance = useInkAppearance();
+  const appearance = appearanceOverride ?? themeAppearance;
 
   const [box, setBox] = useState({ width: 0, height: 0 });
 
@@ -87,6 +102,7 @@ export function DrawingCanvas({
   const erasingRef = useRef(false);
   const erasedThisGestureRef = useRef(false);
   const penReportedRef = useRef(false);
+  const lastPenAtRef = useRef(-Infinity);
   const touchScrollRef = useRef<{ pointerId: number; lastY: number; target: HTMLElement | null } | null>(null);
   const liveDirtyRef = useRef<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
 
@@ -221,15 +237,16 @@ export function DrawingCanvas({
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!active) return;
-    if (event.pointerType === "pen" && !penReportedRef.current) {
-      penReportedRef.current = true;
-      onPenDetected();
-    }
+    notePenActivity(event);
     // Palm rejection: with pen-only on, a hand resting on a tablet scrolls the
     // note rather than painting over the writing. The scrolling is done by
     // hand here because the layer has to keep `touch-action: none` — see the
     // note on the canvas element below.
     if (penOnly && event.pointerType === "touch") {
+      // A palm resting beside the nib must do nothing at all — not draw, and
+      // not scroll the page out from under the hand that's writing. Pen near
+      // the screen, or a contact too big to be a fingertip, means palm.
+      if (penIsNear() || isPalmContact(event)) return;
       event.currentTarget.setPointerCapture(event.pointerId);
       touchScrollRef.current = {
         pointerId: event.pointerId,
@@ -263,9 +280,36 @@ export function DrawingCanvas({
     drawLive();
   }
 
+  /**
+   * Records that a stylus is around. Hover counts, not just contact: the palm
+   * usually lands while the S Pen is still in the air, and waiting for the
+   * first stroke to learn there's a pen is how the first palm touch drew.
+   */
+  function notePenActivity(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.pointerType !== "pen") return;
+    lastPenAtRef.current = performance.now();
+    if (!penReportedRef.current) {
+      penReportedRef.current = true;
+      onPenDetected();
+    }
+  }
+
+  /** Hovering or just lifted — the grace period covers the gap between strokes while the hand still rests on the glass. */
+  function penIsNear() {
+    return performance.now() - lastPenAtRef.current < PEN_GRACE_MS;
+  }
+
   function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (active) notePenActivity(event);
     const scrolling = touchScrollRef.current;
-    if (scrolling?.pointerId === event.pointerId) {
+    if (scrolling && event.pointerType === "pen") {
+      // The pen arrived after a hand was already down: that hand is a palm.
+      touchScrollRef.current = null;
+    } else if (scrolling?.pointerId === event.pointerId) {
+      if (penIsNear()) {
+        touchScrollRef.current = null;
+        return;
+      }
       const delta = scrolling.lastY - event.clientY;
       scrolling.lastY = event.clientY;
       if (scrolling.target) scrolling.target.scrollBy(0, delta);

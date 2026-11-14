@@ -42,9 +42,11 @@ export default async function NotePage(props: PageProps<"/notes/[id]">) {
   // An uploaded PDF gets the PdfReader.
   const note = await getNoteRow(id);
   if (note && (note.type === "pdf" || note.storagePath?.toLowerCase().endsWith(".pdf"))) {
+    // Handwriting over the pages lives in the same table as a note's own ink.
+    const pdfInk = await getDrawing(id);
     return (
       <LockGate noteId={id} initialLocked={locked}>
-        <PdfReader noteId={id} initialNote={note} />
+        <PdfReader noteId={id} initialNote={note} initialDrawing={pdfInk} />
       </LockGate>
     );
   }

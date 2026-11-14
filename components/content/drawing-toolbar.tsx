@@ -28,6 +28,7 @@ import {
   PEN_SIZES,
   displayInkColor,
   type DrawTool,
+  type InkAppearance,
 } from "@/lib/drawing/strokes";
 import { useInkAppearance } from "@/hooks/ui/use-ink-appearance";
 import type { RecorderState } from "@/hooks/use-audio-recorder";
@@ -39,8 +40,9 @@ interface DrawingToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
   penOnly: boolean;
-  recorderState: RecorderState;
-  recordingElapsedMs: number;
+  /** Recording controls are omitted for surfaces with no audio timeline (PDF annotation). */
+  recorderState?: RecorderState;
+  recordingElapsedMs?: number;
   onToolChange: (tool: DrawTool) => void;
   onColorChange: (color: string) => void;
   onSizeChange: (size: number) => void;
@@ -48,14 +50,16 @@ interface DrawingToolbarProps {
   onRedo: () => void;
   onClear: () => void;
   onPenOnlyChange: (penOnly: boolean) => void;
-  onStartRecording: () => void;
-  onPauseRecording: () => void;
-  onResumeRecording: () => void;
-  onStopRecording: () => void;
+  onStartRecording?: () => void;
+  onPauseRecording?: () => void;
+  onResumeRecording?: () => void;
+  onStopRecording?: () => void;
   /** Feedback for the stop → upload round trip, so ending a recording visibly succeeds instead of the timer just vanishing. */
-  audioSaveState: "idle" | "saving" | "saved";
+  audioSaveState?: "idle" | "saving" | "saved";
   /** The note's player, rendered inline here so a recording doesn't cost the note a second row. */
   audioSlot?: ReactNode;
+  /** Overrides the theme-derived swatch colours (a PDF page is white paper in either theme). */
+  appearance?: InkAppearance;
   className?: string;
 }
 
@@ -94,12 +98,14 @@ export function DrawingToolbar({
   onStopRecording,
   audioSaveState,
   audioSlot,
+  appearance: appearanceOverride,
   className,
 }: DrawingToolbarProps) {
   const [inkOpen, setInkOpen] = useState(false);
   const palette = tool === "highlighter" ? HIGHLIGHT_COLORS : INK_COLORS;
   // Swatches show the ink as it will actually land on this page.
-  const appearance = useInkAppearance();
+  const themeAppearance = useInkAppearance();
+  const appearance = appearanceOverride ?? themeAppearance;
 
   return (
     <div
@@ -209,15 +215,17 @@ export function DrawingToolbar({
         </Button>
       </div>
 
-      <AudioRecordControl
-        recorderState={recorderState}
-        recordingElapsedMs={recordingElapsedMs}
-        audioSaveState={audioSaveState}
-        onStartRecording={onStartRecording}
-        onPauseRecording={onPauseRecording}
-        onResumeRecording={onResumeRecording}
-        onStopRecording={onStopRecording}
-      />
+      {recorderState && onStartRecording && onPauseRecording && onResumeRecording && onStopRecording && (
+        <AudioRecordControl
+          recorderState={recorderState}
+          recordingElapsedMs={recordingElapsedMs ?? 0}
+          audioSaveState={audioSaveState ?? "idle"}
+          onStartRecording={onStartRecording}
+          onPauseRecording={onPauseRecording}
+          onResumeRecording={onResumeRecording}
+          onStopRecording={onStopRecording}
+        />
+      )}
 
       {audioSlot && <div className="shrink-0">{audioSlot}</div>}
 

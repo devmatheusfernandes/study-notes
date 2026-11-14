@@ -28,6 +28,8 @@ export interface Stroke {
    * always visible during replay instead of appearing at some arbitrary moment.
    */
   t?: number;
+  /** 1-based PDF page this stroke was written on. Absent on a note's own ink (one continuous layer); PDF annotations are one layer per page. */
+  page?: number;
 }
 
 export interface DrawingDoc {
