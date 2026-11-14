@@ -77,18 +77,21 @@ export function SyncStatusCard({ isOnline, pendingCount }: SyncStatusCardProps) 
         aria-label="Ver o estado da sincronização"
         className="h-auto flex-col items-start justify-start gap-1.5 whitespace-normal rounded-3xl bg-secondary p-3.5 text-left font-sans font-normal hover:bg-secondary/70"
       >
-        <span
-          className={cn(
-            "font-mono text-[10px] font-medium tracking-[0.08em]",
-            isOnline ? "text-success" : "text-accent"
-          )}
-        >
-          {isOnline ? "OFFLINE-FIRST" : "SEM CONEXÃO"}
-        </span>
-        <span className="text-[12px] leading-relaxed text-muted-foreground">
-          {pendingCount > 0
-            ? `${pendingCount} alteraç${pendingCount === 1 ? "ão" : "ões"} aguardando sincronização. Toque para ver.`
-            : "Suas notas continuam disponíveis sem conexão."}
+        {/* O Button põe o conteúdo num <span> em linha; este wrapper único empilha rótulo e texto. */}
+        <span className="flex w-full min-w-0 flex-col items-start gap-1.5 text-left">
+          <span
+            className={cn(
+              "font-mono text-[10px] font-medium tracking-[0.08em]",
+              isOnline ? "text-success" : "text-accent"
+            )}
+          >
+            {isOnline ? "OFFLINE-FIRST" : "SEM CONEXÃO"}
+          </span>
+          <span className="text-[12px] leading-relaxed text-muted-foreground">
+            {pendingCount > 0
+              ? `${pendingCount} alteraç${pendingCount === 1 ? "ão" : "ões"} aguardando sincronização. Toque para ver.`
+              : "Suas notas continuam disponíveis sem conexão."}
+          </span>
         </span>
       </Button>
 
