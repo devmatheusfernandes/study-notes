@@ -154,6 +154,8 @@
     | `w20 julho pág. 6-7` | `w20.07 6-7` | study edition, by month name |
     | `w17 fevereiro págs. 18-22`, `w16 jan. págs. 17-21` | `w17.02 18-22`, `w16.01 17-21` | names/abbreviations, with or without accent |
     | `w24.11 9`, `w20.07 6` | same | `.MM` form |
+    | `w98 1/9 pág. 6 §1` | `w98 1/9 6` | periodicals only: `§N` after a page counts **on that page** (falls back to the article's own number when the page has fewer); the chip/panel then carry just that paragraph |
+    | `w98 1/9 pág. 6 par. 12`, `w24.01 20 par. 5` | same minus `par.` | `par. N` is always the **article's** numbering — `data-pnum` in study articles, else body paragraphs (`class="sb"`) counted; headings, study questions and footnotes never count |
     | `mwb20 julho pág. 3` | `mwb20.07 3` | Meeting Workbook, by month |
     | `g20 n. 1 pág. 4`, `wp18 nº 2 pág. 3` | `g20.1 4`, `wp18.2 3` | Awake!/Public Watchtower numbered per year |
     | `bh 3`, `bh pág. 3` | `bh 3` | books: a bare number is a **page** |

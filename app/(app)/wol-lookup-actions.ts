@@ -20,6 +20,8 @@ export interface WolHit {
   label: string;
   /** First paragraph of the cited range, when WOL names one. */
   pid?: string;
+  /** What was typed after "@" ("w24.01 32") — shown in the panel as the original reference. */
+  query?: string;
   /** The cited paragraphs themselves (sanitized on render), kept in the note so it opens offline without downloading the publication. */
   snapshot?: string;
 }
@@ -70,7 +72,11 @@ async function requireUser(): Promise<boolean> {
  * one, the one that really spans it), so up to three come back — the widest
  * coverage first for a range, WOL's own order for a single page.
  */
-export async function lookupWolReference(q: string, label: string): Promise<{ hits?: WolHit[]; error?: string }> {
+export async function lookupWolReference(
+  q: string,
+  label: string,
+  para?: { n: number; scope: "page" | "article" }
+): Promise<{ hits?: WolHit[]; error?: string }> {
   if (!(await requireUser())) return { error: "Sessão expirada." };
   const query = q.trim();
   if (!SAFE_QUERY.test(query)) return { error: "Consulta inválida." };
@@ -102,16 +108,30 @@ export async function lookupWolReference(q: string, label: string): Promise<{ hi
     found.sort((x, y) => span(y) - span(x));
   }
 
-  const hits = await Promise.all(
-    found.slice(0, 3).map(async (f): Promise<WolHit> => ({
-      mepsDocumentId: f.docId,
-      title: f.title || label,
-      label: f.title && f.source ? `${f.title} — ${f.source}` : label,
-      pid: f.first !== undefined ? String(f.first) : undefined,
-      snapshot:
-        f.first !== undefined && f.last !== undefined ? await fetchSnapshot(f.docId, f.first, f.last) : undefined,
-    }))
+  const wanted =
+    para && Number.isInteger(para.n) && para.n >= 1 && para.n <= 999 && (para.scope === "page" || para.scope === "article")
+      ? para
+      : undefined;
+  const paraSuffix = wanted ? (wanted.scope === "page" ? ` §${wanted.n}` : ` par. ${wanted.n}`) : "";
+
+  const all = await Promise.all(
+    found.slice(0, 3).map(async (f): Promise<WolHit & { narrowed: boolean }> => {
+      const hasRange = f.first !== undefined && f.last !== undefined;
+      const one = wanted && hasRange ? await fetchParagraph(f.docId, f.first!, f.last!, wanted) : undefined;
+      return {
+        mepsDocumentId: f.docId,
+        title: f.title || label,
+        label: f.title && f.source ? `${f.title} — ${f.source}${one ? paraSuffix : ""}` : label,
+        pid: one ? String(one.pid) : f.first !== undefined ? String(f.first) : undefined,
+        query: query + (one ? paraSuffix : ""),
+        snapshot: one ? one.html : hasRange ? await fetchSnapshot(f.docId, f.first!, f.last!) : undefined,
+        narrowed: Boolean(one),
+      };
+    })
   );
+  // A neighbouring article's tail has no such paragraph — once one article answered, only those stay.
+  const narrowed = all.filter((h) => h.narrowed);
+  const hits = (narrowed.length > 0 ? narrowed : all).map(({ narrowed: _n, ...hit }) => hit);
   return { hits };
 }
 
@@ -182,6 +202,44 @@ function flattenArticleHtml(html: string): string {
     .replace(/<a\b[^>]*>/gi, "<span>")
     .replace(/<\/a>/gi, "</span>")
     .replace(/<(script|style|iframe)\b[\s\S]*?<\/\1>/gi, "");
+}
+
+/**
+ * One numbered paragraph of an article. Study articles print their numbers
+ * (`<span class="parNum" data-pnum="17">`); older articles carry none, so their
+ * body paragraphs (`class="sb"`) are simply counted. Subheadings, study
+ * questions and footnotes never count.
+ */
+async function fetchParagraph(
+  docId: number,
+  first: number,
+  last: number,
+  para: { n: number; scope: "page" | "article" }
+): Promise<{ pid: number; html: string } | undefined> {
+  const page = await fetchWol(`${WOL}/d/r5/lp-t/${docId}`);
+  if (!page) return undefined;
+  const start = page.indexOf('<article id="article"');
+  const end = page.indexOf("</article>", start);
+  if (start === -1 || end === -1) return undefined;
+
+  const body: { pid: number; pnum: number | null; html: string }[] = [];
+  for (const m of page.slice(start, end).matchAll(/<(p|li)\b([^>]*\bdata-pid="(\d+)"[^>]*)>[\s\S]*?<\/\1>/g)) {
+    const pnum = /data-pnum="(\d+)"/.exec(m[0]);
+    const isBody = pnum !== null || /class="sb"/.test(m[2]);
+    if (isBody) body.push({ pid: Number(m[3]), pnum: pnum ? Number(pnum[1]) : null, html: m[0] });
+  }
+
+  const inArticle = () =>
+    body.some((p) => p.pnum !== null) ? body.find((p) => p.pnum === para.n) : body[para.n - 1];
+  let picked;
+  if (para.scope === "page") {
+    const onPage = body.filter((p) => p.pid >= first && p.pid <= last);
+    // "§17" on a page that only has 8 paragraphs can only mean the article's own number.
+    picked = para.n <= onPage.length ? onPage[para.n - 1] : inArticle();
+  } else {
+    picked = inArticle();
+  }
+  return picked ? { pid: picked.pid, html: flattenArticleHtml(picked.html) } : undefined;
 }
 
 /** The paragraphs `first`…`last` (by data-pid) of one WOL document, in document order. */

@@ -81,6 +81,8 @@ export interface ParsedPubRefReference {
   pid?: string;
   /** The cited paragraphs, saved with the chip (WOL lookups) so it opens offline without the publication. */
   snapshot?: string;
+  /** The citation as typed ("w24.01 32"), shown under the panel title. */
+  query?: string;
 }
 
 export type NoteReference =
@@ -183,6 +185,7 @@ export type NoteReferenceAttributes = {
   mepsId?: number | null;
   pubrefPid?: string | null;
   pubrefSnapshot?: string | null;
+  pubrefQuery?: string | null;
 };
 
 /**
@@ -222,6 +225,7 @@ export function referenceToAttributes(ref: NoteReference): NoteReferenceAttribut
       mepsId: ref.mepsDocumentId,
       pubrefPid: ref.pid ?? null,
       pubrefSnapshot: ref.snapshot ? encodeSnapshot(ref.snapshot) : null,
+      pubrefQuery: ref.query ?? null,
     };
   }
   if (ref.kind === "bible") {
@@ -367,6 +371,7 @@ export function referenceFromElement(element: Element): NoteReference | null {
       kind: "pubref",
       mepsDocumentId,
       pid: element.getAttribute("data-ref-pubref-pid") ?? undefined,
+      query: element.getAttribute("data-ref-pubref-query") ?? undefined,
       snapshot: (() => {
         const raw = element.getAttribute("data-ref-pubref-snapshot");
         return raw ? decodeSnapshot(raw) : undefined;

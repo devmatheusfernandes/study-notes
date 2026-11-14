@@ -33,6 +33,7 @@ const EMPTY: ResolvedReference = {
   unresolvedMepsDocumentId: null,
   unresolvedPid: null,
   unresolvedSnapshot: null,
+  unresolvedQuery: null,
   error: null,
 };
 
@@ -137,6 +138,7 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
         unresolvedMepsDocumentId={resolved.unresolvedMepsDocumentId}
         unresolvedPid={resolved.unresolvedPid}
         unresolvedSnapshot={resolved.unresolvedSnapshot}
+        unresolvedQuery={resolved.unresolvedQuery}
         onResolved={() => {
           // The download just made this citation resolvable — re-resolve it in place.
           if (reference?.kind !== "pubref") return;

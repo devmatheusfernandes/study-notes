@@ -66,6 +66,8 @@ export interface ResolvedReference {
   unresolvedPid: string | null;
   /** Cited paragraphs saved in the note itself — shown instead of fetching, so they work offline. */
   unresolvedSnapshot: string | null;
+  /** The citation as typed ("w24.01 32"), for the panel's subtitle. */
+  unresolvedQuery: string | null;
   error: string | null;
 }
 
@@ -78,6 +80,7 @@ const EMPTY: ResolvedReference = {
   unresolvedMepsDocumentId: null,
   unresolvedPid: null,
   unresolvedSnapshot: null,
+  unresolvedQuery: null,
   error: null,
 };
 
@@ -169,6 +172,7 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
       unresolvedMepsDocumentId: reference.mepsDocumentId,
       unresolvedPid: reference.pid ?? null,
       unresolvedSnapshot: reference.snapshot ?? null,
+      unresolvedQuery: reference.query ?? null,
     };
     let hit;
     try {

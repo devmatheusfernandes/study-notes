@@ -168,6 +168,12 @@ export const NoteReferenceMark = Mark.create<NoteReferenceOptions>({
         renderHTML: (attributes) =>
           attributes.pubrefPid ? { "data-ref-pubref-pid": String(attributes.pubrefPid) } : {},
       },
+      pubrefQuery: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-ref-pubref-query"),
+        renderHTML: (attributes) =>
+          attributes.pubrefQuery ? { "data-ref-pubref-query": String(attributes.pubrefQuery) } : {},
+      },
       pubrefSnapshot: {
         default: null,
         parseHTML: (element) => element.getAttribute("data-ref-pubref-snapshot"),

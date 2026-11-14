@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { IngestProgress } from "@/lib/store/ingest-progress-store";
@@ -47,26 +47,23 @@ interface JwpubReferenceSurfaceProps {
   unresolvedPid?: string | null;
   /** The cited paragraphs saved in the note — shown right away, no network. */
   unresolvedSnapshot?: string | null;
+  /** The citation as typed ("w24.01 32"), shown under the title. */
+  unresolvedQuery?: string | null;
   /** Called after a successful download — the caller re-resolves and reopens with the newly-available `target`, same click, no re-navigation needed. */
   onResolved?: (mepsDocumentId: number, noteId: string) => void;
   onClose: () => void;
 }
 
-function DownloadPrompt({
-  mepsDocumentId,
-  pid,
-  snapshot,
-  onResolved,
-}: {
-  mepsDocumentId: number;
-  pid?: string | null;
-  snapshot?: string | null;
-  onResolved?: (mepsDocumentId: number, noteId: string) => void;
-}) {
+/** Download state lives in the surface (not the body) so the header's icon button and the body's progress bar share it. */
+function usePublicationDownload(
+  mepsDocumentId: number | null | undefined,
+  onResolved?: (mepsDocumentId: number, noteId: string) => void
+) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [progress, setProgress] = useState<IngestProgress | null>(null);
 
-  async function handleDownload() {
+  async function download() {
+    if (!mepsDocumentId || isDownloading) return;
     setIsDownloading(true);
     setProgress({ stage: "Iniciando", percent: 0 });
     try {
@@ -82,6 +79,21 @@ function DownloadPrompt({
       setProgress(null);
     }
   }
+
+  return { isDownloading, progress, download };
+}
+
+function DownloadPrompt({
+  mepsDocumentId,
+  pid,
+  snapshot,
+  progress,
+}: {
+  mepsDocumentId: number;
+  pid?: string | null;
+  snapshot?: string | null;
+  progress: IngestProgress | null;
+}) {
 
   // The publication isn't in the library, but WOL has the text: show it now,
   // and keep "Baixar" for when the user wants it in the library for good.
@@ -125,10 +137,16 @@ function DownloadPrompt({
             className="w-full text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
             dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(snapshot) }}
           />
-          <p className="text-[12.5px] text-muted-foreground">Trecho salvo na sua nota — disponível offline.</p>
-          <Button variant="outline" size="sm" onClick={() => setWantsFullArticle(true)}>
-            Ver artigo inteiro
-          </Button>
+          <p className="text-[12px] text-muted-foreground">
+            Trecho salvo na sua nota — disponível offline.{" "}
+            <button
+              type="button"
+              onClick={() => setWantsFullArticle(true)}
+              className="underline underline-offset-2 transition-colors hover:text-foreground"
+            >
+              Ver artigo inteiro
+            </button>
+          </p>
         </>
       )}
       {loadingArticle ? (
@@ -142,22 +160,11 @@ function DownloadPrompt({
           dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(article.html) }}
         />
       ) : null}
-      <p className="text-[13.5px] text-muted-foreground">
-        {snapshot && !wantsFullArticle
-          ? "Quer a publicação completa, com marcações e leitura offline? Baixe para a biblioteca."
-          : article?.html
-          ? "Texto exibido a partir do WOL. Baixe a publicação para ter ela na sua biblioteca, com marcações e leitura offline."
-          : "Essa publicação ainda não está na sua biblioteca. O jw.org disponibiliza o arquivo original — dá para trazer ela para cá."}
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        isLoading={isDownloading}
-        leftIcon={<Download className="size-3.5 text-accent" />}
-        onClick={() => void handleDownload()}
-      >
-        {progress ? `Baixando… ${progress.percent}%` : "Baixar publicação"}
-      </Button>
+      {!snapshot && !article?.html && !loadingArticle && (
+        <p className="text-[13.5px] text-muted-foreground">
+          Essa publicação ainda não está na sua biblioteca. Use o ícone de download no topo para trazer ela do jw.org.
+        </p>
+      )}
       {progress && (
         <div className="flex w-full max-w-xs flex-col gap-1.5" role="status" aria-live="polite">
           <Progress value={progress.percent} />
@@ -178,7 +185,7 @@ function Body({
   unresolvedMepsDocumentId,
   unresolvedPid,
   unresolvedSnapshot,
-  onResolved,
+  downloadProgress,
   onClose,
 }: {
   target: JwpubReferenceTarget | null;
@@ -188,7 +195,7 @@ function Body({
   unresolvedMepsDocumentId?: number | null;
   unresolvedPid?: string | null;
   unresolvedSnapshot?: string | null;
-  onResolved?: (mepsDocumentId: number, noteId: string) => void;
+  downloadProgress: IngestProgress | null;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -218,7 +225,7 @@ function Body({
 
   if (!target || !html) {
     if (!error && unresolvedMepsDocumentId) {
-      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} snapshot={unresolvedSnapshot} onResolved={onResolved} />;
+      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} snapshot={unresolvedSnapshot} progress={downloadProgress} />;
     }
     return <p className="text-[13.5px] text-muted-foreground">{error ?? "Conteúdo não encontrado."}</p>;
   }
@@ -267,14 +274,33 @@ export function JwpubReferenceSurface({
   unresolvedMepsDocumentId,
   unresolvedPid,
   unresolvedSnapshot,
+  unresolvedQuery,
   onResolved,
   onClose,
   raiseKey,
 }: JwpubReferenceSurfaceProps) {
+  const { isDownloading, progress, download } = usePublicationDownload(unresolvedMepsDocumentId, onResolved);
+  const canDownload = !isLoading && !error && !(target && html) && Boolean(unresolvedMepsDocumentId);
+
   return (
     <JwpubSidePanel
       open={open}
       title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
+      subtitle={!target ? unresolvedQuery : null}
+      headerActions={
+        canDownload ? (
+          <button
+            type="button"
+            onClick={() => void download()}
+            disabled={isDownloading}
+            aria-label="Baixar publicação"
+            title="Baixar publicação para a biblioteca — com marcações e leitura offline"
+            className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-60"
+          >
+            {isDownloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+          </button>
+        ) : null
+      }
       onClose={onClose}
       raiseKey={raiseKey}
     >
@@ -286,7 +312,7 @@ export function JwpubReferenceSurface({
         unresolvedMepsDocumentId={unresolvedMepsDocumentId}
         unresolvedPid={unresolvedPid}
         unresolvedSnapshot={unresolvedSnapshot}
-        onResolved={onResolved}
+        downloadProgress={progress}
         onClose={onClose}
       />
     </JwpubSidePanel>

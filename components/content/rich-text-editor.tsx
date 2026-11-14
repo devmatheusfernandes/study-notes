@@ -277,7 +277,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         candidates.map(async (candidate) => {
           try {
             if (candidate.kind === "insight") return (await lookupPerspicazTitle(candidate.title)).hits ?? [];
-            return (await lookupWolReference(candidate.q, candidate.label)).hits ?? [];
+            return (await lookupWolReference(candidate.q, candidate.label, candidate.para)).hits ?? [];
           } catch {
             return []; // offline / WOL unreachable: the row just doesn't appear
           }

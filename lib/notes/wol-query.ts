@@ -12,9 +12,26 @@
 
 import { WOL_CATALOG } from "./wol-catalog";
 
+/**
+ * A specific paragraph inside the cited page. `§N` counts on the page (and falls
+ * back to the article's own numbering when the page has fewer); `par. N` is
+ * always the article's numbering.
+ */
+export interface WolParagraph {
+  n: number;
+  scope: "page" | "article";
+}
+
 export type WolQuery =
-  | { kind: "lookup"; q: string; label: string }
+  | { kind: "lookup"; q: string; label: string; para?: WolParagraph }
   | { kind: "insight"; title: string };
+
+/** "… pág. 6 §1" / "… pág. 6 par. 17" → the text without it, plus what it asked for. Periodicals only. */
+function splitParagraph(text: string): { text: string; para?: WolParagraph } {
+  const m = /\s*(§|\bpar(?:[áa]grafos?)?\.?|\bpars\.)\s*(\d{1,3})$/i.exec(text);
+  if (!m) return { text };
+  return { text: text.slice(0, m.index), para: { n: Number(m[2]), scope: m[1] === "§" ? "page" : "article" } };
+}
 
 /** Periodical symbols WOL dates itself. */
 const PERIODICAL = "w|wp|g|mwb|km|kmw|yb";
@@ -111,8 +128,13 @@ export function parseWolQueries(raw: string): WolQuery[] {
   const text = original.replace(PAGE_WORD, "");
   const results: WolQuery[] = [];
 
-  const periodical = parsePeriodical(original);
-  if (periodical) return [{ kind: "lookup", q: periodical.q, label: periodical.label }];
+  const withoutPara = splitParagraph(original);
+  const periodical = parsePeriodical(withoutPara.text);
+  if (periodical) {
+    const { para } = withoutPara;
+    const suffix = para ? (para.scope === "page" ? ` §${para.n}` : ` par. ${para.n}`) : "";
+    return [{ kind: "lookup", q: periodical.q, label: periodical.label + suffix, ...(para ? { para } : {}) }];
+  }
 
   // Perspicaz by article title: "perspicaz criação", "it-1 criação".
   const insight = /^(?:perspicaz|it(?:-[12])?)\s+(\p{L}[\p{L}\s,()'‘’-]{1,60})$/iu.exec(text);

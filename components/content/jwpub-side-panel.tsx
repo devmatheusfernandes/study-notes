@@ -17,6 +17,10 @@ interface JwpubSidePanelProps {
   width?: number;
   /** See useSidePanelSlot's `raiseKey`. */
   raiseKey?: number;
+  /** Small line under the title (e.g. the citation as typed). */
+  subtitle?: string | null;
+  /** Icon buttons shown beside the close button. */
+  headerActions?: React.ReactNode;
 }
 
 /**
@@ -39,7 +43,7 @@ interface JwpubSidePanelProps {
  * pops the stack. Panels underneath stay mounted at width 0, so going back
  * restores them with their scroll position and loaded content intact.
  */
-export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey }: JwpubSidePanelProps) {
+export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey, subtitle, headerActions }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
   const id = useId();
   // Inside a floating window there is no shared sidebar to join: this panel covers the window's own body.
@@ -66,7 +70,11 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
           >
             <ChevronLeft className="size-4" />
           </button>
-          <span className="mr-auto truncate font-heading text-[14px]">{title}</span>
+          <div className="mr-auto min-w-0">
+            <span className="block truncate font-heading text-[14px]">{title}</span>
+            {subtitle && <span className="block truncate font-mono text-[11px] text-muted-foreground">{subtitle}</span>}
+          </div>
+          {headerActions}
         </header>
         <div className="flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
       </div>
@@ -77,7 +85,13 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
     return (
       <Vault open={open} onOpenChange={(next) => !next && onClose()}>
         <VaultContent aria-label={title}>
-          <VaultTitle className="pb-3 font-heading text-base">{title}</VaultTitle>
+          <div className="flex items-start gap-2 pb-3">
+            <div className="mr-auto min-w-0">
+              <VaultTitle className="font-heading text-base">{title}</VaultTitle>
+              {subtitle && <p className="truncate font-mono text-[11px] text-muted-foreground">{subtitle}</p>}
+            </div>
+            {headerActions}
+          </div>
           {children}
         </VaultContent>
       </Vault>
@@ -112,7 +126,11 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
                   <ChevronLeft className="size-4" />
                 </button>
               )}
-              <span className="mr-auto truncate font-heading text-base">{title}</span>
+              <div className="mr-auto min-w-0">
+                <span className="block truncate font-heading text-base">{title}</span>
+                {subtitle && <span className="block truncate font-mono text-[11px] text-muted-foreground">{subtitle}</span>}
+              </div>
+              {headerActions}
               <button
                 type="button"
                 onClick={closeAll}
