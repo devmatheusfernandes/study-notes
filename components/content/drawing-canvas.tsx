@@ -50,6 +50,16 @@ const PEN_GRACE_MS = 700;
 /** A fingertip reports a contact of roughly 10-20 CSS px; a resting palm or knuckle is far wider. */
 const PALM_CONTACT_PX = 32;
 
+/**
+ * The S Pen's side button (or an eraser end, on pens that have one) held while
+ * the nib touches down: for that stroke the pen erases, and goes back to
+ * whatever tool was chosen once the stroke ends. `buttons` bit 2 is the barrel
+ * button and bit 32 the eraser, per the Pointer Events spec.
+ */
+function isPenEraserGesture(event: React.PointerEvent): boolean {
+  return event.pointerType === "pen" && ((event.buttons & 2) !== 0 || (event.buttons & 32) !== 0);
+}
+
 function isPalmContact(event: React.PointerEvent): boolean {
   return Math.max(event.width, event.height) >= PALM_CONTACT_PX;
 }
@@ -263,7 +273,7 @@ export function DrawingCanvas({
     activePointerRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
 
-    if (tool === "eraser") {
+    if (tool === "eraser" || isPenEraserGesture(event)) {
       erasingRef.current = true;
       erasedThisGestureRef.current = false;
       const point = toPagePoint(event.clientX, event.clientY);
@@ -413,6 +423,11 @@ export function DrawingCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={endStroke}
         onPointerCancel={endStroke}
+        // The barrel button is a right click to the browser — without this it
+        // would pop a menu over the stroke it is meant to erase.
+        onContextMenu={(event) => {
+          if (active) event.preventDefault();
+        }}
       />
     </div>
   );
