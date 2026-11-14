@@ -27,6 +27,10 @@ export function useFullscreen() {
     return () => {
       document.removeEventListener("fullscreenchange", sync);
       document.documentElement.removeAttribute("data-immersive");
+      // Fullscreen belongs to the document, not to this screen: leaving the PDF/note
+      // (Voltar, a link, the browser's back) would otherwise carry it onto every
+      // other page of the app.
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     };
   }, []);
 
