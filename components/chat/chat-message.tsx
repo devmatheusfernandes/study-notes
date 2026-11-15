@@ -206,7 +206,9 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
             if (videoSources.length === 0) return null;
 
             return (
-              <div className="w-full overflow-hidden">
+              // @container: card width follows THIS column, not the viewport — a
+              // fixed 480px card overflowed the 420px docked chat and got clipped.
+              <div className="@container w-full overflow-hidden">
                 {videoSources.length > 1 && (
                   <div className="mb-1 flex items-center justify-between">
                     <span className="font-mono text-[9.5px] font-medium tracking-[0.09em] text-accent">
@@ -223,7 +225,7 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
                       key={videoSource.videoId ? `video-${videoSource.videoId}` : `vid-${videoSource.title}`}
                       className={cn(
                         "snap-center shrink-0 min-w-0 transition-all",
-                        videoSources.length > 1 ? "w-[90%] sm:w-[480px]" : "w-full"
+                        videoSources.length > 1 ? "w-[90%] @xl:w-[480px]" : "w-full"
                       )}
                     >
                       <InlineVideoCard
