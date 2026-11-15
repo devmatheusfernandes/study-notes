@@ -2,6 +2,24 @@ import { createClient } from "@/lib/supabase/server";
 import { buildRagSystemPrompt, formatAllowedSourcesLabel } from "@/lib/vector/rag-query";
 import { buildSources, retrieveContext } from "@/lib/vector/retrieve";
 import OpenAI from "openai";
+import type { ChatSource } from "@/lib/store/chat-store";
+
+/** Appended to the system prompt only when the person switched "Internet" on. */
+const WEB_SEARCH_PROMPT =
+  `PESQUISA NA INTERNET ATIVADA: além das fontes do usuário acima, você pode pesquisar na internet. ` +
+  `Dê prioridade ao material do usuário e use a web para complementar o que ele não traz ou quando a pergunta ` +
+  `pedir algo externo ou atual — mesmo que as fontes do usuário não tenham nada, pesquise e responda. ` +
+  `Deixe claro o que veio da internet ("segundo a internet…", "em um site…") e o que veio das fontes do usuário; ` +
+  `nunca apresente algo da web como se fosse da biblioteca dele. ` +
+  `Continue sem escrever URLs no texto: a interface mostra os links das páginas consultadas.`;
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
 
 export async function POST(
   request: Request,
@@ -34,6 +52,9 @@ export async function POST(
   const allowedSourceTypes: string[] = Array.isArray(body.allowedSourceTypes) && body.allowedSourceTypes.length > 0
     ? body.allowedSourceTypes
     : ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"];
+
+  // Off unless the person turned "Internet" on for this message (a strict `true`, so a missing/garbled field never enables it).
+  const webSearch = body.webSearch === true;
 
   if (!message) {
     return new Response("Empty message", { status: 400 });
@@ -150,8 +171,12 @@ export async function POST(
         const sourcesLabel = formatAllowedSourcesLabel(allowedSourceTypes);
         const systemPrompt = buildRagSystemPrompt(matchRows, sourcesLabel, notice, { citeSources: !catalog, catalog });
 
+        const fullSystemPrompt = webSearch ? `${systemPrompt}
+
+${WEB_SEARCH_PROMPT}` : systemPrompt;
+
         const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: fullSystemPrompt },
           ...history,
           { role: "user", content: message },
         ];
@@ -187,18 +212,11 @@ export async function POST(
           })();
         }
 
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: chatMessages,
-          temperature: 0.3,
-          max_tokens: 1200,
-          stream: true,
-          stream_options: { include_usage: true },
-        });
-
         let fullContent = "";
         let promptTokens = 0;
         let completionTokens = 0;
+        let webSearches = 0;
+        const webSources = new Map<string, ChatSource>();
 
         // The model ends its answer with "<<FONTES: 1, 3>>" (see citeSources in
         // rag-query.ts). Hold that tail back from the stream: emit only the
@@ -213,20 +231,68 @@ export async function POST(
           }
           return text.length;
         };
+        const pushDelta = (delta: string) => {
+          fullContent += delta;
+          const end = safeEnd(fullContent);
+          if (end > emitted) {
+            sendEvent({ type: "delta", content: fullContent.slice(emitted, end) });
+            emitted = end;
+          }
+        };
 
-        for await (const chunk of completion) {
-          const delta = chunk.choices[0]?.delta?.content;
-          if (delta) {
-            fullContent += delta;
-            const end = safeEnd(fullContent);
-            if (end > emitted) {
-              sendEvent({ type: "delta", content: fullContent.slice(emitted, end) });
-              emitted = end;
+        if (webSearch) {
+          // Responses API: the only one that carries the web_search tool. The
+          // model decides whether and what to search; the pages it used come
+          // back as url_citation annotations, which become "web" source cards.
+          const responseStream = await openai.responses.create({
+            model: "gpt-4o-mini",
+            instructions: fullSystemPrompt,
+            input: [...history, { role: "user" as const, content: message }],
+            tools: [{ type: "web_search" }],
+            temperature: 0.3,
+            max_output_tokens: 1200,
+            stream: true,
+          });
+
+          for await (const event of responseStream) {
+            if (event.type === "response.web_search_call.searching") {
+              webSearches += 1;
+              sendEvent({ type: "status", text: "Pesquisando na internet…" });
+            } else if (event.type === "response.output_text.delta") {
+              pushDelta(event.delta);
+            } else if (event.type === "response.output_text.annotation.added") {
+              const annotation = event.annotation as { type?: string; url?: string; title?: string };
+              if (annotation.type === "url_citation" && annotation.url && !webSources.has(annotation.url)) {
+                webSources.set(annotation.url, {
+                  type: "web",
+                  title: annotation.title?.trim() || hostnameOf(annotation.url),
+                  href: annotation.url,
+                });
+              }
+            } else if (event.type === "response.completed") {
+              promptTokens = event.response.usage?.input_tokens ?? 0;
+              completionTokens = event.response.usage?.output_tokens ?? 0;
+            } else if (event.type === "response.failed" || event.type === "error") {
+              throw new Error("Web search response failed");
             }
           }
-          if (chunk.usage) {
-            promptTokens = chunk.usage.prompt_tokens;
-            completionTokens = chunk.usage.completion_tokens;
+        } else {
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: chatMessages,
+            temperature: 0.3,
+            max_tokens: 1200,
+            stream: true,
+            stream_options: { include_usage: true },
+          });
+
+          for await (const chunk of completion) {
+            const delta = chunk.choices[0]?.delta?.content;
+            if (delta) pushDelta(delta);
+            if (chunk.usage) {
+              promptTokens = chunk.usage.prompt_tokens;
+              completionTokens = chunk.usage.completion_tokens;
+            }
           }
         }
 
@@ -253,11 +319,13 @@ export async function POST(
                 .filter((k): k is string => Boolean(k))
             )
           : null;
-        const sources =
+        const ownSources =
           cited && cited.size > 0
             ? Array.from(sourcesMap.entries()).filter(([key]) => cited.has(key)).map(([, item]) => item)
             : allSources;
-        const uncertain = sources.length > 0 && !catalog && /n[ãa]o\s+(foi|foram)\s+encontrad/i.test(fullContent);
+        const sources = [...ownSources, ...webSources.values()];
+        // "Uncertain" is about the person's own sources; a web answer is a different kind of claim.
+        const uncertain = ownSources.length > 0 && webSources.size === 0 && !catalog && /n[ãa]o\s+(foi|foram)\s+encontrad/i.test(fullContent);
         if (sources.length > 0) {
           sendEvent({ type: "sources", sources, uncertain });
         }
@@ -284,7 +352,8 @@ export async function POST(
           "gpt-4o-mini",
           promptTokens,
           completionTokens,
-          (promptTokens / 1_000_000) * 0.15 + (completionTokens / 1_000_000) * 0.6
+          // + the web_search tool's per-call fee (~$10 per 1k calls)
+          (promptTokens / 1_000_000) * 0.15 + (completionTokens / 1_000_000) * 0.6 + webSearches * 0.01
         );
 
         sendEvent({ type: "done" });

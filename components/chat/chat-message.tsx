@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { AlertTriangle, BookMarked, BookOpen, FileText, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
+import { AlertTriangle, BookMarked, BookOpen, FileText, Globe, NotebookPen, Scroll, Sparkles, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatSource } from "@/lib/store/chat-store";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
@@ -90,6 +90,7 @@ function sourceHref(source: ChatSource): string {
 }
 
 function sourceIcon(type: string) {
+  if (type === "web") return Globe;
   if (type === "jwpub") return FileText;
   if (type === "pdf") return FileText;
   if (type === "estudo_pessoal") return BookMarked;

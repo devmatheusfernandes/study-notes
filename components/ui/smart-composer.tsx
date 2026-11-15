@@ -9,6 +9,7 @@ import {
   BookOpen,
   FileText,
   FolderPlus,
+  Globe,
   NotebookPen,
   Scroll,
   Sparkles,
@@ -74,7 +75,7 @@ interface SmartComposerBaseProps {
 
 interface SmartComposerChatProps extends SmartComposerBaseProps {
   variant: "chat";
-  onSend: (message: string, allowedSourceTypes: string[]) => void;
+  onSend: (message: string, allowedSourceTypes: string[], webSearch: boolean) => void;
   disabled?: boolean;
   /** While set, the input row is replaced by this animated, centred status ("Procurando vídeos…"). */
   statusText?: string;
@@ -107,6 +108,9 @@ export function SmartComposer(props: SmartComposerProps) {
   // "folder-input" phase: inline folder name entry
   const [drawerPhase, setDrawerPhase] = useState<"menu" | "folder-input">("menu");
   const [folderName, setFolderName] = useState("");
+  // Internet search (chat variant). Off by default and deliberately NOT persisted: it sends the question to a
+  // web search outside the person's own material, so each visit to a chat starts without it.
+  const [webSearch, setWebSearch] = useState(false);
 
   // Drag-to-create (notes variant only)
   const [armed, setArmed] = useState(false);
@@ -269,7 +273,7 @@ export function SmartComposer(props: SmartComposerProps) {
     if (props.variant !== "chat") return;
     const trimmed = value.trim();
     if (!trimmed || props.disabled) return;
-    props.onSend(trimmed, selectedFilters);
+    props.onSend(trimmed, selectedFilters, webSearch);
     setValue("");
   }
 
@@ -554,6 +558,22 @@ export function SmartComposer(props: SmartComposerProps) {
                 </button>
               );
             })}
+            <span aria-hidden className="mx-1 h-4 w-px bg-foreground/15" />
+            <button
+              type="button"
+              onClick={() => setWebSearch((v) => !v)}
+              aria-pressed={webSearch}
+              title="Pesquisar também na internet, além das suas fontes"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-all",
+                webSearch
+                  ? "bg-accent/20 border border-accent/50 text-accent shadow-xs"
+                  : "bg-foreground/5 border border-foreground/10 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+              )}
+            >
+              <Globe className="size-3 shrink-0" />
+              <span>Internet</span>
+            </button>
           </div>
         </motion.div>
       )}
@@ -724,7 +744,7 @@ export function SmartComposer(props: SmartComposerProps) {
           >
             <Sparkles className="size-3.5" />
             {/* badge for narrowed chat filters */}
-            {isChat && hasNarrowedFilters && !drawerOpen && (
+            {isChat && (hasNarrowedFilters || webSearch) && !drawerOpen && (
               <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-glass" />
             )}
           </button>

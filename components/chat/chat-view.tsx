@@ -51,12 +51,12 @@ export function ChatView({ conversationId, docked = false }: ChatViewProps) {
   }, [messages]);
 
   const streamResponse = useCallback(
-    async (questionText: string, allowedSourceTypes: string[]) => {
+    async (questionText: string, allowedSourceTypes: string[], webSearch: boolean) => {
       try {
         const response = await fetch(`/chats/${conversationId}/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: questionText, allowedSourceTypes }),
+          body: JSON.stringify({ message: questionText, allowedSourceTypes, webSearch }),
         });
 
         if (!response.ok || !response.body) {
@@ -118,7 +118,7 @@ export function ChatView({ conversationId, docked = false }: ChatViewProps) {
   );
 
   const sendMessage = useCallback(
-    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"]) => {
+    async (content: string, allowedSourceTypes: string[] = ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"], webSearch = false) => {
       // 1. Optimistic user message, and the assistant's "thinking" placeholder
       // right behind it — not after the persist below, which is a server round
       // trip during which the person would otherwise see their message and
@@ -134,7 +134,7 @@ export function ChatView({ conversationId, docked = false }: ChatViewProps) {
       }
 
       // 3. Start streaming assistant response
-      await streamResponse(content, allowedSourceTypes);
+      await streamResponse(content, allowedSourceTypes, webSearch);
     },
     [conversationId, addUserMsg, startStream, failStream, streamResponse]
   );
