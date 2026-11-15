@@ -177,7 +177,7 @@ export function ChatView({ conversationId, docked = false }: ChatViewProps) {
     >
       {/* Scrollable conversation messages container */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-4 pt-6 pb-32 sm:px-6">
-        <div className="mx-auto flex max-w-2xl sm:max-w-3xl flex-col gap-4">
+        <div className="mx-auto flex w-full min-w-0 max-w-2xl sm:max-w-3xl flex-col gap-4">
           {messages.length === 0 && hasPendingQuery && (
             // The question this chat was opened with, until the auto-send
             // below puts the real messages in the store. Same markup as

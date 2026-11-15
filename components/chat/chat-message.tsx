@@ -108,6 +108,16 @@ function renderMarkdown(text: string): string {
     )
     // Inline code
     .replace(/`([^`]+)`/g, '<code class="rounded bg-background/60 px-1.5 py-0.5 text-[12px] font-mono">$1</code>')
+    // Links — [text](https://…); only http(s), opened in a new tab
+    .replace(
+      /\[([^\]\n]+)\][\s​ ]*\([\s​]*(https?:\/\/[^\s)]+(?:\([^\s)]*\)[^\s)]*)*)[\s​]*\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-accent underline underline-offset-2 break-all">$1</a>'
+    )
+    // Bare URLs the model left unformatted
+    .replace(
+      /(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+      '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="text-accent underline underline-offset-2 break-all">$2</a>'
+    )
     // Bold
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     // Italic
@@ -150,7 +160,7 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
       transition={{ duration: 0.25, ease: "easeOut" }}
       className="flex flex-col gap-2"
     >
-      <div className="flex items-start gap-2.5 max-w-[92%]">
+      <div className="flex min-w-0 items-start gap-2.5 max-w-[92%]">
         <span
           className={cn(
             "mt-1 flex size-6 shrink-0 items-center justify-center rounded-full transition-all",
@@ -163,7 +173,7 @@ export function ChatMessage({ role, content, sources, sourcesUncertain, isStream
         </span>
         <div
           className={cn(
-            "flex-1 rounded-[20px_20px_20px_6px] px-4 py-3.5 text-[13.5px] leading-relaxed transition-all",
+            "min-w-0 flex-1 break-words rounded-[20px_20px_20px_6px] px-4 py-3.5 text-[13.5px] leading-relaxed transition-all [overflow-wrap:anywhere]",
             "bg-secondary text-foreground/90",
             isStreaming && !content && "min-w-[70%]"
           )}
