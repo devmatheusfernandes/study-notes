@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ChevronLeft, ChevronRight, List, RefreshCw, X } from "lucide-react";
+import { useFullscreen } from "@/hooks/use-fullscreen";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -234,6 +235,7 @@ export function JwpubReader({
   const [html, setHtml] = useState<string | null>(null);
   const [isLoadingChapter, setIsLoadingChapter] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
+  const fullscreen = useFullscreen();
   const [isReprocessing, setIsReprocessing] = useState(false);
   // The header's ↻ asks first: reprocessing re-reads the whole archive, which
   // on a big publication takes minutes, and it was easy to hit by accident.
@@ -937,6 +939,18 @@ export function JwpubReader({
 
           {/* Where the "open last reference" button used to be — the history is useful while reading too. Shown at every width here (the header has no avatar menu to move it into). */}
           <HistoryVaultButton className="inline-flex shrink-0 rounded-full text-muted-foreground" />
+
+          {fullscreen.supported && (
+            <button
+              type="button"
+              onClick={() => void fullscreen.toggle()}
+              aria-label={fullscreen.isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+              title={fullscreen.isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+              className="shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {fullscreen.isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </button>
+          )}
 
           {chapters.length > 0 && (
             <button
