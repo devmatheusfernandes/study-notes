@@ -46,7 +46,7 @@ const DETAIL_TITLES: Record<BibleSearchDetail["kind"], string> = {
 };
 
 const PROSE_CLASS =
-  "text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl";
+  "text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full";
 
 interface BibleSearchDetailPanelProps {
   detail: BibleSearchDetail | null;

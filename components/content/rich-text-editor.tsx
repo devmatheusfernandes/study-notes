@@ -21,6 +21,8 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import TextAlign from "@tiptap/extension-text-align";
 import Image from "@tiptap/extension-image";
+import { ImageUploadNode } from "./image-upload-node-extension";
+import { MAX_IMAGE_SIZE } from "@/lib/storage-config";
 // Deliberately from @tiptap/extension-list (not the standalone
 // @tiptap/extension-task-list / -task-item packages): StarterKit already
 // wires up that package's ListKeymap for Enter/Tab/Backspace, and it isn't
@@ -88,15 +90,23 @@ function bubbleMenuShouldShow({ state }: { state: { selection: { empty: boolean 
   return !state.selection.empty;
 }
 
-async function insertImageFile(editor: Editor, file: File) {
-  if (!file.type.startsWith("image/")) return;
-
+/** Uploads an image to the note-images bucket and resolves to its public URL; throws with the server's message. */
+async function uploadImageFile(file: File): Promise<string> {
   const formData = new FormData();
   formData.set("file", file);
   const { url, error } = await uploadNoteImage(formData);
+  if (error || !url) throw new Error(error ?? "Falha ao enviar a imagem.");
+  return url;
+}
 
-  if (error || !url) {
-    notify.error("Não foi possível enviar a imagem", error);
+async function insertImageFile(editor: Editor, file: File) {
+  if (!file.type.startsWith("image/")) return;
+
+  let url: string;
+  try {
+    url = await uploadImageFile(file);
+  } catch (error) {
+    notify.error("Não foi possível enviar a imagem", error instanceof Error ? error.message : undefined);
     return;
   }
   // Collapse to the end of whatever was selected first — inserting an image
@@ -172,7 +182,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   ref
 ) {
   const seeded = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* --------------------------------------------------------------- *
    * References — "(mt 7:12)" input rule + the "/" menu
@@ -521,7 +530,13 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       StarterKit,
       NoteHighlight,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Image.configure({ HTMLAttributes: { class: "rounded-2xl max-w-full" } }),
+      Image.configure({ HTMLAttributes: { class: "max-w-full" } }),
+      ImageUploadNode.configure({
+        accept: "image/*",
+        maxSize: MAX_IMAGE_SIZE,
+        upload: uploadImageFile,
+        onError: (error) => notify.error("Não foi possível enviar a imagem", error.message),
+      }),
       TaskList,
       CustomTaskItem,
       Placeholder.configure({ placeholder: placeholder ?? "Comece a escrever…" }),
@@ -618,7 +633,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   });
 
   useImperativeHandle(ref, () => ({
-    openImagePicker: () => fileInputRef.current?.click(),
+    openImagePicker: () => {
+      editor?.chain().focus().setImageUploadNode().run();
+    },
     openFind: () => openFindBar(),
     scrollToText: (text: string) => {
       const target = text.trim().toLowerCase();
@@ -814,18 +831,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           </>
         )}
       </BubbleMenu>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (file) void insertImageFile(editor, file);
-        }}
-      />
 
       <EditorContent editor={editor} />
 

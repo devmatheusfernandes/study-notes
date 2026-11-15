@@ -551,7 +551,7 @@ export function NoteCard({
           <img
             src={previewImageUrl}
             alt=""
-            className="max-h-40 w-full rounded-xl object-cover"
+            className="max-h-40 w-full object-cover"
           />
         )}
 

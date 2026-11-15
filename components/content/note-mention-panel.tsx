@@ -86,7 +86,7 @@ export function NoteMentionPanel({ mention, onClose }: NoteMentionPanelProps) {
           {html ? (
             <div
               ref={bodyRef}
-              className="text-[14px] leading-relaxed text-foreground/90 [&_img]:max-w-full [&_img]:rounded-xl [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+              className="text-[14px] leading-relaxed text-foreground/90 [&_img]:max-w-full [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
               dangerouslySetInnerHTML={{ __html: html }}
             />
           ) : (

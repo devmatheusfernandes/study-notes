@@ -468,7 +468,7 @@ export function JwpubChapterView({
           "[&_p]:my-3 [&_p]:text-pretty",
           "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5",
           "[&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground",
-          "[&_img]:my-4 [&_img]:max-w-full [&_img]:rounded-2xl",
+          "[&_img]:my-4 [&_img]:max-w-full",
           "[&_table]:my-4 [&_table]:w-full [&_table]:text-[13.5px] [&_td]:border [&_td]:border-border [&_td]:p-2",
           // Footnote markers and resolved bible refs read as tappable; unresolved inline references stay inert.
           "[&_[data-jwpub-footnote]]:cursor-pointer [&_[data-jwpub-footnote]]:text-accent [&_[data-jwpub-footnote]]:underline [&_[data-jwpub-footnote]]:underline-offset-2",

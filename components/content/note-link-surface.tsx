@@ -39,7 +39,7 @@ export function NoteLinkSurface({ open, note, fallbackTitle, onOpen, onClose }: 
           </Button>
           {preview?.imageUrl && (
             // eslint-disable-next-line @next/next/no-img-element -- a preview thumbnail, same treatment note-card.tsx already gives it
-            <img src={preview.imageUrl} alt="" className="max-w-full rounded-xl" />
+            <img src={preview.imageUrl} alt="" className="max-w-full" />
           )}
           {preview?.checklist ? (
             <ul className="flex flex-col gap-1.5 text-[13.5px]">

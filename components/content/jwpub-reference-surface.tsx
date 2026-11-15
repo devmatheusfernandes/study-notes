@@ -250,7 +250,7 @@ function Body({
         <SidebarHighlightedHtml
           html={safeHtml}
           mepsDocumentId={target.mepsDocumentId ?? null}
-          className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded-xl"
+          className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full"
         />
       </div>
     </div>
