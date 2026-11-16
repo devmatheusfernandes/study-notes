@@ -32,6 +32,8 @@ import { AppWindow } from "lucide-react";
 import { useIsMobile } from "@/hooks/ui/use-device";
 import { useFloatingWindowsStore } from "@/lib/store/floating-windows-store";
 import { FloatingWindow } from "./floating-window";
+import { RsvpButton } from "@/components/content/rsvp-button";
+import { versesToHtml } from "@/lib/rsvp/verses";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { BibleAppendixSurface } from "./bible-appendix-surface";
 import { JwpubReferenceSurface } from "./jwpub-reference-surface";
@@ -245,7 +247,10 @@ function VerseText({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[11px] tracking-[0.06em] text-accent">{reference(verses)}</span>
-        {headerAction}
+        <div className="flex items-center gap-1">
+          <RsvpButton size="sm" title={reference(verses)} html={versesToHtml(verses)} />
+          {headerAction}
+        </div>
       </div>
       <div ref={containerRef} className="text-[14.5px] leading-relaxed text-foreground/90">
         {/* whitespace-pre-line: see the comment in bible-chapter-view.tsx — verse text carries real `\n` for poetry. */}

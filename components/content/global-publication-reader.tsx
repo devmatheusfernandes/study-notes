@@ -19,6 +19,7 @@ import { getChapter, resolveJwpubReferences } from "@/app/(app)/jwpub-actions";
 import { getBibleVersesBatch, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import { isResearchGuideIntroduction, isResearchGuideTopic } from "@/lib/bible/research-guide-topics";
+import { RsvpButton } from "@/components/content/rsvp-button";
 import { JwpubSidePanel } from "./jwpub-side-panel";
 import { JwpubExtractSurface, type JwpubExtractItem } from "./jwpub-extract-surface";
 import { JwpubReferenceSurface, type JwpubReferenceTarget } from "./jwpub-reference-surface";
@@ -529,7 +530,12 @@ function PublicationArticle({
         onClose={closePanel}
       />
 
-      <JwpubSidePanel open={panel?.kind === "footnote"} title="Nota de rodapé" onClose={closePanel}>
+      <JwpubSidePanel
+        open={panel?.kind === "footnote"}
+        title="Nota de rodapé"
+        onClose={closePanel}
+        headerActions={<RsvpButton size="sm" title="Nota de rodapé" html={panel?.kind === "footnote" ? panel.html : null} />}
+      >
         {panel?.kind === "footnote" && panel.loading ? (
           <ReferenceContentSkeleton paragraphs={2} />
         ) : (

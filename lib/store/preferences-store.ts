@@ -11,6 +11,11 @@ interface PreferencesStore {
   selectedSourceFilters: string[];
   /** Handwriting with a stylus only, so a resting palm (or a stray finger) scrolls instead of drawing. Client-only like `jwlibraryViewMode`, and deliberately so: whether there's a pen is a property of *this device*, not of the account. Auto-enables the first time a real pen event arrives. */
   penOnly: boolean;
+  /** RSVP speed reader: words per minute, and whether it runs continuously ("flow") or stops at the end of every verse/paragraph ("study"). Client-only, per device. */
+  rsvpWpm: number;
+  rsvpMode: "flow" | "study";
+  setRsvpWpm: (wpm: number) => void;
+  setRsvpMode: (mode: "flow" | "study") => void;
   setViewMode: (mode: ViewMode) => void;
   setJwlibraryViewMode: (mode: ViewMode) => void;
   setPenOnly: (penOnly: boolean) => void;
@@ -26,6 +31,11 @@ export const usePreferencesStore = create<PreferencesStore>()(
       selectedSourceFilters: ["nota", "pdf", "jwpub", "video", "estudo_pessoal", "biblia"],
       // On by default: a stylus is the common reason to open the pen at all, and with it off a resting palm draws.
       penOnly: true,
+      rsvpWpm: 300,
+      rsvpMode: "flow",
+
+      setRsvpWpm: (rsvpWpm) => set({ rsvpWpm: Math.min(1000, Math.max(100, Math.round(rsvpWpm))) }),
+      setRsvpMode: (rsvpMode) => set({ rsvpMode }),
 
       setViewMode: (viewMode) => {
         set({ viewMode });

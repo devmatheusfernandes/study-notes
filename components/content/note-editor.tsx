@@ -14,6 +14,7 @@ import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { SyncStatusIndicator } from "@/components/content/sync-status";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/content/rich-text-editor";
 import { NoteReferenceSurface } from "@/components/content/note-reference-surface";
+import { RsvpButton } from "@/components/content/rsvp-button";
 import { DrawingCanvas } from "@/components/content/drawing-canvas";
 import { DrawingToolbar } from "@/components/content/drawing-toolbar";
 import { AudioRecordControl } from "@/components/content/audio-record-control";
@@ -702,6 +703,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                   >
                     <Search className="size-4" />
                   </button>
+                  <RsvpButton title={title || "Nova nota"} html={body} />
                   {/* Shown at every width: this header has no avatar menu to move it into. */}
                   <HistoryVaultButton className="inline-flex size-9 shrink-0 rounded-full text-muted-foreground" />
                   <button

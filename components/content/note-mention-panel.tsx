@@ -11,6 +11,7 @@ import { useLockStore } from "@/lib/store/lock-store";
 import type { NoteScriptureMention } from "@/app/(app)/note-scripture-actions";
 import { findCitationRange } from "@/lib/note-citation-range";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { RsvpButton } from "@/components/content/rsvp-button";
 
 /** Name of the CSS Custom Highlight registered for the citation — styled in globals.css as `::highlight(note-citation)`. */
 const CITATION_HIGHLIGHT = "note-citation";
@@ -72,7 +73,13 @@ export function NoteMentionPanel({ mention, onClose }: NoteMentionPanelProps) {
   }, [mention, html]);
 
   return (
-    <JwpubSidePanel open={mention !== null} title="Nota" onClose={onClose} width={420}>
+    <JwpubSidePanel
+      open={mention !== null}
+      title="Nota"
+      onClose={onClose}
+      width={420}
+      headerActions={<RsvpButton size="sm" title={note?.title || "Nota"} html={html} />}
+    >
       {isHidden ? (
         <div className="flex flex-col items-start gap-3 py-6">
           <p className="text-[13px] text-muted-foreground">Esta nota está trancada.</p>

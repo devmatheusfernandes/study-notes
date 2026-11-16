@@ -37,6 +37,7 @@ import { useWakeLock } from "@/hooks/use-wake-lock";
 import { useOpenPublicationSource } from "@/hooks/use-open-publication-source";
 import type { ChapterSummary, JwpubTocItem, PublicationSummary } from "@/lib/jwpub/types";
 import { Progress } from "@/components/ui/progress";
+import { RsvpButton } from "@/components/content/rsvp-button";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { HistoryVaultButton } from "@/components/layout/history-vault-button";
 import { useIngestProgress, useIngestProgressStore } from "@/lib/store/ingest-progress-store";
@@ -950,6 +951,10 @@ export function JwpubReader({
 
           {/* Where the "open last reference" button used to be — the history is useful while reading too. Shown at every width here (the header has no avatar menu to move it into). */}
           <HistoryVaultButton className="inline-flex shrink-0 rounded-full text-muted-foreground" />
+
+          {view === "chapter" && !failed && (
+            <RsvpButton title={activeChapter?.title ?? publication.title} html={html} />
+          )}
 
           {fullscreen.supported && (
             <button

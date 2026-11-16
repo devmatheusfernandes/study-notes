@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { RsvpButton } from "@/components/content/rsvp-button";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
 
@@ -86,6 +87,7 @@ export function JwpubExtractSurface({
       onBack={openNote ? openNote.back : undefined}
       onClose={onClose}
       raiseKey={raiseKey}
+      headerActions={<RsvpButton size="sm" title={title} html={isLoading ? null : extracts.map((e) => e.html).join(" ")} />}
     >
       {isLoading ? (
         <ReferenceContentSkeleton paragraphs={2} withHeading />

@@ -2,6 +2,7 @@
 
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { RsvpButton } from "@/components/content/rsvp-button";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
 interface JwpubFootnoteSurfaceProps {
@@ -33,7 +34,13 @@ function Body({ html, isLoading }: { html: string | null; isLoading: boolean }) 
 
 export function JwpubFootnoteSurface({ open, html, isLoading, onClose, raiseKey }: JwpubFootnoteSurfaceProps) {
   return (
-    <JwpubSidePanel open={open} title="Nota de rodapé" onClose={onClose} raiseKey={raiseKey}>
+    <JwpubSidePanel
+      open={open}
+      title="Nota de rodapé"
+      onClose={onClose}
+      raiseKey={raiseKey}
+      headerActions={<RsvpButton size="sm" title="Nota de rodapé" html={html} />}
+    >
       <Body html={html} isLoading={isLoading} />
     </JwpubSidePanel>
   );

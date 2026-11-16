@@ -11,6 +11,7 @@ import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { getWolArticle } from "@/app/(app)/wol-lookup-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { RsvpButton } from "@/components/content/rsvp-button";
 import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
 import { ReferenceContentSkeleton } from "./reference-surface-skeleton";
 
@@ -301,7 +302,13 @@ export function JwpubReferenceSurface({
       title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
       subtitle={!target ? unresolvedQuery : null}
       headerActions={
-        canDownload ? (
+        <>
+          <RsvpButton
+            size="sm"
+            title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
+            html={html}
+          />
+          {canDownload ? (
           <button
             type="button"
             onClick={() => void download()}
@@ -312,7 +319,8 @@ export function JwpubReferenceSurface({
           >
             {isDownloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           </button>
-        ) : null
+          ) : null}
+        </>
       }
       onClose={onClose}
       raiseKey={raiseKey}

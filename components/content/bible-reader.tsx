@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Layers } from "lucide-react";
+import { RsvpButton } from "@/components/content/rsvp-button";
+import { versesToHtml } from "@/lib/rsvp/verses";
 import { cn } from "@/lib/utils";
 import { mergeHighlightRange } from "@/lib/highlight-merge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +86,8 @@ interface BibleTopHeaderProps {
   backLabel?: string;
   studyOpen?: boolean;
   onToggleStudy?: () => void;
+  /** Text the header's speed-reader button reads (HTML); no button when empty. */
+  rsvpHtml?: string | null;
   userEmail?: string;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -108,6 +112,7 @@ function BibleTopHeader({
   backLabel = "Trocar de capítulo",
   studyOpen,
   onToggleStudy,
+  rsvpHtml,
   userEmail,
   searchQuery,
   onSearchQueryChange,
@@ -137,6 +142,7 @@ function BibleTopHeader({
           onSubmit={onSearchSubmit}
           onClear={onSearchClear}
         />
+        <RsvpButton title={title} html={rsvpHtml} />
         {onToggleStudy && (
           <button
             type="button"
@@ -866,9 +872,10 @@ export function BibleReader({
       <BibleAppendixPage
         key={openAppendixId}
         mepsDocumentId={openAppendixId}
-        renderHeader={(title) => (
+        renderHeader={(title, rsvpHtml) => (
           <BibleTopHeader
             title={title ?? "Apêndice"}
+            rsvpHtml={rsvpHtml}
             onBack={() => setScreen(returnScreenRef.current)}
             backLabel="Voltar"
             userEmail={userEmail}
@@ -935,6 +942,7 @@ export function BibleReader({
       <div className="flex min-w-0 flex-1 flex-col">
         <BibleTopHeader
           title={`${currentBook?.book ?? ""} ${chapter}`}
+          rsvpHtml={versesToHtml(verses)}
           onBack={() => setScreen("chapters")}
           studyOpen={studyOpen}
           onToggleStudy={() => setStudyOpen((v) => !v)}

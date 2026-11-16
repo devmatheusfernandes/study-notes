@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getBibleAppendix, type BibleAppendix } from "@/app/(app)/bible-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { RsvpButton } from "@/components/content/rsvp-button";
+
 import { HighlightableHtml } from "./highlightable-html";
 import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
 import { documentLocation, useDocumentAnnotations, type DocumentAnnotations } from "./document-annotations";
@@ -148,7 +150,7 @@ export function BibleAppendixContent({
 interface BibleAppendixPageProps {
   mepsDocumentId: number;
   /** The host's own page header (it owns search, back, etc.) — told the appendix's title once it has loaded. */
-  renderHeader: (title: string | null) => ReactNode;
+  renderHeader: (title: string | null, rsvpHtml: string | null) => ReactNode;
   onOpenBibleRef: (bookOrder: number, chapter: number, verse: number) => void;
   onOpenAppendix: (mepsDocumentId: number) => void;
 }
@@ -161,6 +163,7 @@ interface BibleAppendixPageProps {
  */
 export function BibleAppendixPage({ mepsDocumentId, renderHeader, onOpenBibleRef, onOpenAppendix }: BibleAppendixPageProps) {
   const [title, setTitle] = useState<string | null>(null);
+  const [contentHtml, setContentHtml] = useState<string | null>(null);
   const annotations = useDocumentAnnotations(
     documentLocation(APPENDIX_SYMBOL, mepsDocumentId),
     title ?? "Apêndice"
@@ -169,7 +172,7 @@ export function BibleAppendixPage({ mepsDocumentId, renderHeader, onOpenBibleRef
   return (
     <div className="flex min-h-dvh w-full flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        {renderHeader(title)}
+        {renderHeader(title, contentHtml)}
         <div className="flex-1 px-4 py-6 sm:px-6">
           <div className="mx-auto w-full max-w-3xl">
             <BibleAppendixContent
@@ -177,9 +180,10 @@ export function BibleAppendixPage({ mepsDocumentId, renderHeader, onOpenBibleRef
               variant="page"
               mepsDocumentId={mepsDocumentId}
               annotations={annotations}
-              onLoaded={(appendix) =>
-                setTitle(appendix ? (appendix.section === "header" ? appendix.title : `Apêndice ${appendix.letter}`) : null)
-              }
+              onLoaded={(appendix) => {
+                setContentHtml(appendix?.contentHtml ?? null);
+                setTitle(appendix ? (appendix.section === "header" ? appendix.title : `Apêndice ${appendix.letter}`) : null);
+              }}
               onOpenAppendix={onOpenAppendix}
               onOpenBibleRef={onOpenBibleRef}
             />
@@ -221,6 +225,7 @@ export function BibleAppendixSurface({
       title={loaded?.section === "header" ? loaded.title : "Apêndice"}
       onClose={onClose}
       width={460}
+      headerActions={<RsvpButton size="sm" title={loaded?.title ?? "Apêndice"} html={loaded?.contentHtml} />}
     >
       {mepsDocumentId !== null && (
         <BibleAppendixContent

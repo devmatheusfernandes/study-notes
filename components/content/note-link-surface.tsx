@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { parseNotePreview } from "@/lib/note-preview";
 import type { Note } from "@/lib/store/notes-store";
 import { JwpubSidePanel } from "./jwpub-side-panel";
+import { RsvpButton } from "@/components/content/rsvp-button";
 
 interface NoteLinkSurfaceProps {
   open: boolean;
@@ -27,7 +28,12 @@ export function NoteLinkSurface({ open, note, fallbackTitle, onOpen, onClose }: 
   const preview = note ? parseNotePreview(note.body) : null;
 
   return (
-    <JwpubSidePanel open={open} title={note?.title || fallbackTitle || "Nota"} onClose={onClose}>
+    <JwpubSidePanel
+      open={open}
+      title={note?.title || fallbackTitle || "Nota"}
+      onClose={onClose}
+      headerActions={<RsvpButton size="sm" title={note?.title || fallbackTitle || "Nota"} html={note?.body} />}
+    >
       {!note ? (
         <p className="text-[13.5px] text-muted-foreground">
           Essa nota não foi encontrada — pode ter sido excluída.
