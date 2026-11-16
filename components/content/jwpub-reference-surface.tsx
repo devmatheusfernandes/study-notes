@@ -118,6 +118,19 @@ function DownloadPrompt({
   const loadingArticle = fetchArticle && article?.id !== mepsDocumentId;
   const articleRef = useRef<HTMLDivElement>(null);
 
+  // Images come straight from wol.jw.org; offline (or on a miss) they would show a broken-image icon with
+  // alt text, so a failed one is hidden. `error` doesn't bubble, hence the capture-phase listener.
+  const hasArticleHtml = Boolean(article?.html);
+  useEffect(() => {
+    const el = articleRef.current;
+    if (!el) return;
+    const hide = (event: Event) => {
+      if (event.target instanceof HTMLImageElement) event.target.style.display = "none";
+    };
+    el.addEventListener("error", hide, true);
+    return () => el.removeEventListener("error", hide, true);
+  }, [hasArticleHtml, fetchArticle]);
+
   // Scroll to (and briefly mark) the cited paragraph once the text is on screen.
   useEffect(() => {
     if (!pid || !fetchArticle || !article?.html || article.id !== mepsDocumentId) return;

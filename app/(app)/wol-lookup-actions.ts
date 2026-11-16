@@ -190,7 +190,9 @@ export async function getWolArticle(mepsDocumentId: number): Promise<{ title?: s
   html = html
     .replace(/<a\b[^>]*>/gi, "<span>")
     .replace(/<\/a>/gi, "</span>")
-    .replace(/<(script|style|iframe)\b[\s\S]*?<\/\1>/gi, "");
+    .replace(/<(script|style|iframe)\b[\s\S]*?<\/\1>/gi, "")
+    // Images are relative to wol.jw.org (`/pt/wol/mp/...`) — absolute, so they load from there instead of 404ing on this origin.
+    .replace(/(<img\b[^>]*?\bsrc=")(\/[^"]*)"/gi, '$1https://wol.jw.org$2"');
 
   const title = decode(/<(?:p|h1)\b[^>]*class="(?:st|title)[^"]*"[^>]*>([\s\S]*?)<\/(?:p|h1)>/.exec(html)?.[1] ?? "");
   return { title: title || undefined, html };
