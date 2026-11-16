@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Archive, ArchiveRestore, MessageSquare, MoreHorizontal, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, MessageSquare, MoreHorizontal, PanelRight, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { notify } from "@/components/ui/toaster";
 import { useChatStore, type ChatConversation } from "@/lib/store/chat-store";
+import { useChatDockStore } from "@/lib/store/chat-dock-store";
 import {
   archiveConversation,
   restoreConversation,
@@ -66,6 +67,7 @@ function ConversationItem({
   onRestore: (conv: ChatConversation) => void;
   onRequestDelete: (id: string) => void;
 }) {
+  const dock = useChatDockStore((s) => s.dock);
   return (
     <motion.div
       layout
@@ -98,6 +100,18 @@ function ConversationItem({
           <Badge variant="outline" className="shrink-0 text-[9px]">
             Arquivada
           </Badge>
+        )}
+
+        {compact && conv.status === "active" && (
+          <button
+            type="button"
+            aria-label="Abrir chat na lateral"
+            title="Abrir chat na lateral"
+            onClick={() => dock(conv.id)}
+            className="hidden shrink-0 rounded-full p-1 text-muted-foreground opacity-0 transition-all hover:text-accent group-hover:opacity-100 focus-visible:opacity-100 lg:inline-flex"
+          >
+            <PanelRight className="size-4" />
+          </button>
         )}
 
         {!compact && (

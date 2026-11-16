@@ -23,7 +23,8 @@ import {
 } from "@/app/(app)/jwlibrary-actions";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { loadAnswers, loadChapter, loadChapterHighlights, loadExtracts, loadFootnote } from "@/lib/offline/jwpub-data";
-import { queueCreateHighlight } from "@/lib/offline/jwlibrary-mutations";
+import { queueCreateHighlight, queueDeleteHighlight } from "@/lib/offline/jwlibrary-mutations";
+import { mergeHighlightRange } from "@/lib/highlight-merge";
 import { JW_MARKS_CHANGED_EVENT, useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import {
   OFFLINE_PUBLICATION_CHANGED_EVENT,
@@ -767,6 +768,15 @@ export function JwpubReader({
       // highlight the moment it appears — no temporary id to swap later. If the
       // server turns the write down the outbox announces it and the reader
       // reloads what is really saved.
+      // Overlapping marks in the same paragraph are merged into the new one, not stacked.
+      const merged = mergeHighlightRange(
+        highlights.filter((h) => h.pid === pid),
+        startToken,
+        endToken
+      );
+      for (const absorbedId of merged.absorbedIds) queueDeleteHighlight(absorbedId);
+      startToken = merged.startToken;
+      endToken = merged.endToken;
       const id = queueCreateHighlight({
         blockType: 1,
         blockIdentifier: Number(pid),
@@ -784,9 +794,10 @@ export function JwpubReader({
         startToken,
         endToken,
       });
-      setHighlights((prev) => [...prev, { id, pid, colorIndex, startToken, endToken, note: null }]);
+      const gone = new Set(merged.absorbedIds);
+      setHighlights((prev) => [...prev.filter((h) => !gone.has(h.id)), { id, pid, colorIndex, startToken, endToken, note: null }]);
     },
-    [publication, activeChapter]
+    [publication, activeChapter, highlights]
   );
 
   // "Adicionar nota" inside the note-less highlight panel — opens the full

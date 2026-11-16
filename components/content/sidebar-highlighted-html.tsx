@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { ChevronLeft, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,11 @@ interface SidebarHighlightedHtmlProps {
   /** For an excerpt: its article's title, so marks filed under a twin document of the same article are found too. */
   titleHint?: string | null;
   className?: string;
+  /**
+   * When given, the host's panel header owns the "back to the text" button: this is called with the
+   * handler while a note is open and with null when it closes, and the in-body Voltar button is dropped.
+   */
+  onNoteChange?: (back: (() => void) | null) => void;
 }
 
 /** The element that actually scrolls behind `from` — the side panel's body, or null when it's the page. */
@@ -42,7 +47,7 @@ function scrollParent(from: HTMLElement | null): HTMLElement | null {
  * text stays mounted underneath the note (just hidden), so going back doesn't
  * re-render the article or lose its scroll position.
  */
-export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, className }: SidebarHighlightedHtmlProps) {
+export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, className, onNoteChange }: SidebarHighlightedHtmlProps) {
   const { highlights, refresh } = useDocumentHighlights(mepsDocumentId, titleHint);
   const wrapRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef(0);
@@ -60,7 +65,7 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
     setOpenNoteId(click.highlight.note.id);
   }, []);
 
-  function back() {
+  const back = useCallback(() => {
     setOpenNoteId(null);
     setEditing(false);
     // Once the hidden text is visible again, put the reader back where they were.
@@ -69,7 +74,14 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
       if (scroller) scroller.scrollTop = savedScroll.current;
       else window.scrollTo(0, savedScroll.current);
     });
-  }
+  }, []);
+
+  const noteOpen = note !== null;
+  useEffect(() => {
+    if (!onNoteChange) return;
+    onNoteChange(noteOpen ? back : null);
+    return () => onNoteChange(null);
+  }, [noteOpen, back, onNoteChange]);
 
   const color = openHighlight && openHighlight.colorIndex !== null
     ? (JWLIBRARY_HIGHLIGHT_COLORS[openHighlight.colorIndex]?.hex ?? null)
@@ -88,14 +100,11 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
 
       {note && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-2">
-            <Button variant="ghost" size="sm" leftIcon={<ChevronLeft />} onClick={back} className="-ml-2">
+          {!onNoteChange && (
+            <Button variant="ghost" size="sm" leftIcon={<ChevronLeft />} onClick={back} className="-ml-2 self-start">
               Voltar ao trecho
             </Button>
-            <Button variant="ghost" size="sm" leftIcon={<Pencil />} onClick={() => setEditing(true)}>
-              Editar
-            </Button>
-          </div>
+          )}
 
           <div className="flex items-center gap-2">
             <span
@@ -104,6 +113,16 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
               aria-hidden
             />
             <span className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">NOTA</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Editar nota"
+              title="Editar nota"
+              onClick={() => setEditing(true)}
+              className="ml-auto size-7"
+            >
+              <Pencil className="size-3.5" />
+            </Button>
           </div>
 
           {note.title && <span className="font-heading text-[15px]">{note.title}</span>}

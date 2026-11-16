@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { mergeHighlightRange } from "@/lib/highlight-merge";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
 import { useWakeLock } from "@/hooks/use-wake-lock";
@@ -707,8 +708,22 @@ export function BibleReader({
   // it's rolled back on failure.
   const handleCreateHighlight = useCallback(
     (verse: number, startToken: number, endToken: number, colorIndex: number) => {
+      // Overlapping marks in the same verse are merged into the new one, not stacked.
+      const merged = mergeHighlightRange(
+        highlights.filter((h) => h.verse === verse),
+        startToken,
+        endToken
+      );
+      startToken = merged.startToken;
+      endToken = merged.endToken;
+      const gone = new Set(merged.absorbedIds);
+      for (const absorbedId of merged.absorbedIds) void deleteJwlibraryHighlight(absorbedId);
+
       const tempId = `optimistic:${crypto.randomUUID()}`;
-      setHighlights((prev) => [...prev, { id: tempId, verse, colorIndex, startToken, endToken, note: null }]);
+      setHighlights((prev) => [
+        ...prev.filter((h) => !gone.has(h.id)),
+        { id: tempId, verse, colorIndex, startToken, endToken, note: null },
+      ]);
 
       void createJwlibraryHighlight({
         blockType: 2,
@@ -738,7 +753,7 @@ export function BibleReader({
         setHighlights((prev) => prev.map((h) => (h.id === tempId ? { ...h, id: realId } : h)));
       });
     },
-    [bookOrder, chapter]
+    [bookOrder, chapter, highlights]
   );
 
   // "Adicionar nota" inside the note-less highlight panel — opens the full

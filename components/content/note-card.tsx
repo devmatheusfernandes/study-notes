@@ -443,15 +443,18 @@ export function NoteCard({
           </span>
         )}
         {!processing && vectorStatus === "completed" && (
-          <span title="Vetorizado com IA" className="hidden shrink-0 items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25 sm:inline-flex">
-            <Sparkles className="size-2.5" />
-            Vetorizado
+          <span title="Vetorizado com IA" aria-label="Vetorizado com IA" className="hidden shrink-0 sm:inline-flex">
+            <Sparkles className="size-3.5 text-success" />
           </span>
         )}
         {!processing && (vectorStatus === "pending" || vectorStatus === "processing") && (
-          <span title="Vetorização em andamento" className="hidden shrink-0 items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-warning border border-warning/25 sm:inline-flex">
-            <Sparkles className="size-2.5 animate-pulse" />
-            Vetorizando…
+          <span title="Vetorização em andamento" aria-label="Vetorização em andamento" className="hidden shrink-0 sm:inline-flex">
+            <Sparkles className="size-3.5 animate-pulse text-warning" />
+          </span>
+        )}
+        {!processing && vectorStatus === "failed" && (
+          <span title="Falha ao vetorizar" aria-label="Falha ao vetorizar" className="hidden shrink-0 sm:inline-flex">
+            <Sparkles className="size-3.5 text-warning" />
           </span>
         )}
         {pinButton}
@@ -498,29 +501,18 @@ export function NoteCard({
           </span>
         )}
         {!processing && vectorStatus === "completed" && (
-          <span
-            title="Vetorizado com IA"
-            className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-accent border border-accent/25"
-          >
-            <Sparkles className="size-2.5 text-accent" />
-            Vetorizado
+          <span title="Vetorizado com IA" aria-label="Vetorizado com IA" className="inline-flex shrink-0">
+            <Sparkles className="size-3.5 text-success" />
           </span>
         )}
         {!processing && (vectorStatus === "pending" || vectorStatus === "processing") && (
-          <span
-            title="Vetorização em andamento"
-            className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-warning border border-warning/25"
-          >
-            <Sparkles className="size-2.5 animate-pulse text-warning" />
-            Vetorizando…
+          <span title="Vetorização em andamento" aria-label="Vetorização em andamento" className="inline-flex shrink-0">
+            <Sparkles className="size-3.5 animate-pulse text-warning" />
           </span>
         )}
         {!processing && vectorStatus === "failed" && (
-          <span
-            title="Falha ao vetorizar"
-            className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 font-mono text-[9.5px] font-medium text-destructive border border-destructive/25"
-          >
-            Sem vetor
+          <span title="Falha ao vetorizar" aria-label="Falha ao vetorizar" className="inline-flex shrink-0">
+            <Sparkles className="size-3.5 text-warning" />
           </span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-0.5">

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { JwpubSidePanel } from "./jwpub-side-panel";
@@ -9,6 +10,12 @@ import { SidebarHighlightedHtml } from "./sidebar-highlighted-html";
 /** The cited article's name out of `Extract.Caption`'s `<span class="etitle">…</span>`. */
 function captionTitle(caption: string | null): string | null {
   const match = caption?.match(/class="etitle"[^>]*>([^<]*)</);
+  return match ? match[1].replace(/&nbsp;/g, " ").trim() || null : null;
+}
+
+/** The location line out of the caption's `<span class="eloc">…</span>` ("nwt p. 1788"). */
+function captionLocation(caption: string | null): string | null {
+  const match = caption?.match(/class="eloc"[^>]*>([^<]*)</);
   return match ? match[1].replace(/&nbsp;/g, " ").trim() || null : null;
 }
 
@@ -59,10 +66,27 @@ export function JwpubExtractSurface({
   onOpenSource,
   raiseKey,
 }: JwpubExtractSurfaceProps) {
-  const title = extracts.length > 1 ? `${extracts.length} trechos` : (extracts[0]?.refTitle ?? "Trecho");
+  // While one of the excerpt's notes is open, the header takes over that excerpt's caption (article name over
+  // the "nwt p. 1788" location) and its back button, so the body doesn't spend lines on either.
+  const [openNote, setOpenNote] = useState<{ extractId: number; back: () => void } | null>(null);
+  const noteExtract = openNote ? extracts.find((e) => e.extractId === openNote.extractId) : undefined;
+
+  const title = noteExtract
+    ? (captionTitle(noteExtract.caption) ?? noteExtract.refTitle ?? "Trecho")
+    : extracts.length > 1
+      ? `${extracts.length} trechos`
+      : (extracts[0]?.refTitle ?? "Trecho");
+  const subtitle = noteExtract ? captionLocation(noteExtract.caption) : null;
 
   return (
-    <JwpubSidePanel open={open} title={title} onClose={onClose} raiseKey={raiseKey}>
+    <JwpubSidePanel
+      open={open}
+      title={title}
+      subtitle={subtitle}
+      onBack={openNote ? openNote.back : undefined}
+      onClose={onClose}
+      raiseKey={raiseKey}
+    >
       {isLoading ? (
         <ReferenceContentSkeleton paragraphs={2} withHeading />
       ) : extracts.length === 0 ? (
@@ -74,7 +98,7 @@ export function JwpubExtractSurface({
               key={extract.extractId}
               className={index > 0 ? "border-t border-border/60 pt-6" : undefined}
             >
-              {extract.caption ? (
+              {openNote?.extractId === extract.extractId ? null : extract.caption ? (
                 <div
                   className="mb-2 [&_.eloc]:block [&_.eloc]:font-mono [&_.eloc]:text-[10.5px] [&_.eloc]:uppercase [&_.eloc]:tracking-wide [&_.eloc]:text-muted-foreground [&_.etitle]:block [&_.etitle]:font-heading [&_.etitle]:text-[14px] [&_.etitle]:text-foreground"
                   dangerouslySetInnerHTML={{ __html: extract.caption }}
@@ -88,6 +112,10 @@ export function JwpubExtractSurface({
                 html={extract.html}
                 mepsDocumentId={extract.refMepsDocumentId}
                 titleHint={captionTitle(extract.caption)}
+                onNoteChange={(back) => {
+                  const id = extract.extractId;
+                  setOpenNote((prev) => (back ? { extractId: id, back } : prev?.extractId === id ? null : prev));
+                }}
                 className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full"
               />
 

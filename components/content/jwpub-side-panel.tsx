@@ -21,6 +21,8 @@ interface JwpubSidePanelProps {
   subtitle?: string | null;
   /** Icon buttons shown beside the close button. */
   headerActions?: React.ReactNode;
+  /** Back button at the left of the header that steps back *inside* this panel (e.g. from a note to the text), ahead of the stack's own back. */
+  onBack?: () => void;
 }
 
 /**
@@ -43,7 +45,7 @@ interface JwpubSidePanelProps {
  * pops the stack. Panels underneath stay mounted at width 0, so going back
  * restores them with their scroll position and loaded content intact.
  */
-export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey, subtitle, headerActions }: JwpubSidePanelProps) {
+export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey, subtitle, headerActions, onBack }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
   const id = useId();
   // Inside a floating window there is no shared sidebar to join: this panel covers the window's own body.
@@ -63,7 +65,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
           <button
             type="button"
-            onClick={onClose}
+            onClick={onBack ?? onClose}
             aria-label="Voltar"
             title="Voltar"
             className="-ml-1.5 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -86,6 +88,16 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
       <Vault open={open} onOpenChange={(next) => !next && onClose()}>
         <VaultContent aria-label={title}>
           <div className="flex items-start gap-2 pb-3">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Voltar ao trecho"
+                className="-ml-1.5 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+            )}
             <div className="mr-auto min-w-0">
               <VaultTitle className="font-heading text-base">{title}</VaultTitle>
               {subtitle && <p className="truncate font-mono text-[11px] text-muted-foreground">{subtitle}</p>}
@@ -115,12 +127,12 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
         >
           <div className="flex h-full flex-col" style={{ width }}>
             <header className="flex items-center gap-2.5 border-b border-border px-5 py-4">
-              {previousTitle && (
+              {(onBack || previousTitle) && (
                 <button
                   type="button"
-                  onClick={onClose}
-                  aria-label={`Voltar para ${previousTitle}`}
-                  title={`Voltar para ${previousTitle}`}
+                  onClick={onBack ?? onClose}
+                  aria-label={onBack ? "Voltar ao trecho" : `Voltar para ${previousTitle}`}
+                  title={onBack ? "Voltar ao trecho" : `Voltar para ${previousTitle}`}
                   className="-ml-2 shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 >
                   <ChevronLeft className="size-4" />

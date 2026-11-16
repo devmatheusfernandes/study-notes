@@ -27,7 +27,7 @@ interface FloatingWindowProps {
   id: string;
   title: string;
   onClose: () => void;
-  /** Fixed strip under the title bar (tabs), outside the scrolling body. */
+  /** Replaces the title inside the title bar (tabs), next to the close button. */
   toolbar?: React.ReactNode;
   /** The scrolling body. */
   children: React.ReactNode;
@@ -149,9 +149,9 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
           onPointerMove={update}
           onPointerUp={end}
           onPointerCancel={end}
-          className="flex shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b border-border bg-sidebar px-4 py-2.5 active:cursor-grabbing"
+          className="flex shrink-0 cursor-grab touch-none select-none items-center gap-2 border-b border-border bg-sidebar px-3 py-1.5 active:cursor-grabbing"
         >
-          <span className="mr-auto truncate font-heading text-[15px]">{title}</span>
+          {toolbar ? <div className="mr-auto min-w-0">{toolbar}</div> : <span className="mr-auto truncate font-heading text-[15px]">{title}</span>}
           <button
             type="button"
             onClick={onClose}
@@ -161,8 +161,6 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
             <X className="size-4" />
           </button>
         </header>
-
-        {toolbar}
 
         {/* The scroller is in normal flow (so an auto-height window can size to it); overlays sit over this
             wrapper rather than inside the scroller, so they don't scroll with the content. */}

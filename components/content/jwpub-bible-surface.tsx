@@ -550,7 +550,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
       windowTab === value ? "data-active:bg-primary/[0.18] data-active:text-accent" : "bg-secondary text-muted-foreground"
     );
   const windowToolbar = floating ? (
-    <div className="shrink-0 border-b border-border px-4 py-2">
+    <div>
       <Tabs value={windowTab} onValueChange={(value) => selectWindowTab(value as "texto" | "notas" | "highlights")}>
         <TabsList className="w-full justify-start gap-1.5 bg-transparent p-0 [&_[data-slot=tabs-trigger]]:flex-none [&_[data-slot=tabs-trigger]]:gap-1.5 [&_[data-slot=tabs-trigger]]:px-3">
           <TabsTrigger value="texto" className={windowTabPill("texto")}>
