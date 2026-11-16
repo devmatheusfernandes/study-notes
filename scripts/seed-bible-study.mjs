@@ -129,13 +129,17 @@ const outline = query(
  * 100% com o prefixo do próprio título de cada artigo antes de confiar nela
  * (nenhum dos 59 artigos discorda de qual seção o id-order atribui).
  */
+// Illustrations uploaded once by scripts/upload-nwtsty-media.mjs, shared by every user.
+const APPENDIX_MEDIA_BASE = env.NEXT_PUBLIC_SUPABASE_URL
+  ? `${env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/jwpub-media/global/nwtsty/`
+  : null;
 let currentLetter = null;
 const appendices = query("SELECT id, meps_document_id, section, title, content FROM appendices ORDER BY id").map(
   ([id, mepsId, section, title, content]) => {
     if (section === "header") {
       currentLetter = /Apêndice ([ABC])/.exec(title)?.[1] ?? currentLetter;
     }
-    return [id, mepsId, section, currentLetter, title, prepareStudyHtml(content, appendixMepsIds)];
+    return [id, mepsId, section, currentLetter, title, prepareStudyHtml(content, appendixMepsIds, APPENDIX_MEDIA_BASE)];
   }
 );
 

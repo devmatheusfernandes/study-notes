@@ -107,30 +107,39 @@ export function rewriteBibleStudyLinks(html, appendixMepsIds = new Set()) {
  * `href`/`src` com esquema estranho, mas os links internos já viraram
  * `data-*` antes disso — o allowlist abaixo é o que sobra.
  */
-export function sanitizeStudyHtml(html) {
-  return DOMPurify.sanitize(html, {
+export function sanitizeStudyHtml(html, mediaBase = null) {
+  const clean = DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     ALLOWED_ATTR: [
       "class", "id", "colspan", "rowspan",
       "data-pid", "data-fnid", "data-bid", "data-xtid",
       "data-bible-ref", "data-bible-ref-end", "data-bible-ref-raw",
       "data-jwpub-pubref", "data-jwpub-pubref-pid", "data-bible-appendix-ref",
+      // Only kept for <img>, and only when `src` points at `mediaBase` (checked below).
+      ...(mediaBase ? ["src", "alt", "width", "height"] : []),
     ],
-    // "img" is forbidden entirely, not just its `src`: 18 of the 62
-    // appendices reference `jwpub-media://...` illustrations, but
-    // data/nwt_st.sqlite has no media table backing this feature (unlike
-    // .jwpub ingest, which has a real asset pipeline — see
-    // uploadPublicationMedia in lib/jwpub/ingest.ts). An <img> with no `src`
-    // renders a broken-image icon; dropping the tag leaves the figcaption
-    // (kept — it's plain text describing the figure and reads fine alone).
-    FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed", "img"],
-    FORBID_ATTR: ["onerror", "onload", "onclick", "src", "srcset", "href", "style"],
+    // Without a `mediaBase` "img" is forbidden entirely: an <img> with no usable
+    // `src` renders a broken-image icon, while dropping the tag leaves the
+    // figcaption (plain text, reads fine alone). With one, the appendices' own
+    // illustrations — uploaded by scripts/upload-nwtsty-media.mjs — are kept.
+    FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed", ...(mediaBase ? [] : ["img"])],
+    FORBID_ATTR: ["onerror", "onload", "onclick", "srcset", "href", "style", ...(mediaBase ? [] : ["src"])],
+  });
+  if (!mediaBase) return clean;
+  // An image survives only if it points at our own shared media folder.
+  return clean.replace(/<img[^>]*>/gi, (tag) => {
+    const src = /src="([^"]*)"/.exec(tag)?.[1] ?? "";
+    return src.startsWith(mediaBase) ? tag : "";
   });
 }
 
 /** Reescreve e sanitiza, na ordem que importa. */
-export function prepareStudyHtml(html, appendixMepsIds = new Set()) {
-  return sanitizeStudyHtml(rewriteBibleStudyLinks(html ?? "", appendixMepsIds));
+export function prepareStudyHtml(html, appendixMepsIds = new Set(), mediaBase = null) {
+  let rewritten = rewriteBibleStudyLinks(html ?? "", appendixMepsIds);
+  if (mediaBase) {
+    rewritten = rewritten.replace(/jwpub-media:\/\/([^\s"'<>)]+)/g, (_m, name) => mediaBase + encodeURIComponent(decodeURIComponent(name).split("/").pop()));
+  }
+  return sanitizeStudyHtml(rewritten, mediaBase);
 }
 
 /**
