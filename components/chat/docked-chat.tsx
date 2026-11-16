@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { getConversationMessages } from "@/app/(app)/chat-actions";
 import { AnimatePresence, motion } from "framer-motion";
 import { Maximize2, X } from "lucide-react";
 import { useChatDockStore } from "@/lib/store/chat-dock-store";
@@ -26,6 +28,34 @@ export function DockedChat() {
   const conversationId = useChatDockStore((s) => s.conversationId);
   const close = useChatDockStore((s) => s.close);
   const title = useChatStore((s) => s.conversations.find((c) => c.id === conversationId)?.title);
+
+  // The chat page hydrates the store with its conversation's messages; docking from the sidebar
+  // skips that page, so load them here — unless the store already holds this conversation
+  // (docked from its own page), where reloading could clobber a reply still streaming in.
+  useEffect(() => {
+    if (!conversationId) return;
+    const chat = useChatStore.getState();
+    if (chat.activeConversationId === conversationId) return;
+    let cancelled = false;
+    chat.setActiveConversationId(conversationId);
+    chat.setMessages([]);
+    void getConversationMessages(conversationId).then(({ messages }) => {
+      if (cancelled) return;
+      useChatStore.getState().setMessages(
+        messages.map((r) => ({
+          id: r.id,
+          role: r.role,
+          content: r.content,
+          sources: r.sources,
+          sourcesUncertain: r.sourcesUncertain,
+          createdAt: r.createdAt,
+        }))
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   return (
     <AnimatePresence initial={false}>
