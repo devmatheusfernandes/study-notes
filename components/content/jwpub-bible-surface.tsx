@@ -454,6 +454,8 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
 
   const {
     referenceOpen,
+    referenceRaiseKey,
+    extractRaiseKey,
     referenceTarget,
     referenceHtml,
     isLoadingReference,
@@ -526,6 +528,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
 
       <JwpubReferenceSurface
         open={referenceOpen}
+        raiseKey={referenceRaiseKey}
         target={referenceTarget}
         html={referenceHtml}
         isLoading={isLoadingReference}
@@ -536,6 +539,7 @@ export function JwpubBibleSurface({ open, verses, isLoading, error, onClose, hig
 
       <JwpubExtractSurface
         open={openExtractIds !== null}
+        raiseKey={extractRaiseKey}
         extracts={openExtracts}
         onClose={closeExtract}
         onOpenSource={(mepsDocumentId) => {

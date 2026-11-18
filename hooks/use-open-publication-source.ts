@@ -27,6 +27,8 @@ export function useOpenPublicationSource({ onOpenGlobal }: Options = {}) {
   // `resolving` shows the panel's skeleton while the lookup runs; once it
   // settles with no hit, the same panel turns into the "Baixar" prompt.
   const [pending, setPending] = useState<{ mepsDocumentId: number; resolving: boolean } | null>(null);
+  // Bumped on each request so a panel still open under another comes back to the top of the stack.
+  const [raiseKey, setRaiseKey] = useState(0);
 
   const navigate = useCallback(
     (hit: ResolvedJwpubReference): boolean => {
@@ -46,6 +48,7 @@ export function useOpenPublicationSource({ onOpenGlobal }: Options = {}) {
   const openSource = useCallback(
     (mepsDocumentId: number) => {
       setPending({ mepsDocumentId, resolving: true });
+      setRaiseKey((k) => k + 1);
       void resolveJwpubReferences([mepsDocumentId]).then(({ resolved }) => {
         const hit = resolved[0];
         if (hit && navigate(hit)) {
@@ -75,6 +78,7 @@ export function useOpenPublicationSource({ onOpenGlobal }: Options = {}) {
     openSource,
     surfaceProps: {
       open: pending !== null,
+      raiseKey,
       target: null,
       html: null,
       isLoading: pending?.resolving ?? false,

@@ -26,6 +26,12 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
   const [unresolvedPubRef, setUnresolvedPubRef] = useState<number | null>(null);
   // A citation link names a LIST of excerpt ids (see rewriteJwpubLinks) — `null` means the panel is closed.
   const [openExtractIds, setOpenExtractIds] = useState<number[] | null>(null);
+  // A panel that is already open sits somewhere in the desktop side-panel stack
+  // (maybe under an appendix or a source panel). Asking for it again must bring
+  // it back to the top — otherwise the click appears dead until the sidebar is
+  // closed. Bumped on every open; passed to the surfaces as `raiseKey`.
+  const [referenceRaiseKey, setReferenceRaiseKey] = useState(0);
+  const [extractRaiseKey, setExtractRaiseKey] = useState(0);
 
   // Resolves every citation currently on screen against this user's own
   // library in one batched call, the moment the Guia tab's content arrives —
@@ -55,6 +61,7 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
 
   const showResolved = useCallback((resolved: ResolvedJwpubReference) => {
     setReferenceOpen(true);
+    setReferenceRaiseKey((k) => k + 1);
     setReferenceHtml(null);
     setIsLoadingReference(true);
     setUnresolvedPubRef(null);
@@ -93,6 +100,7 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
       // always lands here. Ask the server before offering "Baixar": it also
       // checks global publications like Perspicaz.
       setReferenceOpen(true);
+      setReferenceRaiseKey((k) => k + 1);
       setReferenceTarget(null);
       setReferenceHtml(null);
       setIsLoadingReference(true);
@@ -114,6 +122,7 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
   const openExtract = useCallback((extractIds: number[]) => {
     setReferenceOpen(false);
     setOpenExtractIds(extractIds);
+    setExtractRaiseKey((k) => k + 1);
   }, []);
 
   const handlePublicationRefResolved = useCallback((mepsDocumentId: number) => {
@@ -127,6 +136,8 @@ export function useResearchGuideReference(researchGuideEntries: { contentHtml: s
 
   return {
     referenceOpen,
+    referenceRaiseKey,
+    extractRaiseKey,
     referenceTarget,
     referenceHtml,
     isLoadingReference,
