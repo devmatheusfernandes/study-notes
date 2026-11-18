@@ -1,6 +1,10 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUserId } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { unstable_cache } from "next/cache";
+import { BIBLE_REFERENCE_CACHE_OPTIONS } from "@/lib/bible/reference-cache";
 import { BIBLE_SEARCH_PAGE_SIZE, BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 
 export interface BibleVerseHit {
@@ -129,10 +133,8 @@ export async function searchBibleVerses(
   if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { verses: [] };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase.rpc("search_bible_verses", {
     query_text: trimmed,
@@ -163,10 +165,8 @@ export async function searchVideoTranscripts(
   if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { videos: [] };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase.rpc("search_global_videos", {
     query_text: trimmed,
@@ -205,10 +205,8 @@ export async function searchInsightChapters(
   if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { articles: [] };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase.rpc("search_global_publication_chapters", {
     query_text: trimmed,
@@ -265,10 +263,8 @@ export async function searchResearchGuideExtracts(
   if (trimmed.length < BIBLE_SEARCH_MIN_LENGTH) return { guide: [] };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase.rpc("search_research_guide_extracts", {
     query_text: trimmed,
@@ -297,10 +293,8 @@ export async function getResearchGuideExtractHtml(extractId: number): Promise<{ 
   if (!Number.isInteger(extractId)) return { error: "Trecho inválido." };
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_research_guide_extracts")
@@ -387,21 +381,19 @@ export async function getChapterVideos(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
-  const { data, error } = await supabase.rpc("get_chapter_videos", {
-    p_book_order: bookOrder,
-    p_chapter: chapter,
-  });
-
-  if (error) return { error: "Não foi possível carregar os vídeos do capítulo." };
+  let rows: ChapterVideoRpcRow[];
+  try {
+    rows = await loadChapterVideoRows(bookOrder, chapter);
+  } catch {
+    return { error: "Não foi possível carregar os vídeos do capítulo." };
+  }
 
   const seen = new Set<string>();
   const videos: ChapterVideo[] = [];
-  for (const row of (data ?? []) as ChapterVideoRpcRow[]) {
+  for (const row of rows) {
     if (seen.has(row.video_id)) continue;
     seen.add(row.video_id);
     videos.push({
@@ -419,3 +411,18 @@ export async function getChapterVideos(
 
   return { videos };
 }
+
+/** The catalogue is public reference content — read once per chapter and served from the shared server cache (lib/bible/reference-cache.ts). */
+const loadChapterVideoRows = unstable_cache(
+  async (bookOrder: number, chapter: number): Promise<ChapterVideoRpcRow[]> => {
+    const { data, error } = await createAdminClient().rpc("get_chapter_videos", {
+      p_book_order: bookOrder,
+      p_chapter: chapter,
+    });
+    // Throwing keeps a failed read out of the cache.
+    if (error) throw new Error("get_chapter_videos failed");
+    return (data ?? []) as ChapterVideoRpcRow[];
+  },
+  ["chapter-video-rows"],
+  BIBLE_REFERENCE_CACHE_OPTIONS
+);

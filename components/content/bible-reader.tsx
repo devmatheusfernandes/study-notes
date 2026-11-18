@@ -18,12 +18,9 @@ import { loadBibleChapterVerses } from "@/lib/offline/bible-offline";
 import {
   listBibleBooks,
   getBibleChapterCount,
-  getChapterStudyContent,
   listBibleAppendixHeaders,
   type BibleBook,
   type BibleVerseRow,
-  type BibleFootnote,
-  type BibleStudyNote,
   type BibleAppendixHeader,
 } from "@/app/(app)/bible-actions";
 import {
@@ -37,6 +34,7 @@ import {
 import { BIBLE_SEARCH_MIN_LENGTH } from "@/lib/bible/search-config";
 import {
   useBibleCrossReferences,
+  useChapterStudyContent,
   useBibleChapterVideos,
   useBibleResearchGuide,
 } from "@/hooks/use-bible-study-data";
@@ -501,26 +499,13 @@ export function BibleReader({
   // the verses. Fetching per chapter rather than per tapped verse means
   // opening the panel is instant and the in-text markers can be drawn
   // immediately — the worst chapter in the Bible is 92 footnotes (Salmo 119).
-  const [footnotes, setFootnotes] = useState<BibleFootnote[]>([]);
-  const [studyNotes, setStudyNotes] = useState<BibleStudyNote[]>([]);
-  const [isLoadingStudy, setIsLoadingStudy] = useState(false);
-
-  useEffect(() => {
-    if (screen !== "reading") return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingStudy(true);
-    });
-    void getChapterStudyContent(bookOrder, chapter).then((result) => {
-      if (cancelled) return;
-      setFootnotes(result.footnotes ?? []);
-      setStudyNotes(result.studyNotes ?? []);
-      setIsLoadingStudy(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [screen, bookOrder, chapter]);
+  // Served through the study cache (lib/cache/study-cache.ts): a chapter seen
+  // before paints at once, then is quietly re-checked.
+  const {
+    footnotes,
+    studyNotes,
+    loading: isLoadingStudy,
+  } = useChapterStudyContent({ bookOrder, chapter, enabled: screen === "reading" });
 
   // bible_footnotes stores `verse_id` (the global BibleVerseId) and no verse
   // number — there's no FK to embed through, so the mapping is done here with

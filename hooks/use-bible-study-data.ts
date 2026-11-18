@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  getBibleChapterVerses,
   getChapterCrossReferences,
   getVerseCrossReferences,
   getChapterStudyContent,
@@ -12,15 +11,17 @@ import {
 import { getChapterVideos, type ChapterVideo } from "@/app/(app)/bible-search-actions";
 import { getChapterResearchGuide, type ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { inVerseScope, type VerseRange } from "@/lib/bible/verse-scope";
+import { loadBibleChapterVerses } from "@/lib/offline/bible-offline";
+import { loadStudyData, peekStudyCache, prefetchStudyData, studyCacheKey, type StudyResult } from "@/lib/cache/study-cache";
 
 /** A range this wide is no longer "a passage" — cross references are then read chapter-wide and filtered instead of one request per verse. */
 const MAX_PER_VERSE_REQUESTS = 30;
 
 /**
- * These four hooks are the data BibleStudyPanel's tabs need, extracted out of
+ * These hooks are the data BibleStudyPanel's tabs need, extracted out of
  * bible-reader.tsx (its original inline effects) so jwpub-bible-surface.tsx
  * can fetch the identical shape for whatever verse range it's showing.
- * Kept as four separate hooks rather than one, because bible-reader.tsx
+ * Kept as separate hooks rather than one, because bible-reader.tsx
  * fetches footnotes/study notes UNCONDITIONALLY (it needs them for the
  * reading pane's in-text footnote/study-note markers regardless of whether
  * the study panel is even open) while everything else here is only fetched
@@ -87,38 +88,128 @@ export function useBibleCrossReferences({ bookOrder, chapter, selectedVerse, ver
   return { refs, refsLoading: isLoadingRefs, refsTruncated, refsSource, setRefsSource };
 }
 
+interface StudyContent {
+  footnotes: BibleFootnote[];
+  studyNotes: BibleStudyNote[];
+}
+
+interface ResearchGuideData {
+  entries: { verse: number | null; contentHtml: string }[];
+  extracts: Record<number, ResearchGuideExtract>;
+}
+
+// Module-level (not inline) so their identity is stable across renders and the
+// hooks below can list them as effect dependencies.
+async function fetchStudyContent(bookOrder: number, chapter: number): Promise<StudyResult<StudyContent>> {
+  const result = await getChapterStudyContent(bookOrder, chapter);
+  if (result.error) return { error: result.error };
+  return { data: { footnotes: result.footnotes ?? [], studyNotes: result.studyNotes ?? [] } };
+}
+
+/** `[verse id, verse number]` pairs — local-first (IndexedDB when the Bible is downloaded), and tiny, so cached on its own. */
+async function fetchVerseNumbers(bookOrder: number, chapter: number): Promise<StudyResult<[number, number | null][]>> {
+  const result = await loadBibleChapterVerses(bookOrder, chapter);
+  if (result.error || !result.verses) return { error: result.error ?? "Capítulo indisponível." };
+  return { data: result.verses.map((v) => [v.id, v.verse] as [number, number | null]) };
+}
+
+async function fetchChapterVideos(bookOrder: number, chapter: number): Promise<StudyResult<ChapterVideo[]>> {
+  const result = await getChapterVideos(bookOrder, chapter);
+  if (result.error) return { error: result.error };
+  return { data: result.videos ?? [] };
+}
+
+async function fetchResearchGuide(bookOrder: number, chapter: number): Promise<StudyResult<ResearchGuideData>> {
+  const result = await getChapterResearchGuide(bookOrder, chapter);
+  if (result.error) return { error: result.error };
+  return { data: { entries: result.entries ?? [], extracts: result.extracts ?? {} } };
+}
+
+/** How long a chapter has to stay settled before the next one is warmed — keeps speculative requests out of the way of a user's own. */
+const PREFETCH_DELAY_MS = 1500;
+
+interface ChapterDataParams<T> {
+  kind: string;
+  bookOrder: number | null;
+  chapter: number | null;
+  enabled: boolean;
+  fetcher: (bookOrder: number, chapter: number) => Promise<StudyResult<T>>;
+}
+
 /**
- * Footnotes + study notes, gated by `enabled` — for a caller (jwpub-bible-surface.tsx)
- * that has no always-on need for these, unlike bible-reader.tsx's own inline
- * version which fetches unconditionally to feed the reading pane's markers.
+ * One chapter-scoped dataset, served through lib/cache/study-cache.ts: painted
+ * at once from memory or IndexedDB when this chapter was seen before, then
+ * quietly re-checked against the server. Only a chapter nothing has cached
+ * shows `loading`.
+ *
+ * `data` keeps the previous chapter's value until the new one settles (same as
+ * the effect-driven hooks this replaced) — callers gate on `loading`.
  */
-export function useBibleFootnotesAndStudyNotes({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
-  const rangeFrom = verseRange?.from ?? null;
-  const rangeTo = verseRange?.to ?? null;
-  const [chapterVerseNumberById, setChapterVerseNumberById] = useState<Map<number, number | null>>(new Map());
-  const [footnotes, setFootnotes] = useState<BibleFootnote[]>([]);
-  const [studyNotes, setStudyNotes] = useState<BibleStudyNote[]>([]);
-  const [isLoadingStudy, setIsLoadingStudy] = useState(false);
+function useChapterData<T>({ kind, bookOrder, chapter, enabled, fetcher }: ChapterDataParams<T>) {
+  const key = enabled && bookOrder !== null && chapter !== null ? studyCacheKey(kind, bookOrder, chapter) : null;
+  const [state, setState] = useState<{ key: string; data: T | undefined } | null>(null);
+
+  // Read during render so a chapter that is already in memory paints on the
+  // first frame instead of flashing a skeleton for the effect's round trip.
+  const remembered = key !== null ? peekStudyCache<T>(key) : undefined;
+  const settled = key !== null && state !== null && state.key === key;
+  const data = settled ? state.data : (remembered ?? state?.data);
+  const loading = key !== null && !settled && remembered === undefined;
 
   useEffect(() => {
-    if (!enabled || bookOrder === null || chapter === null) return;
+    if (key === null || bookOrder === null || chapter === null) return;
     let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingStudy(true);
-    });
-    void Promise.all([getChapterStudyContent(bookOrder, chapter), getBibleChapterVerses(bookOrder, chapter)]).then(
-      ([studyResult, versesResult]) => {
-        if (cancelled) return;
-        setFootnotes(studyResult.footnotes ?? []);
-        setStudyNotes(studyResult.studyNotes ?? []);
-        setChapterVerseNumberById(new Map((versesResult.verses ?? []).map((v) => [v.id, v.verse])));
-        setIsLoadingStudy(false);
+    loadStudyData<T>(
+      key,
+      () => fetcher(bookOrder, chapter),
+      (next) => {
+        if (!cancelled) setState({ key, data: next });
       }
     );
     return () => {
       cancelled = true;
     };
-  }, [enabled, bookOrder, chapter]);
+  }, [key, bookOrder, chapter, fetcher]);
+
+  // Reading forward is the common case: warm the next chapter once this one is on screen.
+  useEffect(() => {
+    if (!settled || bookOrder === null || chapter === null) return;
+    const timer = setTimeout(() => {
+      prefetchStudyData<T>(studyCacheKey(kind, bookOrder, chapter + 1), () => fetcher(bookOrder, chapter + 1));
+    }, PREFETCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [settled, kind, bookOrder, chapter, fetcher]);
+
+  return { data, loading };
+}
+
+/** A chapter's footnotes and study notes alone — what the reading pane needs for its in-text markers. */
+export function useChapterStudyContent({ bookOrder, chapter, enabled }: Pick<CommonParams, "bookOrder" | "chapter" | "enabled">) {
+  const { data, loading } = useChapterData({ kind: "study", bookOrder, chapter, enabled, fetcher: fetchStudyContent });
+  return { footnotes: data?.footnotes ?? EMPTY_FOOTNOTES, studyNotes: data?.studyNotes ?? EMPTY_STUDY_NOTES, loading };
+}
+
+const EMPTY_FOOTNOTES: BibleFootnote[] = [];
+const EMPTY_STUDY_NOTES: BibleStudyNote[] = [];
+const EMPTY_VIDEOS: ChapterVideo[] = [];
+const EMPTY_GUIDE_ENTRIES: ResearchGuideData["entries"] = [];
+const EMPTY_GUIDE_EXTRACTS: ResearchGuideData["extracts"] = {};
+
+/**
+ * Footnotes + study notes, gated by `enabled` — for a caller (jwpub-bible-surface.tsx)
+ * that has no always-on need for these, unlike bible-reader.tsx's own use of
+ * useChapterStudyContent, which fetches unconditionally to feed the reading
+ * pane's markers.
+ */
+export function useBibleFootnotesAndStudyNotes({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
+  const rangeFrom = verseRange?.from ?? null;
+  const rangeTo = verseRange?.to ?? null;
+  const study = useChapterData({ kind: "study", bookOrder, chapter, enabled, fetcher: fetchStudyContent });
+  const verseNumbers = useChapterData({ kind: "verse-numbers", bookOrder, chapter, enabled, fetcher: fetchVerseNumbers });
+
+  const footnotes = study.data?.footnotes ?? EMPTY_FOOTNOTES;
+  const studyNotes = study.data?.studyNotes ?? EMPTY_STUDY_NOTES;
+  const chapterVerseNumberById = useMemo(() => new Map(verseNumbers.data ?? []), [verseNumbers.data]);
 
   const panelFootnotes = useMemo(() => {
     const withVerse = footnotes.map((f) => ({ ...f, verse: chapterVerseNumberById.get(f.verseId) ?? null }));
@@ -131,30 +222,14 @@ export function useBibleFootnotesAndStudyNotes({ bookOrder, chapter, selectedVer
     return studyNotes.filter((n) => inVerseScope(n.verse, selectedVerse, range));
   }, [studyNotes, selectedVerse, rangeFrom, rangeTo]);
 
-  return { footnotes: panelFootnotes, studyNotes: panelStudyNotes, studyLoading: isLoadingStudy };
+  return { footnotes: panelFootnotes, studyNotes: panelStudyNotes, studyLoading: study.loading || verseNumbers.loading };
 }
 
 export function useBibleChapterVideos({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
   const rangeFrom = verseRange?.from ?? null;
   const rangeTo = verseRange?.to ?? null;
-  const [chapterVideos, setChapterVideos] = useState<ChapterVideo[]>([]);
-  const [isLoadingChapterVideos, setIsLoadingChapterVideos] = useState(false);
-
-  useEffect(() => {
-    if (!enabled || bookOrder === null || chapter === null) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingChapterVideos(true);
-    });
-    void getChapterVideos(bookOrder, chapter).then((result) => {
-      if (cancelled) return;
-      setChapterVideos(result.videos ?? []);
-      setIsLoadingChapterVideos(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, bookOrder, chapter]);
+  const { data, loading } = useChapterData({ kind: "videos", bookOrder, chapter, enabled, fetcher: fetchChapterVideos });
+  const chapterVideos = data ?? EMPTY_VIDEOS;
 
   const panelVideos = useMemo(() => {
     const range = rangeFrom !== null && rangeTo !== null ? { from: rangeFrom, to: rangeTo } : null;
@@ -164,34 +239,14 @@ export function useBibleChapterVideos({ bookOrder, chapter, selectedVerse, verse
     );
   }, [chapterVideos, selectedVerse, rangeFrom, rangeTo]);
 
-  return { videos: panelVideos, videosLoading: isLoadingChapterVideos };
+  return { videos: panelVideos, videosLoading: loading };
 }
 
 export function useBibleResearchGuide({ bookOrder, chapter, selectedVerse, verseRange = null, enabled }: CommonParams) {
   const rangeFrom = verseRange?.from ?? null;
   const rangeTo = verseRange?.to ?? null;
-  const [researchGuideEntries, setResearchGuideEntries] = useState<{ verse: number | null; contentHtml: string }[]>(
-    []
-  );
-  const [researchGuideExtracts, setResearchGuideExtracts] = useState<Record<number, ResearchGuideExtract>>({});
-  const [isLoadingResearchGuide, setIsLoadingResearchGuide] = useState(false);
-
-  useEffect(() => {
-    if (!enabled || bookOrder === null || chapter === null) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setIsLoadingResearchGuide(true);
-    });
-    void getChapterResearchGuide(bookOrder, chapter).then((result) => {
-      if (cancelled) return;
-      setResearchGuideEntries(result.entries ?? []);
-      setResearchGuideExtracts(result.extracts ?? {});
-      setIsLoadingResearchGuide(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, bookOrder, chapter]);
+  const { data, loading } = useChapterData({ kind: "guide", bookOrder, chapter, enabled, fetcher: fetchResearchGuide });
+  const researchGuideEntries = data?.entries ?? EMPTY_GUIDE_ENTRIES;
 
   const panelResearchGuide = useMemo(() => {
     const range = rangeFrom !== null && rangeTo !== null ? { from: rangeFrom, to: rangeTo } : null;
@@ -200,8 +255,8 @@ export function useBibleResearchGuide({ bookOrder, chapter, selectedVerse, verse
 
   return {
     researchGuideEntries: panelResearchGuide,
-    researchGuideExtracts,
-    researchGuideLoading: isLoadingResearchGuide,
+    researchGuideExtracts: data?.extracts ?? EMPTY_GUIDE_EXTRACTS,
+    researchGuideLoading: loading,
   };
 }
 

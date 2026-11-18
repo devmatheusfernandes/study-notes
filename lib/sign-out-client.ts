@@ -6,6 +6,7 @@ import { useLockStore } from "@/lib/store/lock-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import { deleteOfflineDatabase } from "@/lib/offline/idb";
 import { forgetThisDevice } from "@/lib/offline/device-inventory";
+import { clearStudyMemoryCache } from "@/lib/cache/study-cache";
 
 const SYNC_GRACE_MS = 4000;
 
@@ -38,6 +39,7 @@ export async function signOutAndWipeLocalData() {
   useNotesStore.setState({ notes: [], folders: [], pendingOps: {} });
   useJwOutbox.setState({ ops: [] });
   useLockStore.getState().lock();
+  clearStudyMemoryCache();
 
   try {
     for (const key of Object.keys(localStorage)) {

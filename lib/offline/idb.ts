@@ -5,7 +5,7 @@
  */
 
 export const OFFLINE_DB_NAME = "study-notes-offline";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 /** One object store per kind of thing a downloaded publication needs. */
 export const STORES = {
@@ -23,6 +23,8 @@ export const STORES = {
   bibleMeta: { keyPath: "key" },
   /** The "@" menu's chapter/video title index (lib/notes/reference-title-index.ts). One row, key "index". */
   referenceIndex: { keyPath: "key" },
+  /** Per-chapter study-panel data (notes, videos, research guide) — a revalidated cache, see lib/cache/study-cache.ts. */
+  studyCache: { keyPath: "key" },
 } as const;
 
 export type StoreName = keyof typeof STORES;

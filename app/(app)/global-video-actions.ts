@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { invalidateBibleReferenceCache } from "@/lib/bible/reference-cache";
 import { crawlCategory } from "@/lib/video/video-crawler";
 import { formatVttToText } from "@/lib/video/video-utils";
 import { buildVideoScriptureRows } from "@/lib/bible/video-scripture-refs";
@@ -189,6 +190,9 @@ ${contentText}`, 350);
         })
       );
     }
+
+    // New videos may now be linked to Bible chapters — drop the cached "Vídeos" tabs.
+    if (addedCount > 0) invalidateBibleReferenceCache();
 
     return {
       ok: true,

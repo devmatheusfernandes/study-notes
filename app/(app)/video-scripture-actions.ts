@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { invalidateBibleReferenceCache } from "@/lib/bible/reference-cache";
 import { buildVideoScriptureRows } from "@/lib/bible/video-scripture-refs";
 
 /**
@@ -117,6 +118,9 @@ export async function indexVideoScriptureRefs(): Promise<{
       .in("id", ids);
     if (markError) return { ok: false, error: "Não foi possível marcar os vídeos como indexados." };
 
+    // The "Vídeos" tab is cached per chapter — see lib/bible/reference-cache.ts.
+    invalidateBibleReferenceCache();
+
     const { count: pendingVideos } = await admin
       .from("global_videos")
       .select("*", { count: "exact", head: true })
@@ -165,6 +169,7 @@ export async function resetVideoScriptureIndex(): Promise<{ ok: boolean; error?:
       .update({ scriptures_indexed_at: null })
       .not("scriptures_indexed_at", "is", null);
     if (resetError) return { ok: false, error: "Não foi possível reiniciar a indexação." };
+    invalidateBibleReferenceCache();
 
     return { ok: true };
   } catch (error) {

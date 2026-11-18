@@ -2,6 +2,9 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSessionUserId } from "@/lib/supabase/auth";
+import { unstable_cache } from "next/cache";
+import { BIBLE_REFERENCE_CACHE_OPTIONS, invalidateBibleReferenceCache } from "@/lib/bible/reference-cache";
 
 export interface ResearchGuideEntryInput {
   bookOrder: number;
@@ -237,6 +240,7 @@ export async function finishResearchGuideImport(): Promise<{ ok: boolean; error?
     .update({ imported_at: new Date().toISOString() })
     .eq("id", true);
   if (error) return { ok: false, error: "Não foi possível concluir a importação." };
+  invalidateBibleReferenceCache();
   return { ok: true };
 }
 
@@ -272,55 +276,73 @@ export async function getChapterResearchGuide(
     return { error: "Capítulo inválido." };
   }
 
+  // Public reference content: the session is checked against the JWT and the
+  // read itself comes from the shared server cache (lib/bible/reference-cache.ts).
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
-  const { data, error } = await supabase
-    .from("bible_research_guide")
-    .select("verse, content_html")
-    .eq("book_order", bookOrder)
-    .eq("chapter", chapter)
-    // A superscription (null verse) precedes verse 1 — same convention as
-    // getChapterCrossReferences in bible-actions.ts.
-    .order("verse", { ascending: true, nullsFirst: true });
-
-  if (error) return { error: "Não foi possível carregar o Guia de Pesquisa." };
-
-  const entries = (data ?? []).map((row) => ({ verse: row.verse, contentHtml: row.content_html }));
-
-  // One citation link can name several excerpts, comma-joined — see
-  // rewriteJwpubLinks in lib/jwpub/sanitize.ts.
-  const extractIds = [
-    ...new Set(
-      entries
-        .flatMap((entry) => [...entry.contentHtml.matchAll(/data-jwpub-extract="([\d,]+)"/g)])
-        .flatMap((m) => m[1].split(",").map(Number))
-    ),
-  ];
-
-  const extracts: Record<number, ResearchGuideExtract> = {};
-  if (extractIds.length > 0) {
-    const { data: extractRows } = await supabase
-      .from("bible_research_guide_extracts")
-      .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
-      .in("extract_id", extractIds);
-    for (const row of extractRows ?? []) {
-      extracts[row.extract_id] = {
-        extractId: row.extract_id,
-        html: row.content_html,
-        caption: row.caption,
-        refTitle: row.ref_title,
-        refSymbol: row.ref_symbol,
-        refMepsDocumentId: row.ref_meps_document_id,
-      };
-    }
+  try {
+    return await loadChapterResearchGuide(bookOrder, chapter);
+  } catch {
+    return { error: "Não foi possível carregar o Guia de Pesquisa." };
   }
-
-  return { entries: withTextCitedExtracts(entries, extracts, bookOrder, chapter), extracts };
 }
+
+const loadChapterResearchGuide = unstable_cache(
+  async (
+    bookOrder: number,
+    chapter: number
+  ): Promise<{ entries: ResearchGuideVerseEntry[]; extracts: Record<number, ResearchGuideExtract> }> => {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("bible_research_guide")
+      .select("verse, content_html")
+      .eq("book_order", bookOrder)
+      .eq("chapter", chapter)
+      // A superscription (null verse) precedes verse 1 — same convention as
+      // getChapterCrossReferences in bible-actions.ts.
+      .order("verse", { ascending: true, nullsFirst: true });
+
+    // Throwing keeps a failed read out of the cache.
+    if (error) throw new Error("bible_research_guide read failed");
+
+    const entries = (data ?? []).map((row) => ({ verse: row.verse, contentHtml: row.content_html }));
+
+    // One citation link can name several excerpts, comma-joined — see
+    // rewriteJwpubLinks in lib/jwpub/sanitize.ts.
+    const extractIds = [
+      ...new Set(
+        entries
+          .flatMap((entry) => [...entry.contentHtml.matchAll(/data-jwpub-extract="([\d,]+)"/g)])
+          .flatMap((m) => m[1].split(",").map(Number))
+      ),
+    ];
+
+    const extracts: Record<number, ResearchGuideExtract> = {};
+    if (extractIds.length > 0) {
+      const { data: extractRows, error: extractError } = await admin
+        .from("bible_research_guide_extracts")
+        .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
+        .in("extract_id", extractIds);
+      if (extractError) throw new Error("bible_research_guide_extracts read failed");
+      for (const row of extractRows ?? []) {
+        extracts[row.extract_id] = {
+          extractId: row.extract_id,
+          html: row.content_html,
+          caption: row.caption,
+          refTitle: row.ref_title,
+          refSymbol: row.ref_symbol,
+          refMepsDocumentId: row.ref_meps_document_id,
+        };
+      }
+    }
+
+    return { entries: withTextCitedExtracts(entries, extracts, bookOrder, chapter), extracts };
+  },
+  ["chapter-research-guide"],
+  BIBLE_REFERENCE_CACHE_OPTIONS
+);
 
 /** Widest verse span an excerpt's own cross-reference may cover and still count as "about" each verse in it — "capítulos 5 e 6" (5:1-20) must not surface everywhere. */
 const MAX_TEXT_REF_SPAN = 3;

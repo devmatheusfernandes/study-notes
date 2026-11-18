@@ -1,6 +1,10 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUserId } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { unstable_cache } from "next/cache";
+import { BIBLE_REFERENCE_CACHE_OPTIONS } from "@/lib/bible/reference-cache";
 
 export interface BibleVerseRow {
   id: number;
@@ -21,10 +25,8 @@ export async function getBibleVerses(
   lastVerseId: number
 ): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   if (
     !Number.isFinite(firstVerseId) ||
@@ -69,10 +71,8 @@ export async function getBibleDownloadSlice(
   afterId: number
 ): Promise<{ verses?: BibleVerseRow[]; done?: boolean; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
   if (!Number.isFinite(afterId) || afterId < 0) return { error: "Posição inválida." };
 
   const PAGE = 1000;
@@ -114,10 +114,8 @@ export async function getBibleVersesBatch(
   ranges: { firstVerseId: number; lastVerseId: number }[]
 ): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   if (ranges.length === 0) return { verses: [] };
   if (ranges.length > MAX_BATCH_RANGES) return { error: "Muitas referências de uma vez." };
@@ -168,10 +166,8 @@ export async function getBibleVerseByReference(
   verse: number | null
 ): Promise<{ verse?: BibleVerseRow; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   let query = supabase
     .from("bible_verses")
@@ -205,10 +201,8 @@ export async function getBibleChapterVerses(
   chapter: number
 ): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_verses")
@@ -262,10 +256,8 @@ export async function getVerseCrossReferences(
   source: CrossReferenceSource = "nwt"
 ): Promise<{ refs?: CrossReference[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_cross_references")
@@ -307,10 +299,8 @@ export async function getChapterCrossReferences(
   source: CrossReferenceSource = "nwt"
 ): Promise<{ refs?: (CrossReference & { verse: number | null })[]; truncated?: boolean; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_cross_references")
@@ -376,46 +366,59 @@ export async function getChapterStudyContent(
   bookOrder: number,
   chapter: number
 ): Promise<{ footnotes?: BibleFootnote[]; studyNotes?: BibleStudyNote[]; error?: string }> {
+  if (!Number.isFinite(bookOrder) || !Number.isFinite(chapter)) return { error: "Capítulo inválido." };
+
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
-  const [footnotesResult, studyNotesResult] = await Promise.all([
-    supabase
-      .from("bible_footnotes")
-      .select("id, verse_id, footnote_index, content_html")
-      .eq("book_order", bookOrder)
-      .eq("chapter", chapter)
-      .order("footnote_index", { ascending: true }),
-    supabase
-      .from("bible_study_notes")
-      .select("id, verse, label_html, content_html")
-      .eq("book_order", bookOrder)
-      .eq("chapter", chapter)
-      .order("verse", { ascending: true }),
-  ]);
-
-  if (footnotesResult.error || studyNotesResult.error) {
+  try {
+    return await loadChapterStudyContent(bookOrder, chapter);
+  } catch {
     return { error: "Não foi possível carregar o conteúdo de estudo." };
   }
-
-  return {
-    footnotes: (footnotesResult.data ?? []).map((row) => ({
-      id: row.id,
-      verseId: row.verse_id,
-      index: row.footnote_index,
-      contentHtml: row.content_html,
-    })),
-    studyNotes: (studyNotesResult.data ?? []).map((row) => ({
-      id: row.id,
-      verse: row.verse,
-      labelHtml: row.label_html,
-      contentHtml: row.content_html,
-    })),
-  };
 }
+
+/** Public reference content, identical for every user — served from the shared server cache (lib/bible/reference-cache.ts). */
+const loadChapterStudyContent = unstable_cache(
+  async (bookOrder: number, chapter: number): Promise<{ footnotes: BibleFootnote[]; studyNotes: BibleStudyNote[] }> => {
+    const admin = createAdminClient();
+    const [footnotesResult, studyNotesResult] = await Promise.all([
+      admin
+        .from("bible_footnotes")
+        .select("id, verse_id, footnote_index, content_html")
+        .eq("book_order", bookOrder)
+        .eq("chapter", chapter)
+        .order("footnote_index", { ascending: true }),
+      admin
+        .from("bible_study_notes")
+        .select("id, verse, label_html, content_html")
+        .eq("book_order", bookOrder)
+        .eq("chapter", chapter)
+        .order("verse", { ascending: true }),
+    ]);
+
+    // Throwing keeps a failed read out of the cache.
+    if (footnotesResult.error || studyNotesResult.error) throw new Error("chapter study content read failed");
+
+    return {
+      footnotes: (footnotesResult.data ?? []).map((row) => ({
+        id: row.id,
+        verseId: row.verse_id,
+        index: row.footnote_index,
+        contentHtml: row.content_html,
+      })),
+      studyNotes: (studyNotesResult.data ?? []).map((row) => ({
+        id: row.id,
+        verse: row.verse,
+        labelHtml: row.label_html,
+        contentHtml: row.content_html,
+      })),
+    };
+  },
+  ["chapter-study-content"],
+  BIBLE_REFERENCE_CACHE_OPTIONS
+);
 
 export interface BibleOutlineNode {
   id: number;
@@ -442,10 +445,8 @@ export async function getBookOutline(
   bookOrder: number
 ): Promise<{ nodes?: BibleOutlineNode[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_outline")
@@ -477,10 +478,8 @@ export async function getBibleVerseRange(
   endVerse: number | null
 ): Promise<{ verses?: BibleVerseRow[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   let query = supabase
     .from("bible_verses")
@@ -525,10 +524,8 @@ export interface BibleBook {
  */
 export async function listBibleBooks(): Promise<{ books?: BibleBook[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_verses")
@@ -552,10 +549,8 @@ export async function listBibleBooks(): Promise<{ books?: BibleBook[]; error?: s
 /** Highest chapter number in a book — enough to render a "Capítulo 1..N" select. */
 export async function getBibleChapterCount(bookOrder: number): Promise<{ count?: number; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_verses")
@@ -575,10 +570,8 @@ export async function getBibleVerseCount(
   chapter: number
 ): Promise<{ count?: number; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_verses")
@@ -610,10 +603,8 @@ export interface BibleAppendixHeader {
  */
 export async function listBibleAppendixHeaders(): Promise<{ headers?: BibleAppendixHeader[]; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_appendices")
@@ -652,10 +643,8 @@ export async function getBibleAppendix(
   mepsDocumentId: number
 ): Promise<{ appendix?: BibleAppendix; error?: string }> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Sessão expirada." };
+  const userId = await getSessionUserId(supabase);
+  if (!userId) return { error: "Sessão expirada." };
 
   const { data, error } = await supabase
     .from("bible_appendices")
