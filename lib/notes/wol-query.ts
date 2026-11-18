@@ -49,8 +49,8 @@ const MONTHS: Record<string, string> = {
   setembro: "09", set: "09", outubro: "10", out: "10", novembro: "11", nov: "11", dezembro: "12", dez: "12",
 };
 
-/** "pág.", "págs.", "pp.", "p." before a number — WOL's own cards write it, its search box rejects it. */
-const PAGE_WORD = /\b(?:p[áa]gs?|pp?)\.?\s*(?=\d)/gi;
+/** "pág.", "págs.", "página", "pp.", "p." before a number — WOL's own cards write it, its search box rejects it. */
+const PAGE_WORD = /\b(?:p[áa]g(?:ina)?s?|pp?)\.?\s*(?=\d)/gi;
 
 const fold = (raw: string) => raw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
@@ -60,9 +60,71 @@ const P_MONTH_NAME = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})[\s.]+([a-z
 /** Magazines numbered per year: "g20 n. 1 pág. 4", "wp18 nº 2 3". */
 const P_ISSUE_NUMBER = new RegExp(String.raw`^(g|wp)\s?(\d{2})\s+(?:n\.?|no\.?|n[º°]|numero)\s?(\d)\s+${PAGES}$`);
 
-function parsePeriodical(text: string): { q: string; label: string } | null {
-  const t = fold(text.replace(PAGE_WORD, ""));
+const MONTH_NAME = String.raw`([a-z]{3,9})\.?`;
+
+/** What people call the magazines, mapped to the symbol WOL knows them by. */
+const PUBLICATION_NAMES: [RegExp, string][] = [
+  [/^despertai(?=\s|$)/, "g"],
+  [/^(?:a\s+)?sentinela(?=\s|$)/, "w"],
+];
+
+/**
+ * Folds the ways of writing a periodical's name and date onto the glued
+ * "<symbol><yy> <month> <pages>" shape the patterns below expect:
+ *   "despertai de 2008 agosto 10" → "g08 agosto 10"
+ *   "g agosto 2008 10"            → "g08 agosto 10"
+ *   "despertai 2020 n. 1 4"       → "g20 n. 1 4"
+ */
+function normalizePeriodicalText(folded: string): string {
+  let s = folded.replace(/!/g, "");
+  for (const [name, symbol] of PUBLICATION_NAMES) s = s.replace(name, symbol);
+  s = s.replace(/\bde\b/g, " ").replace(/\s+/g, " ").trim();
+
+  let m = new RegExp(String.raw`^(${PERIODICAL})\s+${MONTH_NAME}\s+(\d{4})\s+(\d.*)$`).exec(s);
+  if (m) return `${m[1]}${m[3].slice(-2)} ${m[2]} ${m[4]}`;
+
+  m = new RegExp(String.raw`^(${PERIODICAL})\s+(\d{4})\s+(.+)$`).exec(s);
+  if (m) return `${m[1]}${m[2].slice(-2)} ${m[3]}`;
+
+  return s;
+}
+
+/**
+ * Despertai! was one issue a month from 2006 to 2015 — neither dated by day
+ * ("g88 8/12 10") nor numbered per year ("g20.1 4"). WOL files those under the
+ * bare symbol and a month/year, "g 8/08 10" (verified live: it answers
+ * "g 8/08 10", "g 8/2008 10" and "g agosto 2008 10", and answers nothing for
+ * "g08 8/8 10", "g08.08 10" or "g08 agosto 10").
+ */
+const MONTHLY_AWAKE_FIRST_YEAR = 2006;
+const MONTHLY_AWAKE_LAST_YEAR = 2015;
+
+function parseMonthlyAwake(t: string): { q: string; label: string } | null {
   const compact = (pages: string) => pages.replace(/\s/g, "");
+  const emit = (month: number, year: number, pages: string) => {
+    if (year < MONTHLY_AWAKE_FIRST_YEAR || year > MONTHLY_AWAKE_LAST_YEAR || month < 1 || month > 12) return null;
+    const yy = String(year % 100).padStart(2, "0");
+    return { q: `g ${month}/${yy} ${pages}`, label: `g ${month}/${yy} p. ${pages}` };
+  };
+  const fullYear = (y: string) => (y.length === 4 ? Number(y) : 2000 + Number(y));
+
+  // "g 8/08 10", "g 8/2008 10"
+  let m = new RegExp(String.raw`^g\s?(\d{1,2})\/(\d{4}|\d{2})\s+${PAGES}$`).exec(t);
+  if (m) return emit(Number(m[1]), fullYear(m[2]), compact(m[3]));
+
+  // "g08 agosto 10" (what normalizePeriodicalText leaves for "despertai de 2008 agosto pagina 10")
+  m = new RegExp(String.raw`^g\s?(\d{4}|\d{2})\s+${MONTH_NAME}\s+${PAGES}$`).exec(t);
+  if (m && MONTHS[m[2]]) return emit(Number(MONTHS[m[2]]), fullYear(m[1]), compact(m[3]));
+
+  return null;
+}
+
+function parsePeriodical(text: string): { q: string; label: string } | null {
+  const t = normalizePeriodicalText(fold(text.replace(PAGE_WORD, "")));
+  const compact = (pages: string) => pages.replace(/\s/g, "");
+
+  const monthly = parseMonthlyAwake(t);
+  if (monthly) return monthly;
 
   let m = P_DAY.exec(t);
   if (m) return { q: `${m[1]}${m[2]} ${m[3]} ${compact(m[4])}`, label: `${m[1]}${m[2]} ${m[3]} p. ${compact(m[4])}` };

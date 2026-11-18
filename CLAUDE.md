@@ -163,6 +163,7 @@
     | `w98 1/9 pág. 6 par. 12`, `w24.01 20 par. 5` | same minus `par.` | `par. N` is always the **article's** numbering — `data-pnum` in study articles, else body paragraphs (`class="sb"`) counted; headings, study questions and footnotes never count |
     | `mwb20 julho pág. 3` | `mwb20.07 3` | Meeting Workbook, by month |
     | `g20 n. 1 pág. 4`, `wp18 nº 2 pág. 3` | `g20.1 4`, `wp18.2 3` | Awake!/Public Watchtower numbered per year |
+    | `g 8/08 10`, `g agosto 2008 pág. 10`, `despertai de 2008 agosto página 10`, `g08 agosto 10` | `g 8/08 10` | Despertai! **2006–2015** was monthly: WOL files it under the bare symbol + month/year (`g08.08 10` and `g08 8/8 10` resolve nothing). A name (`despertai`, `sentinela`) and `de`, `página`, year-before-month are folded away first |
     | `bh 3`, `bh pág. 3` | `bh 3` | books: a bare number is a **page** |
     | `bh cap. 3`, `bh cap. 3 par. 2` | same | chapter (and paragraph) |
     | `lff lição 5`, `lmd lição 3` | same | lesson |
