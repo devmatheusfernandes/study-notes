@@ -55,11 +55,21 @@ export async function syncGlobalJwVideos(): Promise<{
     const admin = createAdminClient();
 
     // 1. Fetch existing video IDs from global_videos
-    const { data: existingRows } = await admin
-      .from("global_videos")
-      .select("id");
-
-    const existingIds = new Set((existingRows ?? []).map((r) => r.id));
+    // PostgREST caps a single response at 1000 rows, so page through the whole
+    // table — otherwise everything past the first 1000 looks "new" and gets
+    // re-inserted (duplicate key on global_videos_pkey).
+    const existingIds = new Set<string>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: pageErr } = await admin
+        .from("global_videos")
+        .select("id")
+        .order("id")
+        .range(from, from + PAGE - 1);
+      if (pageErr) throw new Error(pageErr.message);
+      for (const r of page ?? []) existingIds.add(r.id);
+      if (!page || page.length < PAGE) break;
+    }
 
     // 2. Crawl JW.org catalog
     const crawledVideos = await crawlCategory("VideoOnDemand");
