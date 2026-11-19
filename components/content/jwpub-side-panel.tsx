@@ -6,7 +6,7 @@ import { ChevronLeft, X } from "lucide-react";
 import { useDevice } from "@/hooks/ui/use-device";
 import { Vault, VaultContent, VaultTitle } from "@/components/ui/vault";
 import { useSidePanelSlot } from "./side-panel-stack";
-import { useEmbeddedPanel } from "./embedded-panel-context";
+import { EmbeddedPanelProvider, useEmbeddedPanel } from "./embedded-panel-context";
 
 interface JwpubSidePanelProps {
   open: boolean;
@@ -23,6 +23,13 @@ interface JwpubSidePanelProps {
   headerActions?: React.ReactNode;
   /** Back button at the left of the header that steps back *inside* this panel (e.g. from a note to the text), ahead of the stack's own back. */
   onBack?: () => void;
+  /**
+   * Panels this one opens (a citation, an excerpt, an appendix). On desktop they
+   * render INSIDE this panel, covering its body with a back arrow, so a
+   * reference replaces what is shown instead of opening a second panel; on
+   * mobile they are rendered as siblings and each is its own Vault sheet.
+   */
+  overlays?: React.ReactNode;
 }
 
 /**
@@ -45,7 +52,7 @@ interface JwpubSidePanelProps {
  * pops the stack. Panels underneath stay mounted at width 0, so going back
  * restores them with their scroll position and loaded content intact.
  */
-export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey, subtitle, headerActions, onBack }: JwpubSidePanelProps) {
+export function JwpubSidePanel({ open, title, onClose, children, width = 380, raiseKey, subtitle, headerActions, onBack, overlays }: JwpubSidePanelProps) {
   const { isMobile } = useDevice();
   const id = useId();
   // Inside a floating window there is no shared sidebar to join: this panel covers the window's own body.
@@ -61,7 +68,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
 
   if (embedded) {
     return open ? (
-      <div className="absolute inset-0 z-10 flex flex-col bg-background">
+      <div className={`absolute inset-0 z-10 flex flex-col ${embedded === "sidebar" ? "bg-sidebar" : "bg-background"}`}>
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
           <button
             type="button"
@@ -85,6 +92,7 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
 
   if (isMobile) {
     return (
+      <>
       <Vault open={open} onOpenChange={(next) => !next && onClose()}>
         <VaultContent aria-label={title}>
           <div className="flex items-start gap-2 pb-3">
@@ -107,6 +115,8 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
           {children}
         </VaultContent>
       </Vault>
+      {overlays}
+      </>
     );
   }
 
@@ -166,8 +176,12 @@ export function JwpubSidePanel({ open, title, onClose, children, width = 380, ra
               itself zero padding, so `top-0` sits flush with its real edge
               and fully covers whatever scrolls underneath.
             */}
-            <div className="flex-1 overflow-y-auto overscroll-contain">
-              <div className="p-5">{children}</div>
+            <div className="relative min-h-0 flex-1">
+              <div className="h-full overflow-y-auto overscroll-contain">
+                <div className="p-5">{children}</div>
+              </div>
+              {/* In-place navigation: whatever this panel opens covers its body, with a back arrow (see EmbeddedPanelKind). */}
+              {overlays && <EmbeddedPanelProvider value="sidebar">{overlays}</EmbeddedPanelProvider>}
             </div>
           </div>
         </motion.aside>

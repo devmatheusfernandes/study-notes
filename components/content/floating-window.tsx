@@ -126,7 +126,7 @@ export function FloatingWindow({ id, title, onClose, toolbar, children, overlays
   if (!win || typeof document === "undefined") return null;
 
   return createPortal(
-    <EmbeddedPanelProvider value={true}>
+    <EmbeddedPanelProvider value="window">
       <section
         ref={sectionRef}
         role="dialog"

@@ -107,13 +107,11 @@ function SurfaceShell({
       </FloatingWindow>
     );
   }
+  // On desktop the panels the study tabs open cover this one's body (with a back arrow) instead of stacking.
   return (
-    <>
-      <JwpubSidePanel open={open} title={title} onClose={onClose} width={380} raiseKey={raiseKey}>
-        {children}
-      </JwpubSidePanel>
-      {overlays}
-    </>
+    <JwpubSidePanel open={open} title={title} onClose={onClose} width={380} raiseKey={raiseKey} overlays={overlays}>
+      {children}
+    </JwpubSidePanel>
   );
 }
 
