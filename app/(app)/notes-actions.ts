@@ -100,9 +100,15 @@ async function requireUser() {
   return { supabase, user };
 }
 
-export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: FolderRow[]; tags: TagRow[] }> {
+export async function listUserContent(): Promise<{
+  notes: NoteRow[];
+  folders: FolderRow[];
+  tags: TagRow[];
+  /** false when a query failed — the lists are then NOT the truth and must not replace the local cache. */
+  ok: boolean;
+}> {
   const { supabase, user } = await requireUser();
-  if (!user) return { notes: [], folders: [], tags: [] };
+  if (!user) return { notes: [], folders: [], tags: [], ok: false };
 
   const [notesRes, foldersRes, queueRes, embeddingsRes, tagsRes, noteTagsRes] = await Promise.all([
     supabase.from("notes").select("*").order("updated_at", { ascending: false }),
@@ -112,6 +118,13 @@ export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: Fo
     supabase.from("tags").select("*").order("created_at", { ascending: true }),
     supabase.from("note_tags").select("note_id, tag_id"),
   ]);
+
+  // Only the notes/folders/tags queries decide correctness; the vector/tag-link
+  // queries just decorate (a failure there degrades a badge, not the list).
+  const ok = !notesRes.error && !foldersRes.error && !tagsRes.error && !noteTagsRes.error;
+  if (!ok) {
+    console.error("listUserContent failed", notesRes.error ?? foldersRes.error ?? tagsRes.error ?? noteTagsRes.error);
+  }
 
   const queueMap = new Map((queueRes.data ?? []).map((q) => [q.note_id, q.status]));
   const embeddedNoteIds = new Set((embeddingsRes.data ?? []).map((e) => e.note_id));
@@ -138,6 +151,7 @@ export async function listUserContent(): Promise<{ notes: NoteRow[]; folders: Fo
     }),
     folders: (foldersRes.data ?? []).map(mapFolder),
     tags: (tagsRes.data ?? []).map(mapTag),
+    ok,
   };
 }
 

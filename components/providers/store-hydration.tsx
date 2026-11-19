@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
-import type { NoteRow, FolderRow, TagRow } from "@/app/(app)/notes-actions";
+import { listUserContent, type NoteRow, type FolderRow, type TagRow } from "@/app/(app)/notes-actions";
 import type { UserPreferencesData } from "@/app/(app)/preferences-actions";
 
 interface StoreHydrationProps {
@@ -13,7 +13,15 @@ interface StoreHydrationProps {
   initialFolders: FolderRow[];
   initialTags: TagRow[];
   initialPreferences?: UserPreferencesData;
+  /**
+   * False when the server's query failed (timeout, transient DB/auth error).
+   * The lists are then empty by accident, not by truth — they must never
+   * overwrite the locally cached notes/folders.
+   */
+  contentOk?: boolean;
 }
+
+const RETRY_DELAYS_MS = [1500, 4000, 10000, 20000];
 
 /**
  * Seeds the notes store from data fetched server-side, and rehydrates the
@@ -25,6 +33,7 @@ export function StoreHydration({
   initialFolders,
   initialTags,
   initialPreferences,
+  contentOk = true,
 }: StoreHydrationProps) {
   const seeded = useRef(false);
 
@@ -37,8 +46,25 @@ export function StoreHydration({
       // Load whatever was persisted locally (including any still-unsynced
       // drafts and their pending outbox entries) before merging in the
       // server-fetched rows, so `hydrate()` knows which ids to keep local.
-      void useNotesStore.persist.rehydrate()?.then(() => {
-        useNotesStore.getState().hydrate(initialNotes, initialFolders, initialTags);
+      void Promise.resolve(useNotesStore.persist.rehydrate()).then(async () => {
+        if (contentOk) {
+          useNotesStore.getState().hydrate(initialNotes, initialFolders, initialTags);
+        } else {
+          // Keep the local cache and show it; then keep asking the server.
+          useNotesStore.setState({ hydrated: true });
+          for (const delay of RETRY_DELAYS_MS) {
+            await new Promise((r) => setTimeout(r, delay));
+            try {
+              const fresh = await listUserContent();
+              if (fresh.ok) {
+                useNotesStore.getState().hydrate(fresh.notes, fresh.folders, fresh.tags);
+                break;
+              }
+            } catch {
+              // offline — the local copy stays on screen
+            }
+          }
+        }
         void useNotesStore.getState().syncPendingOps();
       });
     }
