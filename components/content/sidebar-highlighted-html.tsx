@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import type { HighlightClick } from "@/lib/jwlibrary/draw-highlights";
 import { useDocumentHighlights } from "@/hooks/use-document-highlights";
+import { notify } from "@/components/ui/toaster";
+import { useBibleDownloaded } from "@/hooks/use-bible-downloaded";
+import { readOfflineBiblePassage } from "@/lib/offline/bible-offline";
+import { parseInertBibleRef, passageLabel } from "@/lib/bible/inert-reference";
+import type { BibleVerseRow } from "@/app/(app)/bible-actions";
 import { HighlightableHtml } from "./highlightable-html";
 import { JwlibraryNoteEditorVault } from "./jwlibrary-note-editor-vault";
 
@@ -20,9 +25,11 @@ interface SidebarHighlightedHtmlProps {
   className?: string;
   /**
    * When given, the host's panel header owns the "back to the text" button: this is called with the
-   * handler while a note is open and with null when it closes, and the in-body Voltar button is dropped.
+   * handler while a note or a Bible passage is open and with null when it closes, and the in-body
+   * Voltar button is dropped. `title` is set only for a passage (its reference, "1 João 4:16") — the
+   * host may show it in place of its own.
    */
-  onNoteChange?: (back: (() => void) | null) => void;
+  onNoteChange?: (back: (() => void) | null, title?: string) => void;
 }
 
 /** The element that actually scrolls behind `from` — the side panel's body, or null when it's the page. */
@@ -53,6 +60,9 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
   const savedScroll = useRef(0);
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  // A scripture citation in the text, opened in place of it — only offered once the Bible is on the device.
+  const bibleDownloaded = useBibleDownloaded();
+  const [passage, setPassage] = useState<{ label: string; verses: BibleVerseRow[] } | null>(null);
 
   const openHighlight = openNoteId ? highlights.find((h) => h.note?.id === openNoteId) : undefined;
   const note = openHighlight?.note ?? null;
@@ -65,9 +75,32 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
     setOpenNoteId(click.highlight.note.id);
   }, []);
 
+  const openPassage = useCallback(
+    async (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!bibleDownloaded) return;
+      const link = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a[data-jwpub-ref]");
+      const ref = parseInertBibleRef(link?.dataset.jwpubRef);
+      if (!link || !ref) return;
+      // Dragging across the text to highlight it ends in a click — not a request to open the verse.
+      if (window.getSelection()?.toString()) return;
+      event.preventDefault();
+
+      const verses = await readOfflineBiblePassage(ref);
+      if (!verses) {
+        notify.error("Não encontrei esse texto na Bíblia baixada");
+        return;
+      }
+      const scroller = scrollParent(wrapRef.current);
+      savedScroll.current = scroller ? scroller.scrollTop : window.scrollY;
+      setPassage({ label: passageLabel(verses), verses });
+    },
+    [bibleDownloaded]
+  );
+
   const back = useCallback(() => {
     setOpenNoteId(null);
     setEditing(false);
+    setPassage(null);
     // Once the hidden text is visible again, put the reader back where they were.
     requestAnimationFrame(() => {
       const scroller = scrollParent(wrapRef.current);
@@ -77,11 +110,12 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
   }, []);
 
   const noteOpen = note !== null;
+  const passageLabelOpen = passage?.label;
   useEffect(() => {
     if (!onNoteChange) return;
-    onNoteChange(noteOpen ? back : null);
+    onNoteChange(noteOpen || passageLabelOpen !== undefined ? back : null, passageLabelOpen);
     return () => onNoteChange(null);
-  }, [noteOpen, back, onNoteChange]);
+  }, [noteOpen, passageLabelOpen, back, onNoteChange]);
 
   const color = openHighlight && openHighlight.colorIndex !== null
     ? (JWLIBRARY_HIGHLIGHT_COLORS[openHighlight.colorIndex]?.hex ?? null)
@@ -89,7 +123,17 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
 
   return (
     <div ref={wrapRef}>
-      <div className={note ? "hidden" : undefined}>
+      {/* `a.b` is how the archive marks a scripture link; it only looks (and acts) like one once the Bible is downloaded. */}
+      <div
+        onClick={bibleDownloaded ? (event) => void openPassage(event) : undefined}
+        className={
+          note || passage
+            ? "hidden"
+            : bibleDownloaded
+              ? "[&_a.b[data-jwpub-ref]]:cursor-pointer [&_a.b[data-jwpub-ref]]:text-accent [&_a.b[data-jwpub-ref]]:underline [&_a.b[data-jwpub-ref]]:underline-offset-2"
+              : undefined
+        }
+      >
         <HighlightableHtml
           html={html}
           className={className}
@@ -97,6 +141,35 @@ export function SidebarHighlightedHtml({ html, mepsDocumentId, titleHint, classN
           onHighlightClick={handleClick}
         />
       </div>
+
+      {passage && (
+        <div className="flex flex-col gap-3">
+          {!onNoteChange && (
+            <>
+              <Button variant="ghost" size="sm" leftIcon={<ChevronLeft />} onClick={back} className="-ml-2 self-start">
+                Voltar ao trecho
+              </Button>
+              <span className="font-heading text-[15px]">{passage.label}</span>
+            </>
+          )}
+          {/* whitespace-pre-line: verse text carries real \n for poetry (see bible-chapter-view.tsx). */}
+          <div className="text-[14.5px] leading-relaxed text-foreground/90">
+            {passage.verses.map((verse, index) => (
+              <div key={verse.id}>
+                {(index === 0 || verse.chapter !== passage.verses[index - 1].chapter) && passage.verses[0].chapter !== passage.verses[passage.verses.length - 1].chapter && (
+                  <span className="mt-3 block font-mono text-[10px] tracking-[0.08em] text-muted-foreground">
+                    CAPÍTULO {verse.chapter}
+                  </span>
+                )}
+                <p data-verse={verse.verse ?? undefined} className="my-2 whitespace-pre-line">
+                  <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{verse.verse}</span>
+                  {verse.text ?? <span className="italic text-muted-foreground">texto não disponível nesta tradução</span>}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {note && (
         <div className="flex flex-col gap-3">

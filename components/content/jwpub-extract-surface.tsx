@@ -69,15 +69,16 @@ export function JwpubExtractSurface({
 }: JwpubExtractSurfaceProps) {
   // While one of the excerpt's notes is open, the header takes over that excerpt's caption (article name over
   // the "nwt p. 1788" location) and its back button, so the body doesn't spend lines on either.
-  const [openNote, setOpenNote] = useState<{ extractId: number; back: () => void } | null>(null);
+  const [openNote, setOpenNote] = useState<{ extractId: number; back: () => void; title?: string } | null>(null);
   const noteExtract = openNote ? extracts.find((e) => e.extractId === openNote.extractId) : undefined;
 
-  const title = noteExtract
-    ? (captionTitle(noteExtract.caption) ?? noteExtract.refTitle ?? "Trecho")
-    : extracts.length > 1
-      ? `${extracts.length} trechos`
-      : (extracts[0]?.refTitle ?? "Trecho");
-  const subtitle = noteExtract ? captionLocation(noteExtract.caption) : null;
+  const articleTitle = noteExtract ? (captionTitle(noteExtract.caption) ?? noteExtract.refTitle ?? "Trecho") : null;
+  // A Bible passage opened from the excerpt takes the header ("1 João 4:16") with the article's name under it.
+  const title =
+    openNote?.title ??
+    articleTitle ??
+    (extracts.length > 1 ? `${extracts.length} trechos` : (extracts[0]?.refTitle ?? "Trecho"));
+  const subtitle = noteExtract ? (openNote?.title ? articleTitle : captionLocation(noteExtract.caption)) : null;
 
   return (
     <JwpubSidePanel
@@ -114,9 +115,11 @@ export function JwpubExtractSurface({
                 html={extract.html}
                 mepsDocumentId={extract.refMepsDocumentId}
                 titleHint={captionTitle(extract.caption)}
-                onNoteChange={(back) => {
+                onNoteChange={(back, passageTitle) => {
                   const id = extract.extractId;
-                  setOpenNote((prev) => (back ? { extractId: id, back } : prev?.extractId === id ? null : prev));
+                  setOpenNote((prev) =>
+                    back ? { extractId: id, back, title: passageTitle } : prev?.extractId === id ? null : prev
+                  );
                 }}
                 className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full"
               />

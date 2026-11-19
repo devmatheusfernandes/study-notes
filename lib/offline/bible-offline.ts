@@ -1,5 +1,6 @@
 import { getBibleChapterVerses, getBibleDownloadSlice, type BibleVerseRow } from "@/app/(app)/bible-actions";
 import { notifyInventoryChanged } from "./inventory-events";
+import type { BiblePassageRef } from "@/lib/bible/inert-reference";
 import { idbClear, idbGet, idbGetAll, idbPut, idbPutMany, isOfflineStorageAvailable } from "./idb";
 
 /**
@@ -80,6 +81,31 @@ export async function loadBibleChapterVerses(
   } catch {
     return { error: "Sem conexão. Baixe a Bíblia em Configurações para ler offline." };
   }
+}
+
+/** Chapters a single citation may span — a guard against a malformed range, not a real limit. */
+const MAX_PASSAGE_CHAPTERS = 20;
+const MAX_PASSAGE_VERSES = 200;
+
+/**
+ * A scripture range from the device copy, across chapters if it spans them
+ * ("Gênesis 1:27–2:3"). `undefined` when the Bible isn't downloaded or the
+ * range doesn't resolve — the caller then offers nothing rather than guessing.
+ */
+export async function readOfflineBiblePassage(ref: BiblePassageRef): Promise<BibleVerseRow[] | undefined> {
+  if (ref.endChapter - ref.startChapter >= MAX_PASSAGE_CHAPTERS) return undefined;
+  const passage: BibleVerseRow[] = [];
+  for (let chapter = ref.startChapter; chapter <= ref.endChapter; chapter += 1) {
+    const verses = await readOfflineBibleChapter(ref.bookOrder, chapter);
+    if (!verses) return undefined;
+    for (const verse of verses) {
+      if (verse.verse === null) continue; // a Psalm superscription has no number to range over
+      if (chapter === ref.startChapter && verse.verse < ref.startVerse) continue;
+      if (chapter === ref.endChapter && verse.verse > ref.endVerse) continue;
+      passage.push(verse);
+    }
+  }
+  return passage.length > 0 && passage.length <= MAX_PASSAGE_VERSES ? passage : undefined;
 }
 
 /** Mirrors getBibleVerseRange: a single verse when `endVerse` is null, else start..end inclusive. */
