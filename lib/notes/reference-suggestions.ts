@@ -48,6 +48,8 @@ export type ReferenceSuggestionItem =
       /** Literal text written into the note, parentheses included. */
       text: string;
       reference: NoteReference;
+      /** Shown at the row's right in place of "inserir" — an issue's article names its issue and page ("w13 1/3 · p. 4"). */
+      meta?: string;
     }
   | {
       type: "prefix";
@@ -58,6 +60,8 @@ export type ReferenceSuggestionItem =
     };
 
 const MAX_ITEMS = 7;
+/** An issue's whole table of contents is the answer there — the menu scrolls instead of cutting it. */
+const MAX_ISSUE_ITEMS = 40;
 
 function normalizeForSearch(raw: string): string {
   return raw
@@ -141,16 +145,24 @@ export function buildReferenceSuggestions(
   // Publications the user hasn't downloaded, found through WOL ("w05 1/6 16",
   // "bh cap. 3", "Perspicaz Criação"). Reuses the `pubref` reference the .jwpub
   // citations already produce, so the chip/panel/"Baixar" flow is unchanged.
-  for (const hit of search.wol ?? []) {
-    if (items.length >= MAX_ITEMS) break;
+  // An issue named with no page ("w13 março") answers with its articles, each with the
+  // page it starts on — those ARE the suggestions, so they aren't capped at 7 and the
+  // generic name rows below (Bible books, publications) would only be noise.
+  const wolHits = search.wol ?? [];
+  const issueMode = wolHits.some((hit) => hit.issue !== undefined);
+  for (const hit of wolHits) {
+    if (items.length >= (issueMode ? MAX_ISSUE_ITEMS : MAX_ITEMS)) break;
     items.push({
       type: "insert",
-      label: hit.label,
+      label: hit.title && hit.issue !== undefined ? hit.title : hit.label,
       hint: "WOL",
       text: `(${hit.label.replace(/[()]/g, "")})`,
       reference: { kind: "pubref", mepsDocumentId: hit.mepsDocumentId, pid: hit.pid, snapshot: hit.snapshot, query: hit.query },
+      meta:
+        hit.issue !== undefined ? [hit.issue, hit.page !== undefined ? `p. ${hit.page}` : null].filter(Boolean).join(" · ") : undefined,
     });
   }
+  if (issueMode) return items.slice(0, MAX_ISSUE_ITEMS);
 
   // Once the query names a known publication followed by whitespace, every
   // remaining suggestion searches only inside that one publication by title —

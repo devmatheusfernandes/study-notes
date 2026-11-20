@@ -12,6 +12,8 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUserId } from "@/lib/supabase/auth";
+import { parseIssueCards, startPageOf } from "@/lib/notes/wol-issue";
 
 export interface WolHit {
   mepsDocumentId: number;
@@ -24,6 +26,10 @@ export interface WolHit {
   query?: string;
   /** The cited paragraphs themselves (sanitized on render), kept in the note so it opens offline without downloading the publication. */
   snapshot?: string;
+  /** Set for an article listed from an issue (see lookupWolIssue): the WOL query that named the issue ("w13 1/3"). */
+  issue?: string;
+  /** Page the article starts on, when WOL prints page markers. */
+  page?: number;
 }
 
 /** Cap on what a note carries per citation — a page is a few KB; anything bigger is a whole article. */
@@ -59,11 +65,63 @@ async function fetchWol(url: string): Promise<string | null> {
 }
 
 async function requireUser(): Promise<boolean> {
+  // Only gates a read of public WOL pages — the session JWT is enough, no round trip to Auth.
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return Boolean(user);
+  return (await getSessionUserId(supabase)) !== null;
+}
+
+/** An issue is a few dozen articles at most; a whole book's table of contents ("od") is the largest. */
+const MAX_ISSUE_ARTICLES = 30;
+/** Article pages fetched at once — WOL is someone else's site. */
+const ISSUE_FETCH_CONCURRENCY = 6;
+
+/**
+ * The articles of one issue — or one book's table of contents — with the page
+ * each starts on, for the "@" menu when the reference names no page ("w13 março").
+ *
+ * WOL answers a search with no page with one card per document, but a card has
+ * only a title; the page is read from the article itself (see lib/notes/wol-issue.ts).
+ * That is one search plus one fetch per article, so the pages are fetched a few at a
+ * time, and every response is cached for an hour like the rest of this file's reads.
+ */
+export async function lookupWolIssue(q: string, label: string): Promise<{ hits?: WolHit[]; error?: string }> {
+  if (!(await requireUser())) return { error: "Sessão expirada." };
+  const query = q.trim();
+  if (!SAFE_QUERY.test(query)) return { error: "Consulta inválida." };
+
+  const html = await fetchWol(`${WOL}/l/r5/lp-t?q=${encodeURIComponent(query)}`);
+  if (!html) return { error: "Sem resposta do WOL." };
+  const cards = parseIssueCards(html).slice(0, MAX_ISSUE_ARTICLES);
+  if (cards.length === 0) return { error: "Não encontrei essa edição no WOL." };
+
+  const pages: (number | undefined)[] = new Array(cards.length).fill(undefined);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(ISSUE_FETCH_CONCURRENCY, cards.length) }, async () => {
+      while (next < cards.length) {
+        const index = next;
+        next += 1;
+        const page = await fetchWol(`${WOL}/d/r5/lp-t/${cards[index].docId}`);
+        pages[index] = page ? startPageOf(page) : undefined;
+      }
+    })
+  );
+
+  const hits = cards
+    .map((card, index): WolHit => {
+      const page = pages[index];
+      return {
+        mepsDocumentId: card.docId,
+        title: card.title,
+        label: card.source ? `${card.title} — ${card.source}` : label,
+        query: page !== undefined ? `${query} ${page}` : query,
+        issue: query,
+        page,
+      };
+    })
+    // Reading order, not WOL's search order; articles with no page marker keep their place at the end.
+    .sort((a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER));
+  return { hits };
 }
 
 /**

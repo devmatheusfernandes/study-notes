@@ -24,7 +24,9 @@ export interface WolParagraph {
 
 export type WolQuery =
   | { kind: "lookup"; q: string; label: string; para?: WolParagraph }
-  | { kind: "insight"; title: string };
+  | { kind: "insight"; title: string }
+  /** A whole issue (or book) with no page: WOL answers with its articles, and the start page of each is read from the article itself. */
+  | { kind: "issue"; q: string; label: string };
 
 /** "… pág. 6 §1" / "… pág. 6 par. 17" → the text without it, plus what it asked for. Periodicals only. */
 function splitParagraph(text: string): { text: string; para?: WolParagraph } {
@@ -66,6 +68,7 @@ const MONTH_NAME = String.raw`([a-z]{3,9})\.?`;
 const PUBLICATION_NAMES: [RegExp, string][] = [
   [/^despertai(?=\s|$)/, "g"],
   [/^(?:a\s+)?sentinela(?=\s|$)/, "w"],
+  [/^anuario(?=\s|$)/, "yb"],
 ];
 
 /**
@@ -80,11 +83,15 @@ function normalizePeriodicalText(folded: string): string {
   for (const [name, symbol] of PUBLICATION_NAMES) s = s.replace(name, symbol);
   s = s.replace(/\bde\b/g, " ").replace(/\s+/g, " ").trim();
 
-  let m = new RegExp(String.raw`^(${PERIODICAL})\s+${MONTH_NAME}\s+(\d{4})\s+(\d.*)$`).exec(s);
-  if (m) return `${m[1]}${m[3].slice(-2)} ${m[2]} ${m[4]}`;
+  let m = new RegExp(String.raw`^(${PERIODICAL})\s+${MONTH_NAME}\s+(\d{4})(?:\s+(\d.*))?$`).exec(s);
+  if (m) return `${m[1]}${m[3].slice(-2)} ${m[2]}${m[4] ? ` ${m[4]}` : ""}`;
 
   m = new RegExp(String.raw`^(${PERIODICAL})\s+(\d{4})\s+(.+)$`).exec(s);
   if (m) return `${m[1]}${m[2].slice(-2)} ${m[3]}`;
+
+  // "yb 2013" → "yb13"
+  m = new RegExp(String.raw`^(${PERIODICAL})\s+(\d{4})$`).exec(s);
+  if (m) return `${m[1]}${m[2].slice(-2)}`;
 
   return s;
 }
@@ -182,10 +189,72 @@ function parseTail(tail: string): { wol: string; label: string } | null {
   };
 }
 
+/**
+ * An issue named without a page — WOL lists its articles for these. Verified
+ * against the live search box (what each form answers, and what it doesn't):
+ *   "w13 1/3", "w13 15/3"      semi-monthly Watchtower (to 2015): needs the day
+ *   "w20.07", "mwb20.07"       study edition / Meeting Workbook by month
+ *   "g20.1", "wp18.2"          numbered per year (2016 on); "wp16.1" works, "wp13 1/3" does not
+ *   "g 8/08", "km 5/08"        monthly Despertai! (2006–2015) and Our Kingdom Ministry
+ *   "yb13", "od"               the Yearbook of a year; a book's whole table of contents
+ * A bare month on a semi-monthly period names TWO issues, so both are returned.
+ */
+const fullYear = (yy: string) => (Number(yy) > 26 ? 1900 + Number(yy) : 2000 + Number(yy));
+
+function issuesForMonth(symbol: string, yy: string, month: number, monthPadded: string): string[] {
+  const year = fullYear(yy);
+  const m = String(month);
+  switch (symbol) {
+    case "w":
+      return year >= 2016 ? [`w${yy}.${monthPadded}`] : [`w${yy} 1/${m}`, `w${yy} 15/${m}`];
+    case "wp":
+      // Before 2016 the public Watchtower is the 1st-of-the-month issue of "w".
+      return year >= 2016 ? [] : [`w${yy} 1/${m}`];
+    case "mwb":
+      return [`mwb${yy}.${monthPadded}`];
+    case "km":
+      return [`km ${m}/${yy}`];
+    case "g":
+      if (year >= MONTHLY_AWAKE_FIRST_YEAR && year <= MONTHLY_AWAKE_LAST_YEAR) return [`g ${m}/${yy}`];
+      if (year < MONTHLY_AWAKE_FIRST_YEAR) return [`g${yy} 8/${m}`, `g${yy} 22/${m}`]; // twice a month until 2005
+      return [];
+    default:
+      return [];
+  }
+}
+
+function parseIssues(t: string): string[] {
+  let m = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})\s+(\d{1,2}\/\d{1,2})$`).exec(t);
+  if (m) return [`${m[1]}${m[2]} ${m[3]}`];
+
+  m = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})\.(\d{1,2})$`).exec(t);
+  if (m) return [`${m[1]}${m[2]}.${m[3]}`];
+
+  m = new RegExp(String.raw`^(g|wp)\s?(\d{2})\s+(?:n\.?|no\.?|n[º°]|numero)\s?(\d)$`).exec(t);
+  if (m) return [`${m[1]}${m[2]}.${m[3]}`];
+
+  m = /^(g|km)\s?(\d{1,2})\/(\d{4}|\d{2})$/.exec(t);
+  if (m) {
+    const month = Number(m[2]);
+    const yy = m[3].slice(-2);
+    return month >= 1 && month <= 12 ? [`${m[1]} ${month}/${yy}`] : [];
+  }
+
+  m = new RegExp(String.raw`^(${PERIODICAL})\s?(\d{2})[\s.]+${MONTH_NAME}$`).exec(t);
+  if (m && MONTHS[m[3]]) return issuesForMonth(m[1], m[2], Number(MONTHS[m[3]]), MONTHS[m[3]]);
+
+  m = /^yb\s?(\d{4}|\d{2})$/.exec(t);
+  if (m) return [`yb${m[1].slice(-2)}`];
+
+  return [];
+}
+
 const MAX_CANDIDATES = 3;
 
 export function parseWolQueries(raw: string): WolQuery[] {
   const original = raw.trim().replace(/\s+/g, " ");
+  // A book's whole table of contents — an explicit exception to the length floor.
+  if (/^od$/i.test(original)) return [{ kind: "issue", q: "od", label: "od" }];
   if (original.length < 3 || original.length > 80) return [];
   const text = original.replace(PAGE_WORD, "");
   const results: WolQuery[] = [];
@@ -197,6 +266,10 @@ export function parseWolQueries(raw: string): WolQuery[] {
     const suffix = para ? (para.scope === "page" ? ` §${para.n}` : ` par. ${para.n}`) : "";
     return [{ kind: "lookup", q: periodical.q, label: periodical.label + suffix, ...(para ? { para } : {}) }];
   }
+
+  // An issue with no page: "w13 março", "g agosto 2008", "w20.07", "yb13".
+  const issues = parseIssues(normalizePeriodicalText(fold(text)));
+  if (issues.length > 0) return issues.map((q) => ({ kind: "issue" as const, q, label: q }));
 
   // Perspicaz by article title: "perspicaz criação", "it-1 criação".
   const insight = /^(?:perspicaz|it(?:-[12])?)\s+(\p{L}[\p{L}\s,()'‘’-]{1,60})$/iu.exec(text);

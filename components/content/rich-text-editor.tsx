@@ -71,7 +71,7 @@ import { prefetchNoteReference, warmPastedReferences } from "@/lib/notes/referen
 import { ReferenceSuggestionMenu } from "@/components/content/reference-suggestion-menu";
 import { isReferenceTitleIndexReady, searchReferenceTitles, warmReferenceTitleIndex } from "@/lib/notes/reference-title-index";
 import { parseWolQueries } from "@/lib/notes/wol-query";
-import { lookupPerspicazTitle, lookupWolReference, type WolHit } from "@/app/(app)/wol-lookup-actions";
+import { lookupPerspicazTitle, lookupWolIssue, lookupWolReference, type WolHit } from "@/app/(app)/wol-lookup-actions";
 
 const REFERENCE_SEARCH_DEBOUNCE_MS = 250;
 const WOL_DEBOUNCE_MS = 250;
@@ -286,6 +286,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         candidates.map(async (candidate) => {
           try {
             if (candidate.kind === "insight") return (await lookupPerspicazTitle(candidate.title)).hits ?? [];
+            if (candidate.kind === "issue") return (await lookupWolIssue(candidate.q, candidate.label)).hits ?? [];
             return (await lookupWolReference(candidate.q, candidate.label, candidate.para)).hits ?? [];
           } catch {
             return []; // offline / WOL unreachable: the row just doesn't appear
