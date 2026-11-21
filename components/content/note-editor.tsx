@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, AudioLines, ImagePlus, Maximize2, Minimize2, PenLine, Pin, Search, Share } from "lucide-react";
+import { ArrowLeft, AudioLines, FileDown, ImagePlus, Maximize2, Minimize2, PenLine, Pin, Search, Share } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -549,6 +549,22 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     setTranscriptOpen(true);
   }
 
+  const [exportingPdf, setExportingPdf] = useState(false);
+  async function exportPdf() {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      const { noteToPdfFile } = await import("@/lib/note-pdf");
+      const file = await noteToPdfFile(title.trim() || "Nova nota", body);
+      const result = await shareFile(file, title.trim() || "Nota");
+      if (result === "downloaded") notify.success("PDF gerado", "O arquivo foi baixado.");
+    } catch {
+      notify.error("Não foi possível gerar o PDF", "Tente novamente.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   async function shareAudio() {
     if (!audioUrl) return;
     try {
@@ -693,6 +709,16 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                     className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   >
                     <Share className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void exportPdf()}
+                    disabled={exportingPdf}
+                    aria-label="Enviar nota como PDF"
+                    title="Enviar como PDF"
+                    className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                  >
+                    <FileDown className="size-4" />
                   </button>
                   <button
                     type="button"
