@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useSharedStore } from "@/lib/store/shared-store";
+import { refreshOwnContent } from "@/lib/store/refresh-own-content";
 import { useDeviceStore, type BeforeInstallPromptEvent } from "@/hooks/ui/use-device";
 import { useNotesStore, usePendingSyncCount } from "@/lib/store/notes-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
@@ -65,6 +66,8 @@ export function DeviceListener() {
       void useJwOutbox.getState().sync();
       // Shares can change from the other side at any time; also purges revoked ones from this device.
       void useSharedStore.getState().refresh();
+      // Collaborators can add notes to a folder you shared (throttled inside).
+      void refreshOwnContent();
     };
     const goOffline = () => setIsOnline(false);
     // Fallback for the (rare, but real — e.g. some mobile browsers, and some

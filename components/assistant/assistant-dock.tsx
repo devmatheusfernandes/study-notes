@@ -7,7 +7,7 @@ import { ArrowUp, NotebookPen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { hapticSuccess } from "@/lib/haptics";
 import { useAssistantStore } from "@/lib/store/assistant-store";
-import { useFolderViewStore } from "@/lib/store/folder-view-store";
+import { useNewNoteFolderId } from "@/lib/store/folder-view-store";
 
 /** How long the pointer must be held before the drag-to-new-note gesture arms. */
 const HOLD_MS = 320;
@@ -44,7 +44,8 @@ export function AssistantDock({ variant = "floating" }: AssistantDockProps) {
   const open = useAssistantStore((s) => s.open);
   const start = useAssistantStore((s) => s.start);
   const fail = useAssistantStore((s) => s.fail);
-  const activeFolderId = useFolderViewStore((s) => s.activeFolderId);
+  // The open folder — own, or one shared with the user (see useNewNoteFolderId).
+  const activeFolderId = useNewNoteFolderId();
 
   const dockRef = useRef<HTMLDivElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

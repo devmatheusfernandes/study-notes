@@ -14,6 +14,7 @@ import {
   listShareMembers,
   revokeShare,
   updateShareRole,
+  type InheritedShare,
   type ShareMember,
   type ShareRole,
   type ShareStatus,
@@ -57,6 +58,7 @@ export function ShareVault({ open, onOpenChange, target, name, locked, onShared 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<ShareRole>("editor");
   const [members, setMembers] = useState<ShareMember[]>([]);
+  const [inherited, setInherited] = useState<InheritedShare[]>([]);
   // Which target the member list was last loaded for — "loading" is derived from it.
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const loading = loadedFor !== targetKey;
@@ -68,6 +70,7 @@ export function ShareVault({ open, onOpenChange, target, name, locked, onShared 
     try {
       const res = await listShareMembers(target);
       setMembers(res.members);
+      setInherited(res.inherited);
     } catch {
       // offline — the list just stays as it was
     } finally {
@@ -82,7 +85,10 @@ export function ShareVault({ open, onOpenChange, target, name, locked, onShared 
     let cancelled = false;
     listShareMembers(target)
       .then((res) => {
-        if (!cancelled) setMembers(res.members);
+        if (!cancelled) {
+          setMembers(res.members);
+          setInherited(res.inherited);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -190,10 +196,13 @@ export function ShareVault({ open, onOpenChange, target, name, locked, onShared 
                 <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
                   PESSOAS
                 </span>
-                {members.length === 0 && (
+                {members.length === 0 && inherited.length === 0 && (
                   <p className="py-2 text-sm text-muted-foreground">
                     {loading ? "Carregando…" : "Ainda não compartilhado com ninguém."}
                   </p>
+                )}
+                {members.length === 0 && inherited.length > 0 && (
+                  <p className="py-1 text-sm text-muted-foreground">Ninguém convidado só para {isFolder ? "esta pasta" : "esta nota"}.</p>
                 )}
                 {members.map((member) => {
                   const status = STATUS_LABEL[member.status];
@@ -239,6 +248,33 @@ export function ShareVault({ open, onOpenChange, target, name, locked, onShared 
                   );
                 })}
               </div>
+
+              {inherited.map((group) => (
+                <div key={group.folderId} className="flex flex-col gap-1">
+                  <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
+                    PELA PASTA “{group.folderName.toUpperCase()}”
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    {isFolder ? "Esta pasta" : "Esta nota"} está dentro de uma pasta compartilhada. Para mudar quem tem
+                    acesso, abra o compartilhamento da pasta.
+                  </p>
+                  {group.members.map((member) => {
+                    const status = STATUS_LABEL[member.status];
+                    return (
+                      <div key={member.id} className="flex items-center gap-2 rounded-2xl bg-foreground/5 px-3 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{member.name ?? member.email}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {member.name ? member.email + " · " : ""}
+                            {member.role === "editor" ? "pode editar" : "só ver"}
+                          </p>
+                        </div>
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </>
           )}
         </VaultBody>

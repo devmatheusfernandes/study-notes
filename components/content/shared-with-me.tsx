@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Check, ChevronLeft, Download, FileText, Folder, LogOut, Users, X } from "lucide-react";
+import { Check, ChevronLeft, Download, FileText, Folder, LogOut, NotebookPen, Users, X } from "lucide-react";
+import { useFolderViewStore } from "@/lib/store/folder-view-store";
 import { Button } from "@/components/ui/button";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
@@ -64,6 +65,15 @@ export function SharedWithMe() {
   // A folder that stopped being shared while open simply falls back to the top level.
   const openFolder = requestedFolderId ? folders.find((f) => f.id === requestedFolderId) : undefined;
   const openFolderId = openFolder ? openFolder.id : null;
+
+  // An editable shared folder that's open is where new notes go — the "+"
+  // menu and the composer's drag-to-create read it from the folder-view store.
+  const setSharedFolder = useFolderViewStore((s) => s.setSharedFolder);
+  const writableFolderId = openFolder?.role === "editor" ? openFolder.id : null;
+  useEffect(() => {
+    setSharedFolder(writableFolderId);
+  }, [writableFolderId, setSharedFolder]);
+  useEffect(() => () => setSharedFolder(null), [setSharedFolder]);
 
   const levelFolders = folders.filter((f) => (f.parentId ?? null) === openFolderId);
   const levelNotes = notes.filter((n) => (n.folderId ?? null) === openFolderId);
@@ -209,14 +219,26 @@ export function SharedWithMe() {
       )}
 
       {openFolder && (
-        <button
-          type="button"
-          onClick={() => setOpenFolderId(openFolder.parentId ?? null)}
-          className="flex w-fit items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-[13px] text-foreground/80 transition-all hover:bg-surface"
-        >
-          <ChevronLeft className="size-4" />
-          {openFolder.name}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOpenFolderId(openFolder.parentId ?? null)}
+            className="flex w-fit items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-[13px] text-foreground/80 transition-all hover:bg-surface"
+          >
+            <ChevronLeft className="size-4" />
+            {openFolder.name}
+          </button>
+          {openFolder.role === "editor" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={<NotebookPen />}
+              onClick={() => router.push(`/notes/new?folder=${encodeURIComponent(openFolder.id)}`)}
+            >
+              Nova nota aqui
+            </Button>
+          )}
+        </div>
       )}
 
       {levelFolders.length > 0 && (

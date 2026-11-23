@@ -57,6 +57,7 @@ import { useSharedStore } from "@/lib/store/shared-store";
 import { ownSharedNoteIds } from "@/lib/collab/shared-ids";
 import { lockedNoteIds } from "@/lib/lock/locked";
 import { ShareVault } from "@/components/content/share-vault";
+import { createNoteInSharedFolder } from "@/app/(app)/shares-actions";
 
 /** Applies a new title string to a Y.Text as the smallest edit (common prefix/suffix kept), so two people typing in the title don't clobber each other. */
 function replaceYText(ytext: Y.Text, next: string) {
@@ -147,6 +148,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // document synced over Supabase Realtime — see lib/collab/. Everything else
   // keeps the ordinary offline-first path below, untouched.
   const folders = useNotesStore((s) => s.folders);
+  const sharedHydrated = useSharedStore((s) => s.hydrated);
   const collabRoles = useSharedStore((s) => s.collabRoles);
   const outgoingNoteIds = useSharedStore((s) => s.outgoingNoteIds);
   const outgoingFolderIds = useSharedStore((s) => s.outgoingFolderIds);
@@ -166,7 +168,6 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // lists haven't been read back from this device yet, or the note isn't one
   // of the user's own (so it can only be someone else's, shared with them).
   // A note of the user's own that isn't known to be shared opens instantly.
-  const sharedHydrated = useSharedStore((s) => s.hydrated);
   const maybeShared =
     knownShared ||
     (!!noteId && (!sharedHydrated || (hydrated && !notes.some((n) => n.id === noteId))));
@@ -181,6 +182,41 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const canWrite = !inCollab || collab.role === "owner" || collab.role === "editor";
   const [shareOpen, setShareOpen] = useState(false);
   const applyCollabSnapshot = useNotesStore((s) => s.applyCollabSnapshot);
+
+  // ── New note inside a folder someone shared with this user ───────────────
+  // It must belong to the folder's owner (that's what puts it in the shared
+  // tree), so it's created server-side up front and then opened as an
+  // ordinary shared note — collaborative from its first keystroke.
+  const sharedFolders = useSharedStore((s) => s.folders);
+  const sharedTargetFolder = folderId ? sharedFolders.find((f) => f.id === folderId) : undefined;
+  const ownFolderId = folderId && !sharedTargetFolder ? folderId : undefined;
+  // Not known yet whether `folder` is the user's own or a shared one: wait.
+  const folderUnresolved =
+    !!folderId && !sharedTargetFolder && (!sharedHydrated || !hydrated) && !folders.some((f) => f.id === folderId);
+  const creatingInShared = !noteId && (sharedTargetFolder?.role === "editor" || folderUnresolved);
+  const sharedCreateStarted = useRef(false);
+  useEffect(() => {
+    if (noteId || !folderId || sharedTargetFolder?.role !== "editor" || sharedCreateStarted.current) return;
+    sharedCreateStarted.current = true;
+    const id = crypto.randomUUID();
+    const draft = initialBody
+      ? "<p>" + initialBody.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</p>"
+      : "";
+    createNoteInSharedFolder({ id, folderId, title: "", body: draft })
+      .then((res) => {
+        if (res.error) {
+          notify.error("Não foi possível criar a nota", res.error);
+          router.replace("/notes");
+          return;
+        }
+        void useSharedStore.getState().refresh();
+        router.replace("/notes/" + id);
+      })
+      .catch(() => {
+        notify.error("Sem conexão", "Notas em pastas compartilhadas só podem ser criadas online.");
+        router.replace("/notes");
+      });
+  }, [noteId, folderId, sharedTargetFolder?.role, initialBody, router]);
 
   // "@" note-linking candidates — plain notes only (not files/publications),
   // excludes this note itself so it can't reference its own text, and reads
@@ -332,7 +368,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
       const id = addNote({
         title: (seed?.title ?? titleRef.current).trim() || "Nova nota",
         body: seed?.body ?? bodyRef.current,
-        folderId,
+        folderId: ownFolderId,
       });
       setCreatedId(id);
       // Not router.replace(): that navigates from the /notes/new route tree
@@ -343,7 +379,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
       window.history.replaceState(null, "", `/notes/${id}`);
       return id;
     },
-    [createdId, addNote, folderId]
+    [createdId, addNote, ownFolderId]
   );
 
   // Debounced autosave. Guarded against re-saving content that's identical
@@ -990,7 +1026,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             to use. */}
         <div ref={inkWrapRef} className="relative flex flex-1 flex-col" style={{ minHeight: inkMinHeight }}>
           <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6">
-            {inCollab && !collabReady ? (
+            {creatingInShared ? (
+              <CollabPlaceholder status="loading" onBack={() => void leaveNote()} />
+            ) : inCollab && !collabReady ? (
               <CollabPlaceholder status={collab.status} onBack={() => void leaveNote()} />
             ) : (
               <>

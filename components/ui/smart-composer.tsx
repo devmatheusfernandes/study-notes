@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAssistantStore, type AssistantSource } from "@/lib/store/assistant-store";
-import { useFolderViewStore } from "@/lib/store/folder-view-store";
+import { useFolderViewStore, useNewNoteFolderId } from "@/lib/store/folder-view-store";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useFileUpload } from "@/hooks/use-file-upload";
@@ -126,6 +126,8 @@ export function SmartComposer(props: SmartComposerProps) {
   const start = useAssistantStore((s) => s.start);
   const fail = useAssistantStore((s) => s.fail);
   const activeFolderId = useFolderViewStore((s) => s.activeFolderId);
+  // New notes may also go into a folder shared with the user; folders and uploads can't.
+  const newNoteFolderId = useNewNoteFolderId();
   const createFolder = useNotesStore((s) => s.createFolder);
   const { upload, isUploading } = useFileUpload();
 
@@ -364,7 +366,7 @@ export function SmartComposer(props: SmartComposerProps) {
     if (shouldCommit) {
       const params = new URLSearchParams();
       if (draft) params.set("q", draft);
-      if (activeFolderId) params.set("folder", activeFolderId);
+      if (newNoteFolderId) params.set("folder", newNoteFolderId);
       const qs = params.toString();
       router.push(qs ? `/notes/new?${qs}` : "/notes/new");
     } else if (wasOnInput && !wasArmed) {
@@ -416,7 +418,7 @@ export function SmartComposer(props: SmartComposerProps) {
                   onClick={() => {
                     setDrawerOpen(false);
                     const params = new URLSearchParams();
-                    if (activeFolderId) params.set("folder", activeFolderId);
+                    if (newNoteFolderId) params.set("folder", newNoteFolderId);
                     const qs = params.toString();
                     router.push(qs ? `/notes/new?${qs}` : "/notes/new");
                   }}

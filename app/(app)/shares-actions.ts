@@ -34,6 +34,13 @@ export interface ShareMember {
   status: ShareStatus;
 }
 
+/** People who get this note/folder through a shared folder above it (managed on that folder). */
+export interface InheritedShare {
+  folderId: string;
+  folderName: string;
+  members: ShareMember[];
+}
+
 export interface IncomingInvite {
   id: string;
   kind: "note" | "folder";
@@ -187,13 +194,15 @@ export async function inviteToShare(
   return {};
 }
 
-export async function listShareMembers(target: ShareTarget): Promise<{ members: ShareMember[]; error?: string }> {
+export async function listShareMembers(
+  target: ShareTarget
+): Promise<{ members: ShareMember[]; inherited: InheritedShare[]; error?: string }> {
   const { supabase, user } = await requireUser();
-  if (!user) return { members: [], error: "Sessão expirada." };
+  if (!user) return { members: [], inherited: [], error: "Sessão expirada." };
 
   const column = "noteId" in target ? "note_id" : "folder_id";
   const targetId = "noteId" in target ? target.noteId : target.folderId;
-  const [{ data, error }, peers] = await Promise.all([
+  const [{ data, error }, peers, { data: folders }, { data: note }] = await Promise.all([
     supabase
       .from("shares")
       .select("id, invitee_email, invitee_id, role, status")
@@ -201,21 +210,99 @@ export async function listShareMembers(target: ShareTarget): Promise<{ members: 
       .eq(column, targetId)
       .order("created_at", { ascending: true }),
     peerProfiles(supabase),
+    supabase.from("folders").select("id, name, parent_id").eq("user_id", user.id),
+    "noteId" in target
+      ? supabase.from("notes").select("folder_id").eq("id", target.noteId).eq("user_id", user.id).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
-  if (error) return { members: [], error: "Não foi possível carregar." };
+  if (error) return { members: [], inherited: [], error: "Não foi possível carregar." };
 
-  return {
-    members: (data ?? []).map((row) => {
-      const profile = row.invitee_id ? peers.get(row.invitee_id as string) : undefined;
-      return {
-        id: row.id as string,
-        email: row.invitee_email as string,
-        name: profile ? nameOf(profile) : undefined,
-        role: row.role as ShareRole,
-        status: row.status as ShareStatus,
-      };
-    }),
+  const toMember = (row: Record<string, unknown>): ShareMember => {
+    const profile = row.invitee_id ? peers.get(row.invitee_id as string) : undefined;
+    return {
+      id: row.id as string,
+      email: row.invitee_email as string,
+      name: profile ? nameOf(profile) : undefined,
+      role: row.role as ShareRole,
+      status: row.status as ShareStatus,
+    };
   };
+
+  // Folders above the target: a share on any of them also covers it (the
+  // database computes access through the whole tree), so the vault shows them.
+  const byId = new Map((folders ?? []).map((f) => [f.id as string, f]));
+  const ancestors: string[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null =
+    "noteId" in target
+      ? ((note as { folder_id: string | null } | null)?.folder_id ?? null)
+      : ((byId.get(target.folderId)?.parent_id as string | null) ?? null);
+  while (cursor && !seen.has(cursor) && byId.has(cursor)) {
+    seen.add(cursor);
+    ancestors.push(cursor);
+    cursor = (byId.get(cursor)!.parent_id as string | null) ?? null;
+  }
+
+  let inherited: InheritedShare[] = [];
+  if (ancestors.length > 0) {
+    const { data: rows } = await supabase
+      .from("shares")
+      .select("id, folder_id, invitee_email, invitee_id, role, status")
+      .eq("owner_id", user.id)
+      .in("folder_id", ancestors)
+      .in("status", ["pending", "accepted"])
+      .order("created_at", { ascending: true });
+    inherited = ancestors
+      .map((folderId) => ({
+        folderId,
+        folderName: (byId.get(folderId)?.name as string) ?? "Pasta",
+        members: (rows ?? []).filter((r) => r.folder_id === folderId).map(toMember),
+      }))
+      .filter((group) => group.members.length > 0);
+  }
+
+  return { members: (data ?? []).map(toMember), inherited };
+}
+
+/**
+ * Creates a note inside a folder someone shared with the caller (as editor).
+ * The note belongs to the FOLDER'S OWNER — that's what puts it in the shared
+ * tree, so everyone with the folder sees it, and it stays when the creator
+ * leaves. The insert uses the service role (RLS rightly won't let a user
+ * insert rows owned by someone else), only after the session is verified and
+ * the database itself confirms editor access to that exact folder.
+ */
+export async function createNoteInSharedFolder(input: {
+  id: string;
+  folderId: string;
+  title: string;
+  body: string;
+}): Promise<{ error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada. Entre novamente." };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id)) return { error: "Nota inválida." };
+  if (typeof input.title !== "string" || typeof input.body !== "string") return { error: "Dados inválidos." };
+
+  const { data: access, error: accessError } = await supabase.rpc("shared_folder_access");
+  if (accessError) return { error: "Não foi possível criar a nota." };
+  const entry = ((access ?? []) as { folder_id: string; role: ShareRole; owner_id: string }[]).find(
+    (a) => a.folder_id === input.folderId
+  );
+  if (!entry) return { error: "Pasta não encontrada." };
+  if (entry.role !== "editor") return { error: "Você só pode ver esta pasta." };
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("notes").insert({
+    id: input.id,
+    user_id: entry.owner_id,
+    folder_id: input.folderId,
+    type: "nota",
+    title: encryptText(input.title.trim() || "Nova nota"),
+    body: encryptText(input.body),
+  });
+  if (error) return { error: "Não foi possível criar a nota." };
+  await refreshNoteDerivedData(supabase, user.id, input.id, entry.owner_id, input.body);
+  return {};
 }
 
 export async function updateShareRole(shareId: string, role: ShareRole): Promise<{ error?: string }> {
