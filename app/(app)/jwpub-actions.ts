@@ -327,8 +327,10 @@ export async function getExtracts(
   if (error) return { error: "Não foi possível carregar o trecho citado." };
 
   // Returned in the order the citation named them, not the database's.
+  // Excerpts stored as binary noise by an older import (U+FFFD everywhere) are
+  // skipped; reprocessing the publication (↻) rewrites them correctly.
   const byId = new Map(
-    (data ?? []).map((row) => [
+    (data ?? []).filter((row) => !String(row.content_html).includes("�")).map((row) => [
       row.extract_id,
       {
         extractId: row.extract_id,

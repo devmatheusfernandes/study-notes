@@ -115,6 +115,10 @@ export async function decodeJwpubContent(
   try {
     return new TextDecoder().decode(inflate(raw) as BufferSource);
   } catch {
-    return plain ?? new TextDecoder().decode(raw as BufferSource);
+    // Nothing worked. Raw bytes that don't read as markup are noise — returning
+    // them stored binary garbage that the reader then showed as text. Empty
+    // makes callers skip the row instead.
+    const fallback = plain ?? new TextDecoder().decode(raw as BufferSource);
+    return looksLikeHtml(fallback) ? fallback : "";
   }
 }
