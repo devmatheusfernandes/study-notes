@@ -10,10 +10,11 @@ import { RsvpButton } from "@/components/content/rsvp-button";
 interface NoteLinkSurfaceProps {
   open: boolean;
   /** `null` when the note was deleted (or hasn't synced to this device) after the reference was made. */
-  note: Note | null;
+  note: Pick<Note, "title" | "body"> | null;
   /** The title baked into the chip itself — shown as the panel title even before/instead of `note` resolving, since a note reference never re-fetches a fresh title from a server. */
   fallbackTitle: string;
-  onOpen: () => void;
+  /** Omitted for a note the user can only read here (the owner's, mentioned in a shared note). */
+  onOpen?: () => void;
   onClose: () => void;
 }
 
@@ -40,9 +41,13 @@ export function NoteLinkSurface({ open, note, fallbackTitle, onOpen, onClose }: 
         </p>
       ) : (
         <div className="flex flex-col gap-3">
-          <Button variant="outline" size="sm" leftIcon={<ExternalLink />} onClick={onOpen}>
-            Abrir nota
-          </Button>
+          {onOpen ? (
+            <Button variant="outline" size="sm" leftIcon={<ExternalLink />} onClick={onOpen}>
+              Abrir nota
+            </Button>
+          ) : (
+            <p className="text-[12px] text-muted-foreground">Nota de quem compartilhou com você · só leitura</p>
+          )}
           {preview?.imageUrl && (
             // eslint-disable-next-line @next/next/no-img-element -- a preview thumbnail, same treatment note-card.tsx already gives it
             <img src={preview.imageUrl} alt="" className="max-w-full" />

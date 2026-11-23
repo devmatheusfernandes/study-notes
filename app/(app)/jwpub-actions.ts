@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { citesAttribute, sharedNoteContext } from "@/lib/notes/shared-context";
 import { updateNoteRow } from "@/app/(app)/notes-actions";
 import { encryptText, decryptText } from "@/lib/encryption";
 import {
@@ -1341,4 +1342,182 @@ export async function searchOwnChapterTitlesInPublication(
     });
   }
   return { hits };
+}
+
+// ---------------------------------------------------------------------------
+// References inside a note shared with the caller (see lib/notes/shared-context.ts)
+// ---------------------------------------------------------------------------
+
+export type SharedReferenceRequest =
+  | { kind: "extract"; publicationId: string; pubNoteId?: string; extractIds: number[] }
+  | { kind: "chapter"; publicationId: string; documentId: number }
+  | { kind: "symbol"; symbol: string; chapter: number | null }
+  | { kind: "pubref"; mepsDocumentId: number };
+
+export interface SharedReferenceResult {
+  extracts?: JwpubExtractRow[];
+  /** A chapter of the owner's publication — `noteId` is null: the caller can't open the owner's copy. */
+  chapter?: ResolvedPublicationReference & { mepsDocumentId?: number | null };
+  error?: string;
+}
+
+/**
+ * Opens a reference cited in a note shared with the caller, from the note
+ * OWNER's library. Refused unless the caller has access to `sharedNoteId`
+ * and that note's own text carries this exact reference; every read is
+ * scoped to the owner's rows.
+ */
+export async function resolveSharedReference(
+  sharedNoteId: string,
+  request: SharedReferenceRequest
+): Promise<SharedReferenceResult> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  const ctx = await sharedNoteContext(supabase, sharedNoteId);
+  if (!ctx) return { error: "Sem acesso a esta referência." };
+  const { ownerId, body } = ctx;
+  const admin = createAdminClient();
+  const notCited = { error: "Referência não encontrada nesta nota." };
+
+  if (request.kind === "extract") {
+    const cited =
+      citesAttribute(body, "data-ref-publication-id", request.publicationId) ||
+      (!!request.pubNoteId && citesAttribute(body, "data-ref-pub-note", request.pubNoteId));
+    if (!cited) return notCited;
+    const ids = request.extractIds.filter((id) => Number.isFinite(id)).slice(0, 50);
+    if (ids.length === 0) return { extracts: [] };
+
+    // The cited id first; the publication's note as a fallback (a reprocess gives it a new id).
+    let { data: publication } = await admin
+      .from("jwpub_publications")
+      .select("id")
+      .eq("id", request.publicationId)
+      .eq("user_id", ownerId)
+      .eq("status", "ready")
+      .maybeSingle();
+    if (!publication && request.pubNoteId) {
+      ({ data: publication } = await admin
+        .from("jwpub_publications")
+        .select("id")
+        .eq("note_id", request.pubNoteId)
+        .eq("user_id", ownerId)
+        .eq("status", "ready")
+        .maybeSingle());
+    }
+    if (!publication) return { extracts: [] };
+
+    const { data, error } = await admin
+      .from("jwpub_extracts")
+      .select("extract_id, content_html, caption, ref_title, ref_symbol, ref_meps_document_id")
+      .eq("publication_id", publication.id)
+      .in("extract_id", ids);
+    if (error) return { error: "Não foi possível carregar o trecho citado." };
+    const byId = new Map(
+      (data ?? []).map((row) => [
+        row.extract_id,
+        {
+          extractId: row.extract_id,
+          html: row.content_html,
+          caption: row.caption,
+          refTitle: row.ref_title,
+          refSymbol: row.ref_symbol,
+          refMepsDocumentId: row.ref_meps_document_id,
+        } satisfies JwpubExtractRow,
+      ])
+    );
+    return { extracts: ids.map((id) => byId.get(id)).filter((row): row is JwpubExtractRow => row !== undefined) };
+  }
+
+  if (request.kind === "chapter") {
+    if (
+      !citesAttribute(body, "data-ref-publication-id", request.publicationId) ||
+      !citesAttribute(body, "data-ref-document-id", request.documentId)
+    ) {
+      return notCited;
+    }
+    const { data } = await admin
+      .from("jwpub_chapters")
+      .select("document_id, title, content_html, jwpub_publications!inner(user_id, title, symbol, status)")
+      .eq("publication_id", request.publicationId)
+      .eq("document_id", request.documentId)
+      .maybeSingle();
+    const pub = Array.isArray(data?.jwpub_publications) ? data.jwpub_publications[0] : data?.jwpub_publications;
+    if (!data || !pub || pub.user_id !== ownerId || pub.status !== "ready") return { error: "Capítulo não encontrado." };
+    return {
+      chapter: {
+        noteId: null,
+        publicationId: request.publicationId,
+        publicationTitle: pub.title,
+        symbol: pub.symbol,
+        documentId: data.document_id,
+        chapterTitle: data.title,
+        html: data.content_html ?? "",
+      },
+    };
+  }
+
+  if (request.kind === "symbol") {
+    const symbol = request.symbol.trim().toLowerCase();
+    if (!symbol || !citesAttribute(body, "data-ref-symbol", symbol)) return notCited;
+    const { data: publication } = await admin
+      .from("jwpub_publications")
+      .select("id, title, symbol")
+      .eq("user_id", ownerId)
+      .ilike("symbol", escapeLikePattern(symbol))
+      .eq("status", "ready")
+      .limit(1)
+      .maybeSingle();
+    if (!publication) return { error: "A publicação citada não está disponível." };
+    const { data: chapters } = await admin
+      .from("jwpub_chapters")
+      .select("document_id, position, title")
+      .eq("publication_id", publication.id)
+      .order("position", { ascending: true });
+    if (!chapters || chapters.length === 0) return { error: "Publicação sem capítulos." };
+    const match = request.chapter === null ? chapters[0] : pickChapterByNumber(chapters, request.chapter);
+    if (!match) return { error: `A publicação "${publication.title}" não tem um capítulo ${request.chapter}.` };
+    const { data: content } = await admin
+      .from("jwpub_chapters")
+      .select("content_html")
+      .eq("publication_id", publication.id)
+      .eq("document_id", match.document_id)
+      .maybeSingle();
+    return {
+      chapter: {
+        noteId: null,
+        publicationId: publication.id,
+        publicationTitle: publication.title,
+        symbol: publication.symbol,
+        documentId: match.document_id,
+        chapterTitle: match.title,
+        html: content?.content_html ?? "",
+      },
+    };
+  }
+
+  // pubref
+  if (!citesAttribute(body, "data-ref-meps-id", request.mepsDocumentId)) return notCited;
+  const { data: rows } = await admin
+    .from("jwpub_chapters")
+    .select("document_id, title, content_html, publication_id, jwpub_publications!inner(user_id, title, symbol, status)")
+    .eq("meps_document_id", request.mepsDocumentId)
+    .eq("jwpub_publications.user_id", ownerId)
+    .limit(5);
+  for (const row of rows ?? []) {
+    const pub = Array.isArray(row.jwpub_publications) ? row.jwpub_publications[0] : row.jwpub_publications;
+    if (!pub || pub.user_id !== ownerId || pub.status !== "ready") continue;
+    return {
+      chapter: {
+        noteId: null,
+        publicationId: row.publication_id,
+        publicationTitle: pub.title,
+        symbol: pub.symbol,
+        documentId: row.document_id,
+        chapterTitle: row.title,
+        html: row.content_html ?? "",
+        mepsDocumentId: request.mepsDocumentId,
+      },
+    };
+  }
+  return {};
 }

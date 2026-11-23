@@ -25,6 +25,8 @@ import {
 import {
   getExtractsByNote,
   resolveJwpubReferences,
+  resolveSharedReference,
+  type SharedReferenceRequest,
   resolvePublicationChapterById,
   resolvePublicationReference,
 } from "@/app/(app)/jwpub-actions";
@@ -104,6 +106,30 @@ export function cachedNoteReference(reference: NoteReference | null): ResolvedRe
   return cache.get(referenceKey(reference));
 }
 
+/**
+ * The note shared WITH the user that's open right now (set by NoteEditor), or
+ * null. Its references point at the owner's library, which the user can't
+ * read — so anything their own library can't resolve is asked again through
+ * that note (`resolveSharedReference`, which checks access and that the note
+ * really cites it).
+ */
+let sharedNoteContextId: string | null = null;
+export function setSharedReferenceContext(noteId: string | null) {
+  sharedNoteContextId = noteId;
+}
+export function getSharedReferenceContext() {
+  return sharedNoteContextId;
+}
+
+async function viaSharedNote(request: SharedReferenceRequest) {
+  if (!sharedNoteContextId) return null;
+  try {
+    return await resolveSharedReference(sharedNoteContextId, request);
+  } catch {
+    return null; // offline — the caller reports its own miss
+  }
+}
+
 async function fetchReference(reference: NoteReference): Promise<ResolvedReference> {
   if (reference.kind === "note") return EMPTY; // read straight from the notes store, never fetched
 
@@ -157,6 +183,15 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
         return { ...EMPTY, error: "Sem conexão para carregar esta referência." };
       }
     }
+    if (result.error || (result.extracts?.length ?? 0) === 0) {
+      const shared = await viaSharedNote({
+        kind: "extract",
+        publicationId: reference.publicationId,
+        pubNoteId: reference.pubNoteId,
+        extractIds: reference.extractIds,
+      });
+      if (shared?.extracts && shared.extracts.length > 0) return { ...EMPTY, extracts: shared.extracts };
+    }
     if (result.error) return { ...EMPTY, error: result.error };
     // An empty answer is a miss, not a result: reported as an error so it is
     // never cached (the publication may be re-imported a moment later).
@@ -182,7 +217,24 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
       if (reference.snapshot) return unresolved;
       throw error;
     }
-    // Not in the library: not an error and not cached (see below) — the panel
+    // Not in the library: a note shared with the user may cite the owner's copy.
+    if (!hit) {
+      const shared = await viaSharedNote({ kind: "pubref", mepsDocumentId: reference.mepsDocumentId });
+      if (shared?.chapter) {
+        return {
+          ...EMPTY,
+          target: {
+            noteId: null,
+            publicationTitle: shared.chapter.publicationTitle,
+            chapterTitle: shared.chapter.chapterTitle,
+            documentId: shared.chapter.documentId,
+            mepsDocumentId: reference.mepsDocumentId,
+          },
+          html: shared.chapter.html,
+        };
+      }
+    }
+    // Still not found: not an error and not cached (see below) — the panel
     // offers a download, after which a click resolves for real.
     if (!hit) return unresolved;
     const html = hit.contentHtml ?? (await loadChapter(hit.publicationId, hit.documentId)).html ?? null;
@@ -221,7 +273,25 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
       ? await resolvePublicationChapterById(reference.publicationId, reference.documentId, !!reference.isGlobal)
       : await resolvePublicationReference(reference.symbol, reference.chapter);
 
-  if (!resolved) return { ...EMPTY, error: error ?? "Referência não encontrada." };
+  if (!resolved) {
+    const shared =
+      reference.documentId !== undefined && reference.publicationId && !reference.isGlobal
+        ? await viaSharedNote({ kind: "chapter", publicationId: reference.publicationId, documentId: reference.documentId })
+        : await viaSharedNote({ kind: "symbol", symbol: reference.symbol, chapter: reference.chapter });
+    if (shared?.chapter) {
+      return {
+        ...EMPTY,
+        target: {
+          noteId: null,
+          publicationTitle: shared.chapter.publicationTitle,
+          chapterTitle: shared.chapter.chapterTitle,
+          documentId: shared.chapter.documentId,
+        },
+        html: shared.chapter.html,
+      };
+    }
+    return { ...EMPTY, error: error ?? "Referência não encontrada." };
+  }
 
   return {
     ...EMPTY,

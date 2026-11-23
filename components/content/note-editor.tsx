@@ -58,6 +58,7 @@ import { ownSharedNoteIds } from "@/lib/collab/shared-ids";
 import { lockedNoteIds } from "@/lib/lock/locked";
 import { ShareVault } from "@/components/content/share-vault";
 import { createNoteInSharedFolder } from "@/app/(app)/shares-actions";
+import { setSharedReferenceContext } from "@/lib/notes/reference-resolver";
 
 /** Applies a new title string to a Y.Text as the smallest edit (common prefix/suffix kept), so two people typing in the title don't clobber each other. */
 function replaceYText(ytext: Y.Text, next: string) {
@@ -415,6 +416,14 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     ytitle.observe(sync);
     return () => ytitle.unobserve(sync);
   }, [collabReady, collabDoc]);
+
+  // References in a note shared WITH the user point at the owner's library;
+  // the resolver asks for them through this note (server-checked).
+  useEffect(() => {
+    if (!collabReady || !createdId || collab.role === "owner") return;
+    setSharedReferenceContext(createdId);
+    return () => setSharedReferenceContext(null);
+  }, [collabReady, createdId, collab.role]);
 
   // The owner's own card (preview, search) mirrors the shared text locally.
   useEffect(() => {

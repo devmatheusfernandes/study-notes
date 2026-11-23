@@ -7,6 +7,7 @@ import { encryptText, decryptText } from "@/lib/encryption";
 import { extractNoteImagePaths, noteImageUrl } from "@/lib/note-images";
 import { NOTE_IMAGES_BUCKET } from "@/lib/storage-config";
 import { refreshNoteDerivedData } from "@/lib/notes/derived-data";
+import { citesAttribute, sharedNoteContext } from "@/lib/notes/shared-context";
 
 /*
  * Sharing notes and folders (see supabase/migrations/0055_sharing.sql).
@@ -594,4 +595,50 @@ export async function importSharedCopy(shareId: string): Promise<{ error?: strin
   }
 
   return { importedNotes: imported };
+}
+
+/**
+ * Another of the owner's notes, mentioned ("@nota") inside a note shared with
+ * the caller — read-only, and only if the shared note actually cites it and
+ * it isn't locked (directly or through a folder). See lib/notes/shared-context.ts.
+ */
+export async function getSharedLinkedNote(
+  sharedNoteId: string,
+  linkedNoteId: string
+): Promise<{ note?: { id: string; title: string; body: string }; error?: string }> {
+  const { supabase, user } = await requireUser();
+  if (!user) return { error: "Sessão expirada." };
+  const ctx = await sharedNoteContext(supabase, sharedNoteId);
+  if (!ctx || !citesAttribute(ctx.body, "data-ref-note-id", linkedNoteId)) return { error: "Nota não disponível." };
+
+  const admin = createAdminClient();
+  const { data: note } = await admin
+    .from("notes")
+    .select("id, title, body, folder_id, locked, type, status")
+    .eq("id", linkedNoteId)
+    .eq("user_id", ctx.ownerId)
+    .maybeSingle();
+  if (!note || note.locked || note.type !== "nota" || note.status !== "active") return { error: "Nota não disponível." };
+
+  if (note.folder_id) {
+    const { data: folders } = await admin.from("folders").select("id, parent_id, locked").eq("user_id", ctx.ownerId);
+    const byId = new Map((folders ?? []).map((f) => [f.id as string, f]));
+    const seen = new Set<string>();
+    let cursor: string | null = note.folder_id as string;
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const folder = byId.get(cursor);
+      if (!folder) break;
+      if (folder.locked) return { error: "Nota não disponível." };
+      cursor = folder.parent_id as string | null;
+    }
+  }
+
+  return {
+    note: {
+      id: note.id as string,
+      title: decryptText(note.title as string) ?? "",
+      body: decryptText(note.body as string) ?? "",
+    },
+  };
 }

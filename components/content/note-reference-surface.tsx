@@ -1,5 +1,7 @@
 "use client";
 
+import { getSharedLinkedNote } from "@/app/(app)/shares-actions";
+import { getSharedReferenceContext } from "@/lib/notes/reference-resolver";
 import { useEffect, useState } from "react";
 import { referenceKey, type NoteReference } from "@/lib/notes/note-reference";
 import { useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
@@ -63,7 +65,26 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
   );
   // A locked note is treated as if it weren't in the store: the surface falls back to its
   // "not available" state instead of showing the note's title or text.
-  const linkedNote = linkedNoteRaw && !hiddenNoteIds.has(linkedNoteRaw.id) ? linkedNoteRaw : undefined;
+  const ownLinkedNote = linkedNoteRaw && !hiddenNoteIds.has(linkedNoteRaw.id) ? linkedNoteRaw : undefined;
+
+  // Inside a note shared WITH the user, a mentioned note is the owner's: read
+  // it (read-only) through the shared note — the server checks it's cited there.
+  const linkedId = reference?.kind === "note" ? reference.noteId : null;
+  const [sharedLinked, setSharedLinked] = useState<{ id: string; title: string; body: string } | null>(null);
+  useEffect(() => {
+    const sharedNoteId = getSharedReferenceContext();
+    if (!linkedId || linkedNoteRaw || !sharedNoteId) return;
+    let cancelled = false;
+    getSharedLinkedNote(sharedNoteId, linkedId)
+      .then((res) => {
+        if (!cancelled) setSharedLinked(res.note ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedId, linkedNoteRaw]);
+  const linkedNote = ownLinkedNote ?? (sharedLinked && sharedLinked.id === linkedId ? sharedLinked : undefined);
 
   // Keyed on the reference's identity, not the object: clicking the same chip
   // twice (or a re-render handing over an equal-but-new object) must not
@@ -170,7 +191,8 @@ export function NoteReferenceSurface({ reference, onClose, onOpenNote }: NoteRef
         open={reference?.kind === "note"}
         note={linkedNote ?? null}
         fallbackTitle={reference?.kind === "note" ? reference.title : ""}
-        onOpen={() => linkedNote && onOpenNote(linkedNote.id)}
+        // Only the user's own notes can be opened in the editor; a shared one is read here.
+        onOpen={ownLinkedNote ? () => onOpenNote(ownLinkedNote.id) : undefined}
         onClose={onClose}
       />
     </>
