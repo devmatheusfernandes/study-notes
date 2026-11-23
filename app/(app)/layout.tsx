@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { AssistantSurface } from "@/components/assistant/assistant-surface";
 import { SidePanelStackProvider } from "@/components/content/side-panel-stack";
@@ -6,44 +7,22 @@ import { StoreHydration } from "@/components/providers/store-hydration";
 import { DockedChat } from "@/components/chat/docked-chat";
 import { ChatHydration } from "@/components/chat/chat-hydration";
 import { LockProvider } from "@/components/lock/lock-provider";
-import { listUserContent } from "./notes-actions";
-import { listConversations } from "./chat-actions";
-import { getUserPreferences } from "./preferences-actions";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  // Fetched once per entry into this section (layouts persist across the
-  // client-side navigations between /notes, /archived, /trash, …) — RLS
-  // scopes this to the signed-in user, same as every other query here.
-  const [{ notes, folders, tags, ok: contentOk },conversationRows, initialPreferences] = await Promise.all([
-    listUserContent(),
-    listConversations(),
-    getUserPreferences(),
-  ]);
-
-  const conversations = conversationRows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    status: r.status,
-    updatedAt: r.updatedAt,
-  }));
-
+// Deliberately synchronous and fetch-free: notes, folders, chats and
+// preferences load client-side (StoreHydration / ChatHydration). Awaiting them
+// here made the whole (app) subtree dynamic, so it couldn't be shown offline.
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     // SidePanelStackProvider renders no DOM of its own — it only lets every
     // JwpubSidePanel under it share one desktop sidebar slot (stacking with a
     // back button) instead of opening side by side.
     <SidePanelStackProvider>
       <div className="flex min-h-dvh w-full">
-        <StoreHydration
-          initialNotes={notes}
-          initialFolders={folders}
-          initialTags={tags}
-          contentOk={contentOk}
-          initialPreferences={initialPreferences}
-        />
-        <ChatHydration conversations={conversations} />
+        <StoreHydration />
+        <ChatHydration />
         <LockProvider />
         <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <div className="flex min-w-0 flex-1 flex-col"><Suspense>{children}</Suspense></div>
         <DockedChat />
         <AssistantSurface />
         <FloatingWindowsHost />

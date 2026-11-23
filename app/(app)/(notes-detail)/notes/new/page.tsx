@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { NoteEditor } from "@/components/content/note-editor";
 
@@ -11,5 +12,9 @@ export const metadata: Metadata = {
 // shell then serves every "new note" navigation, offline included, instead
 // of needing a fresh RSC fetch keyed to that request's query string.
 export default function NewNotePage() {
-  return <NoteEditor />;
+  return (
+    <Suspense>
+      <NoteEditor />
+    </Suspense>
+  );
 }

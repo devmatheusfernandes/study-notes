@@ -2,9 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import { useChatStore, type ChatConversation } from "@/lib/store/chat-store";
+import { listConversations } from "@/app/(app)/chat-actions";
 
 interface ChatHydrationProps {
-  conversations: ChatConversation[];
+  /** Omit to fetch client-side (what the static (app) layout does). */
+  conversations?: ChatConversation[];
 }
 
 export function ChatHydration({ conversations }: ChatHydrationProps) {
@@ -14,7 +16,17 @@ export function ChatHydration({ conversations }: ChatHydrationProps) {
   useEffect(() => {
     if (hasHydrated.current) return;
     hasHydrated.current = true;
-    setConversations(conversations);
+    if (conversations) {
+      setConversations(conversations);
+      return;
+    }
+    void listConversations()
+      .then((rows) =>
+        setConversations(rows.map((r) => ({ id: r.id, title: r.title, status: r.status, updatedAt: r.updatedAt })))
+      )
+      .catch(() => {
+        // offline — keep whatever the store already has
+      });
   }, [conversations, setConversations]);
 
   return null;
