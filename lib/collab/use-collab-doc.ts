@@ -4,13 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { createClient } from "@/lib/supabase/client";
-import {
-  checkNoteAccess,
-  initCollabState,
-  openCollabNote,
-  saveCollabState,
-  type CollabRole,
-} from "@/app/(app)/collab-actions";
+import { saveCollabState, type CollabRole } from "@/app/(app)/collab-actions";
+import { fetchCollabAccess, fetchCollabOpen, postCollabSeed } from "./collab-api";
 import { SupabaseYjsProvider, type PresenceUser } from "./supabase-provider";
 import { fromBase64, toBase64 } from "./base64";
 import { collaboratorColor } from "./colors";
@@ -105,8 +100,15 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
       const seedDoc = new Y.Doc();
       Y.applyUpdate(seedDoc, fromBase64(seedB64));
       if (seedTitle.current) seedDoc.getText(COLLAB_TITLE_FIELD).insert(0, seedTitle.current);
-      const res = await initCollabState(noteId, toBase64(Y.encodeStateAsUpdate(seedDoc)));
+      const seed = toBase64(Y.encodeStateAsUpdate(seedDoc));
       seedDoc.destroy();
+      // The note stays behind the skeleton until this lands — keep trying
+      // through a flaky connection rather than leaving it stuck.
+      let res: { state?: string } = {};
+      for (let attempt = 0; attempt < 6 && !res.state && sessionRef.current; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+        res = await postCollabSeed(noteId, seed).catch(() => ({}));
+      }
       if (res.state && sessionRef.current) {
         Y.applyUpdate(sessionRef.current.doc, fromBase64(res.state), "server");
         setSeedHtml(null);
@@ -135,9 +137,9 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
 
     async function start() {
       if (!noteId) return;
-      let opened: Awaited<ReturnType<typeof openCollabNote>> | null = null;
+      let opened: Awaited<ReturnType<typeof fetchCollabOpen>> | null = null;
       try {
-        opened = await openCollabNote(noteId);
+        opened = await fetchCollabOpen(noteId);
       } catch {
         opened = null; // offline
       }
@@ -213,7 +215,7 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
       const offPresence = yProvider.onPresence(setPeers);
       const offRefresh = yProvider.onRefresh(async () => {
         try {
-          const fresh = await openCollabNote(noteId);
+          const fresh = await fetchCollabOpen(noteId);
           if (fresh.state) Y.applyUpdate(ydoc, fromBase64(fresh.state), "server");
         } catch {
           // offline — the next sync exchange covers it
@@ -237,7 +239,7 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
           if (res.error) {
             dirty = true;
             if (!res.transient) {
-              const access = await checkNoteAccess(noteId).catch(() => null);
+              const access = await fetchCollabAccess(noteId).catch(() => null);
               if (access && access.role === null) return void revoke();
             }
             setSaveState("offline");
@@ -286,7 +288,7 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
       // Access can end while the note is open (owner locks it, revokes, …).
       const poll = setInterval(async () => {
         try {
-          const { role: now } = await checkNoteAccess(noteId);
+          const { role: now } = await fetchCollabAccess(noteId);
           if (now === null) void revoke();
         } catch {
           // offline — try again next tick

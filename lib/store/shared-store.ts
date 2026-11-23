@@ -36,6 +36,8 @@ interface SharedState {
   /** Notes this device has opened collaboratively, with the role last seen — lets them open offline. */
   collabRoles: Record<string, CollabRole>;
   loaded: boolean;
+  /** The persisted copy has been read back (not persisted itself). */
+  hydrated: boolean;
   refresh: () => Promise<void>;
   markCollabNote: (id: string, role: CollabRole) => void;
   unmarkCollabNote: (id: string) => void;
@@ -54,6 +56,7 @@ export const useSharedStore = create<SharedState>()(
       outgoingFolderIds: [],
       collabRoles: {},
       loaded: false,
+      hydrated: false,
 
       refresh: () => {
         inflight ??= (async () => {
@@ -121,6 +124,7 @@ export const useSharedStore = create<SharedState>()(
     {
       name: "study-notes:shared",
       skipHydration: true,
+      onRehydrateStorage: () => () => useSharedStore.setState({ hydrated: true }),
       partialize: (s) => ({
         notes: s.notes,
         folders: s.folders,

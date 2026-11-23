@@ -160,12 +160,22 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   );
   const knownShared = !!createdId && (createdId in collabRoles || ownShared);
   const collab = useCollabDoc(createdId ?? undefined, { knownShared });
+  // While the server check is in flight, an existing note that MIGHT be shared
+  // shows the skeleton rather than the ordinary editor — which would open
+  // empty (or with a stale copy) and then visibly swap. "Might": the shared
+  // lists haven't been read back from this device yet, or the note isn't one
+  // of the user's own (so it can only be someone else's, shared with them).
+  // A note of the user's own that isn't known to be shared opens instantly.
+  const sharedHydrated = useSharedStore((s) => s.hydrated);
+  const maybeShared =
+    knownShared ||
+    (!!noteId && (!sharedHydrated || (hydrated && !notes.some((n) => n.id === noteId))));
   const inCollab =
     collab.status === "loading" ||
     collab.status === "ready" ||
     collab.status === "revoked" ||
     collab.status === "unavailable" ||
-    (collab.status === "checking" && knownShared);
+    (collab.status === "checking" && maybeShared);
   const collabReady = collab.status === "ready" && !!collab.doc && !!collab.provider;
   const isOwner = !inCollab || collab.role === "owner";
   const canWrite = !inCollab || collab.role === "owner" || collab.role === "editor";
@@ -984,6 +994,11 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               <CollabPlaceholder status={collab.status} onBack={() => void leaveNote()} />
             ) : (
               <>
+                {/* First collaborative open: the editor below is mounted (it builds
+                    the initial state from its own schema) but stays hidden until
+                    that state lands, so the note never shows up empty first. */}
+                {collab.needsSeed && <CollabPlaceholder status="loading" onBack={() => void leaveNote()} />}
+                <div className={cn("flex flex-1 flex-col gap-3", collab.needsSeed && "hidden")}>
                 <input
                   value={collab.viewerFallback ? collab.viewerFallback.title : title}
                   onChange={(e) => changeTitle(e.target.value)}
@@ -1061,6 +1076,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                     onReferenceClick={setOpenReference}
                   />
                 )}
+                </div>
               </>
             )}
 
