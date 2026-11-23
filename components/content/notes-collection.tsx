@@ -35,6 +35,12 @@ import {
 import { useHiddenFolderIds, useHiddenNoteIds } from "@/lib/lock/use-hidden-ids";
 import { lockItem, unlockItem } from "@/lib/lock/toggle-lock";
 import { useLockStore } from "@/lib/store/lock-store";
+import { lockedFolderIds, lockedNoteIds } from "@/lib/lock/locked";
+import { SegmentedPills } from "@/components/ui/segmented-pills";
+import { useSharedStore } from "@/lib/store/shared-store";
+import { ownSharedNoteIds } from "@/lib/collab/shared-ids";
+import { ShareVault } from "./share-vault";
+import { SharedWithMe } from "./shared-with-me";
 
 interface NotesCollectionProps {
   status: NoteStatus;
@@ -159,6 +165,21 @@ export function NotesCollection({
   const toggleChecklistItem = useNotesStore((s) => s.toggleChecklistItem);
   const viewMode = usePreferencesStore((s) => s.viewMode);
   const { processDiscoveredItems } = useFileUpload();
+
+  // "Pastas" (the user's own) vs "Compartilhado comigo" (other people's, see SharedWithMe).
+  const [scope, setScope] = useState<"mine" | "shared">("mine");
+  const pendingInvites = useSharedStore((s) => s.invites.length);
+  const outgoingNoteIds = useSharedStore((s) => s.outgoingNoteIds);
+  const outgoingFolderIds = useSharedStore((s) => s.outgoingFolderIds);
+  const lockedNotes = useMemo(() => lockedNoteIds(notes, folders), [notes, folders]);
+  const lockedFolders = useMemo(() => lockedFolderIds(folders), [folders]);
+  const sharedNoteIds = useMemo(
+    () => ownSharedNoteIds(notes, folders, outgoingNoteIds, outgoingFolderIds, lockedNotes),
+    [notes, folders, outgoingNoteIds, outgoingFolderIds, lockedNotes]
+  );
+  const [shareTarget, setShareTarget] = useState<
+    { kind: "note" | "folder"; id: string; name: string; locked: boolean } | null
+  >(null);
 
   const isTrashed = status === "trashed";
   const query = useSearchStore((s) => s.query);
@@ -354,8 +375,17 @@ export function NotesCollection({
         onDelete={isOptimistic ? undefined : isTrashed ? () => deletePermanently(note.id) : () => trash(note.id)}
         onManageTags={isOptimistic ? undefined : () => setManageTagsNoteId(note.id)}
         onMoveToFolder={isOptimistic || !showFolders ? undefined : () => setMoveFolderNoteId(note.id)}
-        onToggleChecklistItem={masked ? undefined : (index) => { hapticTap(); toggleChecklistItem(note.id, index); }}
+        // A shared note's text lives in its collaborative document; ticking a box
+        // here would overwrite it from a stale copy — open the note instead.
+        onToggleChecklistItem={masked || sharedNoteIds.has(note.id) ? undefined : (index) => { hapticTap(); toggleChecklistItem(note.id, index); }}
         onDragStart={isOptimistic || !showFolders ? undefined : (e) => handleNoteDragStart(e, note)}
+        shared={!masked && sharedNoteIds.has(note.id)}
+        onShare={
+          isOptimistic || note.type !== "nota" || status !== "active"
+            ? undefined
+            : () =>
+                setShareTarget({ kind: "note", id: note.id, name: note.title, locked: lockedNotes.has(note.id) })
+        }
       />
     );
   };
@@ -474,6 +504,25 @@ export function NotesCollection({
     <>
     <FileDropZone blockJwlibrary>
       <div className="flex flex-1 flex-col gap-7 px-4 py-6 sm:px-6">
+        {/* Sits where the "PASTAS" label used to be, and stays even when there are no folders. */}
+        {showFolders && !openFolder && (
+          <SegmentedPills
+            size="sm"
+            aria-label="O que mostrar"
+            className="w-fit"
+            value={scope}
+            onChange={setScope}
+            options={[
+              { value: "mine", label: "PASTAS" },
+              { value: "shared", label: "COMPARTILHADO COMIGO", badge: pendingInvites },
+            ]}
+          />
+        )}
+
+        {showFolders && scope === "shared" && !openFolder ? (
+          <SharedWithMe />
+        ) : (
+        <>
         {openFolder && (
           <div className="flex w-fit items-center gap-2">
           {/* Deep inside subfolders, "back" only climbs one level — this jumps straight to the root.
@@ -550,9 +599,11 @@ export function NotesCollection({
 
         {foldersVisible && (
           <section className="flex flex-col gap-3">
-            <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
-              PASTAS
-            </span>
+            {openFolder && (
+              <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted-foreground">
+                PASTAS
+              </span>
+            )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {childFolders.map((folder) => (
                 <FolderCard
@@ -584,6 +635,15 @@ export function NotesCollection({
                   onDropNoteIds={(ids) => bulkMoveNotes(ids, folder.id)}
                   onMove={() => setMoveFolderId(folder.id)}
                   onDropFolderId={(id) => moveFolder(id, folder.id)}
+                  shared={outgoingFolderIds.includes(folder.id)}
+                  onShare={() =>
+                    setShareTarget({
+                      kind: "folder",
+                      id: folder.id,
+                      name: folder.name,
+                      locked: lockedFolders.has(folder.id),
+                    })
+                  }
                 />
               ))}
             </div>
@@ -614,8 +674,21 @@ export function NotesCollection({
             {itemsSection(pinned.length > 0 ? "OUTRAS" : "NOTAS E ARQUIVOS", others)}
           </>
         )}
+        </>
+        )}
       </div>
     </FileDropZone>
+    {shareTarget && (
+      <ShareVault
+        open
+        onOpenChange={(open) => {
+          if (!open) setShareTarget(null);
+        }}
+        target={shareTarget.kind === "note" ? { noteId: shareTarget.id } : { folderId: shareTarget.id }}
+        name={shareTarget.name}
+        locked={shareTarget.locked}
+      />
+    )}
     <TagPickerVault
       open={manageTagsNoteId !== null}
       onOpenChange={(open) => {

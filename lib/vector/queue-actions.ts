@@ -134,6 +134,7 @@ export async function revectorizeAllNotes(): Promise<{ enqueued: number; error?:
   const { data: notes, error: fetchError } = await supabase
     .from("notes")
     .select("id")
+    .eq("user_id", user.id)
     .eq("status", "active");
 
   if (fetchError || !notes || notes.length === 0) {

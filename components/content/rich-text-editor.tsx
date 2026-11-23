@@ -31,6 +31,13 @@ import { MAX_IMAGE_SIZE } from "@/lib/storage-config";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TaskItemNodeView } from "@/components/content/task-item-node-view";
+import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import { prosemirrorToYDoc } from "@tiptap/y-tiptap";
+import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
+import * as Y from "yjs";
+import type { SupabaseYjsProvider } from "@/lib/collab/supabase-provider";
+import { toBase64 } from "@/lib/collab/base64";
 import {
   Bold,
   Italic,
@@ -163,6 +170,23 @@ export interface RichTextEditorHandle {
   scrollToText: (text: string) => boolean;
 }
 
+/**
+ * Collaborative mode (a shared note — see lib/collab/). The Yjs document is
+ * the content: `content` is ignored, Tiptap's own undo history is swapped for
+ * Yjs's (StarterKit's would undo other people's edits), and the remote
+ * carets come from the provider's awareness.
+ */
+export interface RichTextEditorCollab {
+  doc: Y.Doc;
+  provider: SupabaseYjsProvider;
+  user: { name: string; color: string };
+  readOnly: boolean;
+  /** Set while nobody has opened this note collaboratively yet: build the first Yjs state from this HTML. */
+  seedHtml: string | null;
+  onSeed: (seedB64: string) => Promise<void>;
+  registerHtmlSource: (fn: () => string) => void;
+}
+
 interface RichTextEditorProps {
   content: string;
   onChange: (html: string) => void;
@@ -175,13 +199,36 @@ interface RichTextEditorProps {
   notes?: NoteOption[];
   /** Called when a reference in the text is clicked, so the host can open its side panel. */
   onReferenceClick?: (reference: NoteReference) => void;
+  /** Set for a shared note. Must not change after mount — key the component on it. */
+  collab?: RichTextEditorCollab;
+  /** Read-only (non-collaborative) rendering — a viewer's fallback snapshot. */
+  readOnly?: boolean;
 }
 
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
-  { content, onChange, placeholder, autoFocus, className, publications, notes, onReferenceClick },
+  { content, onChange, placeholder, autoFocus, className, publications, notes, onReferenceClick, collab, readOnly = false },
   ref
 ) {
   const seeded = useRef(false);
+  // Fixed for the editor's lifetime (the host keys this component on collab mode).
+  const collabDoc = collab?.doc;
+  const collabProvider = collab?.provider;
+  const collabUserName = collab?.user.name;
+  const collabUserColor = collab?.user.color;
+  const collabExtensions = useMemo(
+    () =>
+      collabDoc && collabProvider
+        ? [
+            StarterKit.configure({ undoRedo: false }),
+            Collaboration.configure({ document: collabDoc }),
+            CollaborationCaret.configure({
+              provider: collabProvider,
+              user: { name: collabUserName, color: collabUserColor },
+            }),
+          ]
+        : [StarterKit],
+    [collabDoc, collabProvider, collabUserName, collabUserColor]
+  );
 
   /* --------------------------------------------------------------- *
    * References — "(mt 7:12)" input rule + the "/" menu
@@ -528,7 +575,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     immediatelyRender: false,
     autofocus: autoFocus ? "end" : false,
     extensions: [
-      StarterKit,
+      ...collabExtensions,
       NoteHighlight,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Image.configure({ HTMLAttributes: { class: "max-w-full" } }),
@@ -562,7 +609,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       // only fires once neither of those wants the key.
       ParagraphIndent,
     ],
-    content,
+    content: collab ? undefined : content,
     editorProps: {
       attributes: {
         class:
@@ -630,8 +677,39 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       scheduleWarm(editor.view.dom);
     },
     // Themed to match the app's dark "Organic" tokens instead of Tiptap's defaults.
-    editable: true,
+    // A viewer reads only; an editor waits for the first state to be seeded.
+    editable: collab ? !collab.readOnly && collab.seedHtml === null : !readOnly,
   });
+
+  // `editable` in the options above only counts at creation — useEditor doesn't
+  // push a later change into the view. A collaborative editor starts read-only
+  // while the first state is seeded and must unlock once it lands.
+  const desiredEditable = collab ? !collab.readOnly && collab.seedHtml === null : !readOnly;
+  useEffect(() => {
+    if (editor && editor.isEditable !== desiredEditable) editor.setEditable(desiredEditable, false);
+  }, [editor, desiredEditable]);
+
+  // Collaborative: the host persists an HTML snapshot of the doc (notes.body).
+  const registerHtmlSource = collab?.registerHtmlSource;
+  useEffect(() => {
+    if (!editor || !registerHtmlSource) return;
+    registerHtmlSource(() => editor.getHTML());
+  }, [editor, registerHtmlSource]);
+
+  // Collaborative, first open ever: build the Yjs state from the stored HTML
+  // with this editor's own schema, and hand it to the host, which stores it
+  // only if nobody beat us to it (and applies whichever state won).
+  const seedHtml = collab?.seedHtml ?? null;
+  const onSeed = collab?.onSeed;
+  const seedSent = useRef(false);
+  useEffect(() => {
+    if (!editor || seedHtml === null || !onSeed || seedSent.current) return;
+    seedSent.current = true;
+    const dom = new window.DOMParser().parseFromString(`<body>${seedHtml}</body>`, "text/html").body;
+    const node = ProseMirrorDOMParser.fromSchema(editor.schema).parse(dom);
+    const seedDoc = prosemirrorToYDoc(node, "default");
+    void onSeed(toBase64(Y.encodeStateAsUpdate(seedDoc))).finally(() => seedDoc.destroy());
+  }, [editor, seedHtml, onSeed]);
 
   useImperativeHandle(ref, () => ({
     openImagePicker: () => {
@@ -676,12 +754,12 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // Adopt persisted content once (e.g. once localStorage rehydrates) without
   // fighting the user's own typing on every keystroke.
   useEffect(() => {
-    if (!editor || seeded.current) return;
+    if (!editor || seeded.current || collabDoc) return;
     if (content) {
       seeded.current = true;
       editor.commands.setContent(content);
     }
-  }, [editor, content]);
+  }, [editor, content, collabDoc]);
 
   function openFindBar() {
     if (!editor) return;

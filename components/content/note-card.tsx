@@ -17,6 +17,7 @@ import {
   PinOff,
   Sparkles,
   Tags,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useIngestProgress } from "@/lib/store/ingest-progress-store";
@@ -109,6 +110,19 @@ export interface NoteCardProps {
   onToggleChecklistItem?: (index: number) => void;
   /** Native HTML5 drag start, for dragging this card onto a FolderCard to move it. Parent decides the drag payload (single vs. multi-select) and omits this entirely for cards that shouldn't be draggable (optimistic/processing). */
   onDragStart?: (event: React.DragEvent) => void;
+  /** Opens the share vault (owner side). */
+  onShare?: () => void;
+  /** Shared with someone (or, on the "Compartilhado comigo" screen, shared with you) — a small people icon by the title. */
+  shared?: boolean;
+  /** Extra menu entries (e.g. "Importar para mim" on a note shared with you). */
+  extraActions?: CardAction[];
+}
+
+export interface CardAction {
+  label: string;
+  icon?: LucideIcon;
+  onSelect: () => void;
+  destructive?: boolean;
 }
 
 export function NoteCard({
@@ -143,6 +157,9 @@ export function NoteCard({
   onToggleLock,
   onToggleChecklistItem,
   onDragStart,
+  onShare,
+  shared = false,
+  extraActions = [],
 }: NoteCardProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const config = TYPE_CONFIG[type];
@@ -279,7 +296,9 @@ export function NoteCard({
       onToggleLock ||
       onArchive ||
       onRestore ||
-      onDelete
+      onDelete ||
+      onShare ||
+      extraActions.length > 0
   );
   const menu = hasMenuItems && (
     <DropdownMenu>
@@ -318,12 +337,28 @@ export function NoteCard({
             Mover para pasta
           </DropdownMenuItem>
         )}
+        {onShare && (
+          <DropdownMenuItem onSelect={onShare}>
+            <Users className="size-4" />
+            Compartilhar…
+          </DropdownMenuItem>
+        )}
         {onToggleLock && (
           <DropdownMenuItem onSelect={onToggleLock}>
             {lockedDirectly ? <LockOpen className="size-4" /> : <Lock className="size-4" />}
             {lockedDirectly ? "Destrancar" : "Trancar"}
           </DropdownMenuItem>
         )}
+        {extraActions.map((action) => (
+          <DropdownMenuItem
+            key={action.label}
+            variant={action.destructive ? "destructive" : undefined}
+            onSelect={action.onSelect}
+          >
+            {action.icon && <action.icon className="size-4" />}
+            {action.label}
+          </DropdownMenuItem>
+        ))}
         {onArchive && <DropdownMenuItem onSelect={onArchive}>Arquivar</DropdownMenuItem>}
         {onRestore && <DropdownMenuItem onSelect={onRestore}>Restaurar</DropdownMenuItem>}
         {onDelete && (
@@ -406,6 +441,7 @@ export function NoteCard({
         >
           <span className="flex min-w-0 items-center gap-1.5 truncate font-heading text-[15px] transition-colors group-hover/open:text-accent">
             {(masked || lockedDirectly) && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Trancada" />}
+            {shared && <Users className="size-3.5 shrink-0 text-muted-foreground" aria-label="Compartilhada" />}
             <span className="truncate">{title}</span>
           </span>
           {snippetNode ? (
@@ -535,6 +571,7 @@ export function NoteCard({
       >
         <span className="flex items-start gap-2 font-heading text-[17px] leading-tight text-balance transition-colors group-hover/open:text-accent">
           {(masked || lockedDirectly) && <Lock className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Trancada" />}
+          {shared && <Users className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Compartilhada" />}
           <span>{title}</span>
         </span>
 

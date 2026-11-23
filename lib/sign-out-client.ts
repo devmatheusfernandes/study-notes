@@ -7,6 +7,8 @@ import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import { deleteOfflineDatabase } from "@/lib/offline/idb";
 import { forgetThisDevice } from "@/lib/offline/device-inventory";
 import { clearStudyMemoryCache } from "@/lib/cache/study-cache";
+import { useSharedStore } from "@/lib/store/shared-store";
+import { clearCollabDocument } from "@/lib/collab/device-copy";
 
 const SYNC_GRACE_MS = 4000;
 
@@ -40,6 +42,10 @@ export async function signOutAndWipeLocalData() {
   useJwOutbox.setState({ ops: [] });
   useLockStore.getState().lock();
   clearStudyMemoryCache();
+  // Device copies of shared notes (one IndexedDB database each).
+  const collabIds = Object.keys(useSharedStore.getState().collabRoles);
+  useSharedStore.setState({ notes: [], folders: [], invites: [], outgoingNoteIds: [], outgoingFolderIds: [], collabRoles: {} });
+  await Promise.all(collabIds.map((id) => clearCollabDocument(id)));
 
   try {
     for (const key of Object.keys(localStorage)) {

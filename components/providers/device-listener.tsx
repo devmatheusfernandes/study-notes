@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useSharedStore } from "@/lib/store/shared-store";
 import { useDeviceStore, type BeforeInstallPromptEvent } from "@/hooks/ui/use-device";
 import { useNotesStore, usePendingSyncCount } from "@/lib/store/notes-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
@@ -62,6 +63,8 @@ export function DeviceListener() {
       setIsOnline(true);
       void useNotesStore.getState().syncPendingOps();
       void useJwOutbox.getState().sync();
+      // Shares can change from the other side at any time; also purges revoked ones from this device.
+      void useSharedStore.getState().refresh();
     };
     const goOffline = () => setIsOnline(false);
     // Fallback for the (rare, but real — e.g. some mobile browsers, and some

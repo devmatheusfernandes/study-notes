@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, AudioLines, FileDown, ImagePlus, Maximize2, Minimize2, PenLine, Pin, Search, Share } from "lucide-react";
+import { ArrowLeft, AudioLines, FileDown, ImagePlus, Lock, Maximize2, Minimize2, PenLine, Pin, Search, Share, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -51,6 +51,32 @@ import { listPublicationSymbols } from "@/app/(app)/jwpub-actions";
 import { listGlobalPublicationSymbols } from "@/app/(app)/global-publications-actions";
 import type { NoteOption, PublicationOption } from "@/lib/notes/reference-suggestions";
 import type { NoteReference } from "@/lib/notes/note-reference";
+import type * as Y from "yjs";
+import { useCollabDoc, COLLAB_TITLE_FIELD } from "@/lib/collab/use-collab-doc";
+import { useSharedStore } from "@/lib/store/shared-store";
+import { ownSharedNoteIds } from "@/lib/collab/shared-ids";
+import { lockedNoteIds } from "@/lib/lock/locked";
+import { ShareVault } from "@/components/content/share-vault";
+
+/** Applies a new title string to a Y.Text as the smallest edit (common prefix/suffix kept), so two people typing in the title don't clobber each other. */
+function replaceYText(ytext: Y.Text, next: string) {
+  const prev = ytext.toString();
+  if (prev === next) return;
+  let start = 0;
+  while (start < prev.length && start < next.length && prev[start] === next[start]) start++;
+  let endPrev = prev.length;
+  let endNext = next.length;
+  while (endPrev > start && endNext > start && prev[endPrev - 1] === next[endNext - 1]) {
+    endPrev--;
+    endNext--;
+  }
+  const apply = () => {
+    if (endPrev > start) ytext.delete(start, endPrev - start);
+    if (endNext > start) ytext.insert(start, next.slice(start, endNext));
+  };
+  if (ytext.doc) ytext.doc.transact(apply);
+  else apply();
+}
 
 interface NoteEditorProps {
   /** Existing note id, or undefined for a brand-new note. */
@@ -115,6 +141,36 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // Once a new note is persisted we keep writing to that same id.
   const [createdId, setCreatedId] = useState<string | null>(noteId ?? null);
   const editorRef = useRef<RichTextEditorHandle>(null);
+
+  // ── Sharing / real-time collaboration ────────────────────────────────────
+  // A shared note (by this user, or with them) is edited through a Yjs
+  // document synced over Supabase Realtime — see lib/collab/. Everything else
+  // keeps the ordinary offline-first path below, untouched.
+  const folders = useNotesStore((s) => s.folders);
+  const collabRoles = useSharedStore((s) => s.collabRoles);
+  const outgoingNoteIds = useSharedStore((s) => s.outgoingNoteIds);
+  const outgoingFolderIds = useSharedStore((s) => s.outgoingFolderIds);
+  const lockedSet = useMemo(() => lockedNoteIds(notes, folders), [notes, folders]);
+  const ownShared = useMemo(
+    () =>
+      createdId
+        ? ownSharedNoteIds(notes, folders, outgoingNoteIds, outgoingFolderIds, lockedSet).has(createdId)
+        : false,
+    [createdId, notes, folders, outgoingNoteIds, outgoingFolderIds, lockedSet]
+  );
+  const knownShared = !!createdId && (createdId in collabRoles || ownShared);
+  const collab = useCollabDoc(createdId ?? undefined, { knownShared });
+  const inCollab =
+    collab.status === "loading" ||
+    collab.status === "ready" ||
+    collab.status === "revoked" ||
+    collab.status === "unavailable" ||
+    (collab.status === "checking" && knownShared);
+  const collabReady = collab.status === "ready" && !!collab.doc && !!collab.provider;
+  const isOwner = !inCollab || collab.role === "owner";
+  const canWrite = !inCollab || collab.role === "owner" || collab.role === "editor";
+  const [shareOpen, setShareOpen] = useState(false);
+  const applyCollabSnapshot = useNotesStore((s) => s.applyCollabSnapshot);
 
   // "@" note-linking candidates — plain notes only (not files/publications),
   // excludes this note itself so it can't reference its own text, and reads
@@ -289,6 +345,8 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // every real edit.
   useEffect(() => {
     if (!hydrated) return;
+    // A shared note persists through its collaborative document instead.
+    if (inCollab) return;
     if (!title.trim() && !body.trim()) return;
     if (lastSaved.current && title === lastSaved.current.title && body === lastSaved.current.body) return;
 
@@ -299,7 +357,33 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [title, body, hydrated, ensureNote, updateNote, createdId]);
+  }, [title, body, hydrated, ensureNote, updateNote, createdId, inCollab]);
+
+  // Collaborative title: lives in the same Yjs doc as the text, so it syncs live.
+  const collabDoc = collab.doc;
+  useEffect(() => {
+    if (!collabReady || !collabDoc) return;
+    const ytitle = collabDoc.getText(COLLAB_TITLE_FIELD);
+    const sync = () => setTitle(ytitle.toString());
+    sync();
+    ytitle.observe(sync);
+    return () => ytitle.unobserve(sync);
+  }, [collabReady, collabDoc]);
+
+  // The owner's own card (preview, search) mirrors the shared text locally.
+  useEffect(() => {
+    if (!collabReady || collab.role !== "owner" || !createdId) return;
+    const timer = setTimeout(() => applyCollabSnapshot(createdId, { title: title.trim() || "Nova nota", body }), 800);
+    return () => clearTimeout(timer);
+  }, [collabReady, collab.role, createdId, title, body, applyCollabSnapshot]);
+
+  function changeTitle(next: string) {
+    if (collabReady && collabDoc) {
+      if (canWrite) replaceYText(collabDoc.getText(COLLAB_TITLE_FIELD), next);
+      return;
+    }
+    setTitle(next);
+  }
 
   // Ink is saved on its own debounce — a stroke is a bigger, less frequent
   // change than a keystroke, and it goes to `note_drawings`, not `notes.body`.
@@ -732,21 +816,40 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                   <RsvpButton title={title || "Nova nota"} html={body} />
                   {/* Shown at every width: this header has no avatar menu to move it into. */}
                   <HistoryVaultButton className="inline-flex size-9 shrink-0 rounded-full text-muted-foreground" />
-                  <button
-                    type="button"
-                    onClick={() => editorRef.current?.openImagePicker()}
-                    aria-label="Inserir imagem"
-                    className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  >
-                    <ImagePlus className="size-4" />
-                  </button>
+                  {canWrite && (
+                    <button
+                      type="button"
+                      onClick={() => editorRef.current?.openImagePicker()}
+                      aria-label="Inserir imagem"
+                      className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <ImagePlus className="size-4" />
+                    </button>
+                  )}
+                  {/* Invite people to this note (owner only, once it exists). */}
+                  {isOwner && createdId && (current?.type ?? "nota") === "nota" && (
+                    <button
+                      type="button"
+                      onClick={() => setShareOpen(true)}
+                      aria-label="Compartilhar com pessoas"
+                      title="Compartilhar com pessoas"
+                      className={cn(
+                        "rounded-full p-2 transition-colors",
+                        inCollab
+                          ? "bg-primary/[0.18] text-accent"
+                          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      )}
+                    >
+                      <Users className="size-4" />
+                    </button>
+                  )}
                   {/* Recording a voice note used to only be reachable from the
                       pen toolbar — it doesn't need the pen at all, so it's
                       available here too. Hidden once a recording already
                       exists (one slot per note; the AudioLines button below
                       plays it back, and recording a replacement means
                       deleting this one first from the player). */}
-                  {(isRecordingNow || audioSaveState !== "idle" || (audioPath === null && !pendingUpload)) && (
+                  {isOwner && (isRecordingNow || audioSaveState !== "idle" || (audioPath === null && !pendingUpload)) && (
                     <AudioRecordControl
                       recorderState={recorder.state}
                       recordingElapsedMs={recorder.elapsedMs}
@@ -759,6 +862,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                   )}
                 </>
               )}
+              {isOwner && (
               <button
                 type="button"
                 onClick={() => setPenMode((on) => !on)}
@@ -773,8 +877,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
               >
                 <PenLine className="size-4" />
               </button>
+              )}
               {/* Playing back a recording shouldn't require picking up the pen. */}
-              {!penMode && (audioPath !== null || pendingUpload) && (
+              {isOwner && !penMode && (audioPath !== null || pendingUpload) && (
                 <button
                   type="button"
                   onClick={() => setAudioOpen((open) => !open)}
@@ -818,6 +923,26 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 </button>
               )}
             </div>
+            {collabReady && collab.peers.length > 0 && (
+              <div className="flex shrink-0 -space-x-1.5" aria-label="Pessoas nesta nota">
+                {collab.peers.slice(0, 3).map((peer, i) => (
+                  <span
+                    key={peer.name + "-" + i}
+                    title={peer.role === "viewer" ? peer.name + " (só vendo)" : peer.name}
+                    aria-label={peer.name}
+                    className="flex size-7 items-center justify-center rounded-full font-mono text-[11px] font-semibold text-white ring-2 ring-background"
+                    style={{ backgroundColor: peer.color }}
+                  >
+                    {peer.name.slice(0, 1).toUpperCase()}
+                  </span>
+                ))}
+                {collab.peers.length > 3 && (
+                  <span className="flex size-7 items-center justify-center rounded-full bg-secondary font-mono text-[11px] ring-2 ring-background">
+                    +{collab.peers.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
           </header>
 
           {/* Typing mode keeps the player out of the way until asked for; in
@@ -855,27 +980,89 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             to use. */}
         <div ref={inkWrapRef} className="relative flex flex-1 flex-col" style={{ minHeight: inkMinHeight }}>
           <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-3 px-4 pb-16 sm:px-6">
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Título da nota"
-              aria-label="Título da nota"
-              autoFocus={!noteId}
-              className="w-full bg-transparent font-heading text-3xl leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50"
-            />
+            {inCollab && !collabReady ? (
+              <CollabPlaceholder status={collab.status} onBack={() => void leaveNote()} />
+            ) : (
+              <>
+                <input
+                  value={collab.viewerFallback ? collab.viewerFallback.title : title}
+                  onChange={(e) => changeTitle(e.target.value)}
+                  readOnly={!canWrite || !!collab.viewerFallback}
+                  placeholder="Título da nota"
+                  aria-label="Título da nota"
+                  autoFocus={!noteId}
+                  className="w-full bg-transparent font-heading text-3xl leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50"
+                />
 
-            <SyncStatusIndicator status={current?.syncStatus ?? "local"} />
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <SyncStatusIndicator
+                    status={
+                      collabReady
+                        ? collab.saveState === "saved"
+                          ? "synced"
+                          : collab.saveState === "saving"
+                            ? "syncing"
+                            : "offline"
+                        : current?.syncStatus ?? "local"
+                    }
+                  />
+                  {collabReady && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Users className="size-3" />
+                      {collab.role === "owner"
+                        ? "Compartilhada"
+                        : collab.role === "editor"
+                          ? "Compartilhada com você"
+                          : "Compartilhada com você · só leitura"}
+                    </span>
+                  )}
+                </div>
 
-            <RichTextEditor
-              ref={editorRef}
-              content={body}
-              onChange={setBody}
-              autoFocus={!noteId}
-              className="flex flex-1 flex-col"
-              publications={publications}
-              notes={noteMentionOptions}
-              onReferenceClick={setOpenReference}
-            />
+                {collab.viewerFallback ? (
+                  <RichTextEditor
+                    key="viewer-fallback"
+                    ref={editorRef}
+                    content={collab.viewerFallback.body}
+                    onChange={() => {}}
+                    readOnly
+                    className="flex flex-1 flex-col"
+                    onReferenceClick={setOpenReference}
+                  />
+                ) : collabReady && collab.doc && collab.provider && collab.self ? (
+                  <RichTextEditor
+                    key={"collab:" + createdId}
+                    ref={editorRef}
+                    content=""
+                    onChange={setBody}
+                    className="flex flex-1 flex-col"
+                    publications={publications}
+                    notes={noteMentionOptions}
+                    onReferenceClick={setOpenReference}
+                    collab={{
+                      doc: collab.doc,
+                      provider: collab.provider,
+                      user: collab.self,
+                      readOnly: !canWrite,
+                      seedHtml: collab.seedHtml,
+                      onSeed: collab.applySeed,
+                      registerHtmlSource: collab.setHtmlSource,
+                    }}
+                  />
+                ) : (
+                  <RichTextEditor
+                    key="plain"
+                    ref={editorRef}
+                    content={body}
+                    onChange={setBody}
+                    autoFocus={!noteId}
+                    className="flex flex-1 flex-col"
+                    publications={publications}
+                    notes={noteMentionOptions}
+                    onReferenceClick={setOpenReference}
+                  />
+                )}
+              </>
+            )}
 
             {/* Blank paper below the text while the pen is out. Real content
                 rather than a computed height, so nothing has to be measured. */}
@@ -887,7 +1074,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             tool={tool}
             color={inkColor}
             size={tool === "highlighter" ? HIGHLIGHTER_SIZE : penSize}
-            active={penMode && !isPlaying}
+            active={isOwner && penMode && !isPlaying}
             penOnly={penOnly}
             // A stylus showing up is proof this device has one, so palm
             // rejection turns itself on the first time the pen touches the
@@ -936,11 +1123,63 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
         }}
       />
 
+      {createdId && isOwner && (
+        <ShareVault
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          target={{ noteId: createdId }}
+          name={title.trim() || "Nova nota"}
+          locked={lockedSet.has(createdId)}
+          onShared={() => {
+            // Shared now: flush the last plain edit, then reopen it collaboratively.
+            if (!inCollab) updateNote(createdId, { title: title.trim() || "Nova nota", body });
+            setTimeout(() => collab.recheck(), 400);
+          }}
+        />
+      )}
+
       <NoteReferenceSurface
         reference={openReference}
         onClose={() => setOpenReference(null)}
         onOpenNote={(id) => router.push(`/notes/${id}`)}
       />
+    </div>
+  );
+}
+
+/** What a shared note shows while it opens, or when it can't be opened. */
+function CollabPlaceholder({
+  status,
+  onBack,
+}: {
+  status: ReturnType<typeof useCollabDoc>["status"];
+  onBack: () => void;
+}) {
+  if (status === "revoked" || status === "unavailable") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+          {status === "revoked" ? <Lock className="size-6" /> : <Users className="size-6" />}
+        </div>
+        <h1 className="font-heading text-xl">
+          {status === "revoked" ? "Você não tem mais acesso a esta nota" : "Nota compartilhada indisponível offline"}
+        </h1>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          {status === "revoked"
+            ? "Ela deixou de ser compartilhada com você (ou foi trancada). A cópia deste aparelho foi removida."
+            : "Abra esta nota uma vez com internet para poder lê-la e editá-la offline neste aparelho."}
+        </p>
+        <Button variant="ghost" size="sm" leftIcon={<ArrowLeft />} onClick={onBack}>
+          Voltar
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-1 flex-col gap-3 py-2" aria-busy>
+      <div className="h-9 w-2/3 animate-pulse rounded-xl bg-foreground/5" />
+      <div className="h-4 w-full animate-pulse rounded-lg bg-foreground/5" />
+      <div className="h-4 w-5/6 animate-pulse rounded-lg bg-foreground/5" />
     </div>
   );
 }

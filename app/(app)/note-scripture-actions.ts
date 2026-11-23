@@ -93,6 +93,7 @@ export async function backfillNoteScriptureRefs(): Promise<{ remaining: number }
   const { data: notes } = await supabase
     .from("notes")
     .select("id, body")
+    .eq("user_id", user.id)
     .eq("type", "nota")
     .is("scriptures_indexed_at", null)
     .limit(BACKFILL_BATCH_SIZE);
@@ -104,6 +105,7 @@ export async function backfillNoteScriptureRefs(): Promise<{ remaining: number }
   const { count } = await supabase
     .from("notes")
     .select("*", { count: "exact", head: true })
+    .eq("user_id", user.id)
     .eq("type", "nota")
     .is("scriptures_indexed_at", null);
 

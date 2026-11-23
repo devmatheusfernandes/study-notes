@@ -66,7 +66,7 @@ async function saveDrawingRow(noteId: string, strokes: string): Promise<{ error?
   // the row for a note that isn't theirs (RLS would happily accept it, since
   // the row's own user_id is their own) and the real owner's saves would then
   // collide with a row RLS won't let them update.
-  const { data: note } = await supabase.from("notes").select("id").eq("id", noteId).maybeSingle();
+  const { data: note } = await supabase.from("notes").select("id").eq("id", noteId).eq("user_id", user.id).maybeSingle();
   if (!note) return { error: "Nota não encontrada." };
 
   const { error } = await supabase
@@ -99,7 +99,7 @@ export async function requestAudioUploadSlot(
 
   // The note must exist and be this user's — RLS already scopes the select,
   // so a miss means "not yours" just as much as "not there".
-  const { data: note } = await supabase.from("notes").select("id").eq("id", noteId).maybeSingle();
+  const { data: note } = await supabase.from("notes").select("id").eq("id", noteId).eq("user_id", user.id).maybeSingle();
   if (!note) return { error: "Nota não encontrada." };
 
   const admin = createAdminClient();

@@ -10,6 +10,7 @@ import { encryptText, decryptText } from "@/lib/encryption";
 import type { NoteType } from "@/lib/file-types";
 import { enqueueNoteForVectorization } from "@/lib/vector/queue-actions";
 import { syncNoteScriptureRefs } from "@/lib/bible/note-scripture-sync";
+import { refreshNoteDerivedData } from "@/lib/notes/derived-data";
 import { wouldCreateFolderCycle } from "@/lib/folders";
 
 export interface NoteRow {
@@ -111,8 +112,10 @@ export async function listUserContent(): Promise<{
   if (!user) return { notes: [], folders: [], tags: [], ok: false };
 
   const [notesRes, foldersRes, queueRes, embeddingsRes, tagsRes, noteTagsRes] = await Promise.all([
-    supabase.from("notes").select("*").order("updated_at", { ascending: false }),
-    supabase.from("folders").select("*").order("created_at", { ascending: true }),
+    // Explicit owner filter: the sharing policies (0055) also let a user SELECT
+    // notes/folders shared with them, and those must never enter this store.
+    supabase.from("notes").select("*").eq("user_id", user.id).order("updated_at", { ascending: false }),
+    supabase.from("folders").select("*").eq("user_id", user.id).order("created_at", { ascending: true }),
     supabase.from("vectorization_queue").select("note_id, status"),
     supabase.from("note_embeddings").select("note_id"),
     supabase.from("tags").select("*").order("created_at", { ascending: true }),
@@ -205,12 +208,12 @@ export async function updateNoteRow(
   if (patch.title !== undefined) encryptedPatch.title = encryptText(patch.title);
   if (patch.body !== undefined) encryptedPatch.body = encryptText(patch.body);
 
-  const { error } = await supabase.from("notes").update(encryptedPatch).eq("id", id);
-  if (!error) {
-    void enqueueNoteForVectorization(id);
-    if (patch.body !== undefined) await syncNoteScriptureRefs(supabase, user.id, id, patch.body);
-  }
-  return error ? { error: "Não foi possível salvar." } : {};
+  // `select` returns the row only if RLS let the update through — the owner,
+  // or an editor of a note shared with them (0055) — and names its owner.
+  const { data, error } = await supabase.from("notes").update(encryptedPatch).eq("id", id).select("user_id").maybeSingle();
+  if (error || !data) return { error: "Não foi possível salvar." };
+  await refreshNoteDerivedData(supabase, user.id, id, data.user_id as string, patch.body);
+  return {};
 }
 
 export async function setNotePinned(id: string, pinned: boolean): Promise<{ error?: string }> {
@@ -248,7 +251,7 @@ export async function getNoteLockState(id: string): Promise<boolean> {
 
   const [{ data: note }, { data: folders }] = await Promise.all([
     supabase.from("notes").select("locked, folder_id").eq("id", id).maybeSingle(),
-    supabase.from("folders").select("id, parent_id, locked"),
+    supabase.from("folders").select("id, parent_id, locked").eq("user_id", user.id),
   ]);
   if (!note) return false;
   if (note.locked) return true;
@@ -314,6 +317,7 @@ export async function deleteNotePermanently(id: string): Promise<{ error?: strin
     .from("notes")
     .select("storage_path, body, type")
     .eq("id", id)
+    .eq("user_id", user.id)
     .single();
   if (note?.storage_path) await deleteStorageFile(note.storage_path);
   const body = decryptText(note?.body);
@@ -332,7 +336,7 @@ export async function bulkDeleteNotesPermanently(ids: string[]): Promise<{ error
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
 
-  const { data: notes } = await supabase.from("notes").select("id, storage_path, body, type").in("id", ids);
+  const { data: notes } = await supabase.from("notes").select("id, storage_path, body, type").eq("user_id", user.id).in("id", ids);
   const filePaths = (notes ?? []).map((n) => n.storage_path).filter((p): p is string => !!p);
   const imagePaths = (notes ?? []).flatMap((n) => {
     const body = decryptText(n.body);
@@ -383,7 +387,7 @@ export async function setFolderParentRow(id: string, parentId: string | null): P
 
   if (parentId) {
     // RLS scopes this to the caller's own folders, so a parent that isn't theirs simply isn't found.
-    const { data: folders } = await supabase.from("folders").select("id, parent_id");
+    const { data: folders } = await supabase.from("folders").select("id, parent_id").eq("user_id", user.id);
     const nodes = (folders ?? []).map((f) => ({ id: f.id as string, parentId: f.parent_id as string | null }));
     if (!nodes.some((f) => f.id === parentId)) return { error: "Pasta de destino não encontrada." };
     if (wouldCreateFolderCycle(nodes, id, parentId)) return { error: "Não é possível mover uma pasta para dentro dela mesma." };

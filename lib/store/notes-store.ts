@@ -223,6 +223,13 @@ interface NotesStore {
   addNote: (note: { title: string; body: string; folderId?: string }) => string;
   upsertNoteFromDb: (note: { id: string; title: string; body: string; type?: NoteType }) => void;
   updateNote: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
+  /**
+   * A shared note's text, mirrored from its collaborative document for the
+   * card preview/search. Local only — no outbox op and no image cleanup: the
+   * collaborative path (lib/collab/) persists it, and diffing one client's
+   * view could delete an image another collaborator just inserted.
+   */
+  applyCollabSnapshot: (id: string, patch: Partial<Pick<Note, "title" | "body">>) => void;
   /** Flips one checklist item's checked state directly from a card preview, by its index among all task items in the note. */
   toggleChecklistItem: (id: string, itemIndex: number) => void;
   /** Persists a drawing note's strokes through the same offline outbox as every other mutation — the strokes themselves live in `note_drawings`, not in this store. */
@@ -947,6 +954,15 @@ export const useNotesStore = create<NotesStore>()(
           // the user just typed. The sync dot is the signal; the next edit retries.
           if (outcome === "rejected") notify.error("Não foi possível salvar");
         });
+      },
+
+      applyCollabSnapshot: (id, patch) => {
+        const now = Date.now();
+        set((s) => ({
+          notes: s.notes.map((n) =>
+            n.id === id ? { ...n, ...patch, updatedAt: now, meta: formatRelativeMeta(now), syncStatus: "synced" as const } : n
+          ),
+        }));
       },
 
       toggleChecklistItem: (id, itemIndex) => {

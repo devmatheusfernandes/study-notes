@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Folder, FolderInput, Lock, LockOpen, MoreHorizontal, Upload } from "lucide-react";
+import { Folder, FolderInput, Lock, LockOpen, MoreHorizontal, Upload, Users } from "lucide-react";
+import type { CardAction } from "./note-card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +39,14 @@ export interface FolderCardProps {
   onMove?: () => void;
   /** Called with the dragged folder's id when it's dropped here to nest it inside this folder. */
   onDropFolderId?: (id: string) => void;
+  /** Opens the share vault (owner side). */
+  onShare?: () => void;
+  /** Shared (by you, or with you) — a small people icon by the name. */
+  shared?: boolean;
+  /** Replaces the item count line (e.g. "de Ana · pode editar" on a folder shared with you). */
+  caption?: string;
+  /** Extra menu entries (e.g. "Importar para mim"). */
+  extraActions?: CardAction[];
 }
 
 export function FolderCard({
@@ -54,6 +63,10 @@ export function FolderCard({
   onDropNoteIds,
   onMove,
   onDropFolderId,
+  onShare,
+  shared = false,
+  caption,
+  extraActions = [],
 }: FolderCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -179,6 +192,7 @@ export function FolderCard({
         <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 flex-col text-left cursor-pointer">
           <span className="flex min-w-0 items-center gap-1.5 font-heading text-[15px]">
             {(masked || lockedDirectly) && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Trancada" />}
+            {shared && <Users className="size-3.5 shrink-0 text-muted-foreground" aria-label="Compartilhada" />}
             <span className="truncate">{name}</span>
           </span>
           <span className="text-[11.5px] text-muted-foreground">
@@ -186,7 +200,7 @@ export function FolderCard({
               ? "Soltar aqui"
               : masked
                 ? "Toque para desbloquear"
-                : `${itemCount} ${itemCount === 1 ? "item" : "itens"}`}
+                : caption ?? `${itemCount} ${itemCount === 1 ? "item" : "itens"}`}
           </span>
         </button>
       )}
@@ -224,6 +238,22 @@ export function FolderCard({
               Mover para…
             </DropdownMenuItem>
           )}
+          {onShare && !masked && (
+            <DropdownMenuItem onSelect={onShare}>
+              <Users className="size-4" />
+              Compartilhar…
+            </DropdownMenuItem>
+          )}
+          {extraActions.map((action) => (
+            <DropdownMenuItem
+              key={action.label}
+              variant={action.destructive ? "destructive" : undefined}
+              onSelect={action.onSelect}
+            >
+              {action.icon && <action.icon className="size-4" />}
+              {action.label}
+            </DropdownMenuItem>
+          ))}
           {onDelete && (
             <DropdownMenuItem variant="destructive" onSelect={() => setConfirmOpen(true)}>
               Excluir pasta

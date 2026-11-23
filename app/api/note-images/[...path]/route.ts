@@ -18,7 +18,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pat
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user || !isOwnedStoragePath(storagePath, user.id)) {
+  if (!user) return new Response("Not found", { status: 404 });
+  const prefixOwner = storagePath.split("/")[0] ?? "";
+  if (prefixOwner !== user.id) {
+    // A shared note carries images from whoever inserted them, under THEIR
+    // prefix. Collaborators linked by an accepted share (either direction) may
+    // read each other's note images — the object names are random UUIDs, so
+    // this exposes nothing that isn't already referenced in a shared note.
+    if (!isOwnedStoragePath(storagePath, prefixOwner)) return new Response("Not found", { status: 404 });
+    const { data: connected } = await supabase.rpc("shares_connect", { p_other: prefixOwner });
+    if (connected !== true) return new Response("Not found", { status: 404 });
+  } else if (!isOwnedStoragePath(storagePath, user.id)) {
     return new Response("Not found", { status: 404 });
   }
 

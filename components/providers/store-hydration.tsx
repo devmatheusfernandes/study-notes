@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useNotesStore } from "@/lib/store/notes-store";
 import { usePreferencesStore } from "@/lib/store/preferences-store";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
+import { useSharedStore } from "@/lib/store/shared-store";
 import { listUserContent } from "@/app/(app)/notes-actions";
 import { getUserPreferences } from "@/app/(app)/preferences-actions";
 
@@ -63,6 +64,8 @@ export function StoreHydration() {
         .catch(() => {});
     }
     void usePreferencesStore.persist.rehydrate();
+    // Shared-with-me lists: cached copy first, then the server's (which also purges revoked shares).
+    void Promise.resolve(useSharedStore.persist.rehydrate()).then(() => useSharedStore.getState().refresh());
     // Highlights, notes and answers written offline in a previous session.
     void Promise.resolve(useJwOutbox.persist.rehydrate()).then(() => useJwOutbox.getState().sync());
   }, []);

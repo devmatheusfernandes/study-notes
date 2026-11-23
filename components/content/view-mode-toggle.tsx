@@ -1,7 +1,7 @@
 "use client";
 
 import { LayoutGrid, List } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { SegmentedPills } from "@/components/ui/segmented-pills";
 import { usePreferencesStore, type ViewMode } from "@/lib/store/preferences-store";
 import { useHydrated } from "@/components/providers/store-hydration";
 
@@ -24,32 +24,11 @@ export function ViewModeToggle({ value, onChange }: ViewModeToggleProps = {}) {
   const setViewMode = onChange ?? setGlobalViewMode;
 
   return (
-    <div
-      role="radiogroup"
+    <SegmentedPills
       aria-label="Modo de visualização"
-      className="inline-flex rounded-full border border-border bg-secondary p-1"
-    >
-      {OPTIONS.map((option) => {
-        const active = hydrated && viewMode === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => setViewMode(option.value)}
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] transition-colors",
-              active
-                ? "bg-primary font-semibold text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <option.icon className="size-3.5" />
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
+      options={OPTIONS}
+      value={hydrated ? viewMode : undefined}
+      onChange={setViewMode}
+    />
   );
 }
