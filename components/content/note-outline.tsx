@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
 
 /** Where a heading counts as "being read" and where a jump lands — just under the sticky note header. */
 const HEADER_OFFSET = 96;
+/** The column's width (`w-56`) and the least it keeps from the text, where the collapse chevrons sit. */
+const COLUMN_WIDTH = 224;
+const MIN_GAP = 32;
 
 export interface NoteOutlineOptions {
   open: boolean;
@@ -138,6 +141,25 @@ function useActiveHeading(editor: Editor, items: OutlineItem[], enabled: boolean
   return active;
 }
 
+/** How far from the text the column goes to sit in the middle of the empty margin beside it. */
+function useCenteredGap(aside: HTMLElement | null) {
+  const [gap, setGap] = useState(MIN_GAP);
+
+  useEffect(() => {
+    const main = aside?.closest("main");
+    const text = aside?.parentElement;
+    if (!main || !text) return;
+    const observer = new ResizeObserver(() => {
+      const margin = text.getBoundingClientRect().left - main.getBoundingClientRect().left;
+      setGap(Math.max(MIN_GAP, Math.round((margin - COLUMN_WIDTH) / 2)));
+    });
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, [aside]);
+
+  return gap;
+}
+
 /**
  * The note's headings as a clickable list — Google Docs' document outline.
  * Built from the text itself, so there is nothing to save. A column in the empty
@@ -152,6 +174,8 @@ export function NoteOutline({
 }: NoteOutlineOptions & { editor: Editor; canCollapse: boolean }) {
   const items = useEditorState({ editor, selector: ({ editor }) => readOutline(editor) });
   const active = useActiveHeading(editor, items, open && !sheet);
+  const [aside, setAside] = useState<HTMLElement | null>(null);
+  const gap = useCenteredGap(aside);
 
   const listed = items.filter((item) => item.text);
   const topLevel = Math.min(...listed.map((item) => item.level));
@@ -217,7 +241,7 @@ export function NoteOutline({
 
   if (!open) return null;
   return (
-    <aside className="absolute bottom-0 right-full top-0 mr-8 w-52">
+    <aside ref={setAside} className="absolute bottom-0 right-full top-0 w-56" style={{ marginRight: gap }}>
       <div className="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain pb-4 scrollbar-none">
         {content}
       </div>
