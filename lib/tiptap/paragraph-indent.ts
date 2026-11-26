@@ -17,8 +17,11 @@ declare module "@tiptap/core" {
  * Google Docs-style Tab/Shift-Tab for text that isn't inside a list, in two
  * stages: the first Tab indents only the first line (`firstLine`, a CSS
  * text-indent), and every further Tab moves the whole paragraph (`indent`, a
- * left margin). Shift-Tab — and Backspace at the very start of the paragraph —
- * undo one stage at a time, in reverse.
+ * left margin). Shift-Tab takes a margin level back (then the first-line space).
+ * Backspace at the very start of the paragraph goes the other way round, like
+ * Docs: it removes the first-line space first and leaves the paragraph indented;
+ * only the next ones pull the paragraph back. A Tab after that gives the space
+ * back.
  *
  * List items already get Tab/Shift-Tab for free from
  * @tiptap/extension-list's ListKeymap (nests one level deeper / lifts out), so
@@ -71,8 +74,8 @@ export const ParagraphIndent = Extension.create({
         const firstLine = Boolean(node.attrs.firstLine);
         let next = { indent: level, firstLine };
         if (delta === 1) {
-          // First stage only for an untouched paragraph.
-          if (!firstLine && level === 0) next = { indent: 0, firstLine: true };
+          // The first-line space comes first, whatever the paragraph's own indent.
+          if (!firstLine) next = { indent: level, firstLine: true };
           else next = { indent: Math.min(MAX_INDENT_LEVEL, level + 1), firstLine };
         } else if (level > 0) {
           next = { indent: level - 1, firstLine };
@@ -115,6 +118,9 @@ export const ParagraphIndent = Extension.create({
       Backspace: () => {
         const { empty, $from } = this.editor.state.selection;
         if (!empty || $from.parentOffset !== 0 || inList()) return false;
+        if ($from.parent.attrs.firstLine) {
+          return this.editor.commands.updateAttributes($from.parent.type.name, { firstLine: false });
+        }
         // False when there is nothing to undo, so the key joins paragraphs as usual.
         return this.editor.commands.outdent();
       },
