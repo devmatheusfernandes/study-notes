@@ -10,7 +10,9 @@ export const CARET_IDLE_MS = 4000;
 /**
  * Hides other people's carets (name tag and selection too) once they have been
  * still for a few seconds, so presence doesn't sit on top of the text being
- * read; they come back the moment that person moves or types.
+ * read; they come back the moment that person moves or types — and only then:
+ * presence messages repeating the same position (a reconnect, a window getting
+ * focus again) don't count.
  *
  * Returns a stylesheet rather than touching the elements: ProseMirror creates
  * and moves the caret widgets itself, and a rule keyed on `data-client` (see
@@ -22,6 +24,8 @@ export function useIdleCaretCss(awareness: Awareness | undefined, doc: Y.Doc | u
   useEffect(() => {
     if (!awareness || !doc) return;
     const timers = new Map<number, ReturnType<typeof setTimeout>>();
+    // Where each one was last seen. Kept when they blur or drop out, so coming back to the same spot stays quiet.
+    const lastPosition = new Map<number, string>();
 
     function setIdleState(client: number, value: boolean) {
       setIdle((current) => {
@@ -43,9 +47,17 @@ export function useIdleCaretCss(awareness: Awareness | undefined, doc: Y.Doc | u
       );
     }
 
-    // "change", not "update": the latter also fires on the periodic keep-alive of an unchanged state.
+    function moved(client: number) {
+      const cursor = awareness!.getStates().get(client)?.cursor;
+      if (!cursor) return;
+      const position = JSON.stringify([cursor.anchor, cursor.head]);
+      if (lastPosition.get(client) === position) return;
+      lastPosition.set(client, position);
+      active(client);
+    }
+
     const onAwareness = ({ added, updated }: { added: number[]; updated: number[] }) => {
-      [...added, ...updated].forEach(active);
+      [...added, ...updated].forEach(moved);
     };
     // Typing in the middle of a line can leave the published cursor unchanged — the new text counts too.
     const onTransaction = (transaction: Y.Transaction) => {
@@ -57,7 +69,7 @@ export function useIdleCaretCss(awareness: Awareness | undefined, doc: Y.Doc | u
     awareness.on("change", onAwareness);
     doc.on("afterTransaction", onTransaction);
     // Whoever is already here starts visible and fades like everyone else.
-    queueMicrotask(() => awareness.getStates().forEach((_state, client) => active(client)));
+    queueMicrotask(() => awareness.getStates().forEach((_state, client) => moved(client)));
 
     return () => {
       awareness.off("change", onAwareness);

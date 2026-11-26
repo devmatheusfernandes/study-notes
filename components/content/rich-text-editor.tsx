@@ -173,7 +173,7 @@ function renderRemoteCaret(user: Record<string, string>, clientId?: number) {
 function renderRemoteSelection(user: Record<string, string>, clientId?: number) {
   return {
     class: "ProseMirror-yjs-selection",
-    style: `background-color: ${user.color}70`,
+    style: `background-color: ${user.color}33`,
     "data-client": String(clientId),
   };
 }
