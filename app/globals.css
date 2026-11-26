@@ -411,3 +411,28 @@ html[data-immersive] [data-app-sidebar] {
   color: #fff;
   user-select: none;
 }
+
+/* Printed page numbers in a cited text (components/content/jwpub-reference-surface.tsx):
+   a small tick where the page turns, and its number in the right margin of that line.
+   Generated content, so highlight positions (counted over the text) don't move. */
+[data-page-markers] .pageNum::before {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  margin: 0 0.25em;
+  vertical-align: -0.1em;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--accent) 55%, transparent);
+}
+[data-page-markers] .pageNum::after {
+  content: attr(data-no);
+  position: absolute;
+  right: -1.2rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  font-style: normal;
+  color: var(--muted-foreground);
+  user-select: none;
+}

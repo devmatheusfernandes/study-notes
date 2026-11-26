@@ -24,5 +24,37 @@ export function excerptOfChapter(html: string, [first, last]: [number, number]):
     }
     return true;
   });
-  return picked.length > 0 ? picked.map((el) => el.outerHTML).join("") : null;
+  if (picked.length === 0) return null;
+  keepPageMarkers(doc, picked);
+  return picked.map((el) => el.outerHTML).join("");
+}
+
+/**
+ * Page markers sit in the running text, so cutting paragraphs out loses some:
+ * the one for the page the excerpt starts on (it came earlier), and any placed
+ * between two paragraphs. Each is moved to the start of the paragraph it opens.
+ */
+function keepPageMarkers(doc: Document, picked: Element[]) {
+  const markers = [...doc.body.querySelectorAll(".pageNum[data-no]")];
+  const precedes = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  picked.forEach((paragraph, index) => {
+    // Already starts with its own number.
+    const own = paragraph.querySelector(".pageNum[data-no]");
+    if (own && !textBefore(paragraph, own)) return;
+    const earlier = markers.filter((m) => !paragraph.contains(m) && precedes(m, paragraph));
+    const last = earlier[earlier.length - 1];
+    if (!last) return;
+    // For later paragraphs, only a marker that fell between the two (not one inside the previous).
+    const previous = picked[index - 1];
+    if (previous && (previous.contains(last) || precedes(last, previous))) return;
+    paragraph.prepend(last.cloneNode(true));
+  });
+}
+
+function textBefore(root: Element, node: Node): boolean {
+  const range = root.ownerDocument.createRange();
+  range.setStart(root, 0);
+  range.setEndBefore(node);
+  return range.toString().trim().length > 0;
 }

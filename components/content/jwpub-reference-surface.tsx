@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, ExternalLink, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Download, ExternalLink, FoldVertical, Loader2, UnfoldVertical } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import type { IngestProgress } from "@/lib/store/ingest-progress-store";
 import { notify } from "@/components/ui/toaster";
@@ -222,8 +221,9 @@ function Body({
   unresolvedPid,
   unresolvedSnapshot,
   downloadProgress,
-  wholeChapter,
-  onWholeChapter,
+  safeHtml,
+  excerpt,
+  showingExcerpt,
   onArticleHtml,
 }: {
   target: JwpubReferenceTarget | null;
@@ -234,18 +234,13 @@ function Body({
   unresolvedPid?: string | null;
   unresolvedSnapshot?: string | null;
   downloadProgress: IngestProgress | null;
-  wholeChapter: boolean;
-  onWholeChapter: (whole: boolean) => void;
+  safeHtml: string;
+  /** The cited pages alone, when the reference named some and the chapter has them. */
+  excerpt: string | null;
+  showingExcerpt: boolean;
   onArticleHtml: (html: string | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const safeHtml = useMemo(() => (html ? sanitizeChapterHtml(html) : ""), [html]);
-  const citedRange = target?.citedRange ?? null;
-  const excerpt = useMemo(
-    () => (safeHtml && citedRange ? excerptOfChapter(safeHtml, citedRange) : null),
-    [safeHtml, citedRange]
-  );
-  const showingExcerpt = excerpt !== null && !wholeChapter;
 
   // Same scroll-and-flash treatment JwpubChapterView gives its own `?pid=`
   // deep link — best-effort, since the cited paragraph number isn't
@@ -277,21 +272,11 @@ function Body({
 
   return (
     <div className="flex flex-col gap-3">
-      {excerpt !== null && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onWholeChapter(showingExcerpt)}
-          className="-ml-2 self-start text-[12px] text-muted-foreground"
-        >
-          {showingExcerpt ? "Ver capítulo inteiro" : "Só o trecho citado"}
-        </Button>
-      )}
       <div ref={containerRef}>
         {/* The user's own highlights, with a square in the margin for each note — tapping one opens it right here (see SidebarHighlightedHtml). */}
         <SidebarHighlightedHtml
           key={showingExcerpt ? "excerpt" : "chapter"}
-          html={showingExcerpt ? excerpt : safeHtml}
+          html={showingExcerpt && excerpt !== null ? excerpt : safeHtml}
           mepsDocumentId={target.mepsDocumentId ?? null}
           className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full"
         />
@@ -330,6 +315,14 @@ export function JwpubReferenceSurface({
   const [wholeChapterFor, setWholeChapterFor] = useState<JwpubReferenceTarget | null>(null);
   const [articleHtml, setArticleHtml] = useState<string | null>(null);
 
+  const safeHtml = useMemo(() => (html ? sanitizeChapterHtml(html) : ""), [html]);
+  const citedRange = target?.citedRange ?? null;
+  const excerpt = useMemo(
+    () => (safeHtml && citedRange ? excerptOfChapter(safeHtml, citedRange) : null),
+    [safeHtml, citedRange]
+  );
+  const showingExcerpt = excerpt !== null && wholeChapterFor !== target;
+
   function goToSubheading(pid: string) {
     setWholeChapterFor(target);
     // After the Vault has slid away (and the whole chapter, if only the excerpt was showing, is on screen).
@@ -351,6 +344,18 @@ export function JwpubReferenceSurface({
             html={html}
           />
           <ChapterSubheadingsButton html={target ? html : articleHtml} onSelect={goToSubheading} />
+          {excerpt !== null && (
+            <button
+              type="button"
+              onClick={() => setWholeChapterFor(showingExcerpt ? target : null)}
+              aria-label={showingExcerpt ? "Ver capítulo inteiro" : "Só o trecho citado"}
+              title={showingExcerpt ? "Ver capítulo inteiro" : "Só o trecho citado"}
+              aria-pressed={!showingExcerpt}
+              className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {showingExcerpt ? <UnfoldVertical className="size-4" /> : <FoldVertical className="size-4" />}
+            </button>
+          )}
           {target?.noteId && html ? (
             <button
               type="button"
@@ -382,10 +387,12 @@ export function JwpubReferenceSurface({
       onClose={onClose}
       raiseKey={raiseKey}
     >
-      <div ref={bodyRef}>
+      {/* data-page-markers: the printed page numbers show in the margin (globals.css). */}
+      <div ref={bodyRef} data-page-markers>
       <Body
-        wholeChapter={target !== null && wholeChapterFor === target}
-        onWholeChapter={(whole) => setWholeChapterFor(whole ? target : null)}
+        safeHtml={safeHtml}
+        excerpt={excerpt}
+        showingExcerpt={showingExcerpt}
         onArticleHtml={setArticleHtml}
         target={target}
         html={html}
