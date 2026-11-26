@@ -175,8 +175,27 @@ function normalize(raw: string): string {
 const bySymbol = new Map(WOL_CATALOG.map(([symbol, title]) => [symbol, title]));
 const catalogIndex = WOL_CATALOG.map(([symbol, title]) => ({ symbol, title, norm: normalize(title) }));
 
-/** "[cap.|lição|p.] 3 [par. 2]" → what to append after the symbol, or null. */
+/**
+ * "631-638", "cap. 5 631-638", "cap 5 631": the pages say where, so a chapter
+ * written before them is dropped — WOL's search box takes "jv 631-638" and
+ * answers nothing for "jv cap. 5 631-638".
+ */
+function parsePageTail(folded: string): { wol: string; label: string } | null {
+  const m = /^(?:(?:cap|capitulo|licao)\.?\s*\d{1,3}\s*[,;]?\s+(?:(?:paginas?|pags?|pp?)\.?\s*)?(\d{1,4})(?:\s*[-–—]\s*(\d{1,4}))?|(?:(?:paginas?|pags?|pp?)\.?\s*)?(\d{1,4})\s*[-–—]\s*(\d{1,4}))$/.exec(
+    folded
+  );
+  if (!m) return null;
+  const first = m[1] ?? m[3];
+  const last = m[2] ?? m[4];
+  if (last && Number(last) < Number(first)) return null;
+  const pages = last ? `${first}-${last}` : first;
+  return { wol: pages, label: `p. ${pages}` };
+}
+
+/** "[cap.|lição|p.] 3 [par. 2]" or a page range → what to append after the symbol, or null. */
 function parseTail(tail: string): { wol: string; label: string } | null {
+  const pages = parsePageTail(fold(tail.trim()));
+  if (pages) return pages;
   const m = /^(?:(cap|capitulo|licao|p|pag|pagina)\.?\s*)?(\d{1,4})(?:\s*par(?:agrafo)?\.?\s*(\d{1,3}))?$/.exec(
     tail.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
   );

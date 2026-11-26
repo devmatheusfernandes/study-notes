@@ -114,6 +114,7 @@ export function JwpubExtractSurface({
               <SidebarHighlightedHtml
                 html={extract.html}
                 mepsDocumentId={extract.refMepsDocumentId}
+                symbolHint={extract.refSymbol}
                 titleHint={captionTitle(extract.caption)}
                 onNoteChange={(back, passageTitle) => {
                   const id = extract.extractId;

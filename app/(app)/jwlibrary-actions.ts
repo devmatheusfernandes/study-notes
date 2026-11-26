@@ -758,12 +758,15 @@ export async function getChapterHighlights(
   issueTagNumber: number | null,
   mepsDocumentId: number | null
 ): Promise<{ highlights?: ParagraphHighlight[]; error?: string }> {
+  void issueTagNumber;
   const { supabase, user } = await requireUser();
   if (!user) return { error: "Sessão expirada." };
   if (mepsDocumentId === null) return { highlights: [] };
 
-  // A null `symbol` means "match the document alone" (see getDocumentHighlights):
-  // a MepsDocumentId is unique on its own, so language/issue add nothing there.
+  // The MepsDocumentId names the document on its own; only the language can make
+  // two marks on it mean different texts. Symbol and issue are deliberately not
+  // filtered: a mark made in a side panel on a publication not yet imported can't
+  // know them exactly, and still has to show here once it is.
   let markQuery = supabase
     .from("jwlibrary_usermarks")
     .select("id, color_index")
@@ -774,19 +777,9 @@ export async function getChapterHighlights(
     .eq("meps_document_id", mepsDocumentId)
     .eq("block_type", 1)
     .is("user_mark_id", null);
-  if (symbol !== null) {
-    markQuery = markQuery.eq("key_symbol", symbol);
-    markQuery =
-      mepsLanguage === null ? markQuery.is("meps_language", null) : markQuery.eq("meps_language", mepsLanguage);
-    markQuery =
-      issueTagNumber === null ? markQuery.is("issue_tag_number", null) : markQuery.eq("issue_tag_number", issueTagNumber);
-    looseNoteQuery = looseNoteQuery.eq("key_symbol", symbol);
-    looseNoteQuery =
-      mepsLanguage === null ? looseNoteQuery.is("meps_language", null) : looseNoteQuery.eq("meps_language", mepsLanguage);
-    looseNoteQuery =
-      issueTagNumber === null
-        ? looseNoteQuery.is("issue_tag_number", null)
-        : looseNoteQuery.eq("issue_tag_number", issueTagNumber);
+  if (symbol !== null && mepsLanguage !== null) {
+    markQuery = markQuery.or(`meps_language.is.null,meps_language.eq.${Number(mepsLanguage)}`);
+    looseNoteQuery = looseNoteQuery.or(`meps_language.is.null,meps_language.eq.${Number(mepsLanguage)}`);
   }
 
   const [{ data: usermarks, error }, { data: looseNotes, error: looseNotesError }] = await Promise.all([
@@ -889,6 +882,53 @@ export async function getDocumentHighlights(
     }
   }
   return { highlights: merged };
+}
+
+/**
+ * Where a mark made on a document opened in a side panel should be filed — the
+ * same publication symbol/language/issue the full reader (and a JW Library
+ * export) would use: the user's imported copy if there is one, else wherever
+ * they already marked it, else the caller's best guess.
+ */
+export async function resolveDocumentLocation(
+  mepsDocumentId: number,
+  symbolHint: string | null
+): Promise<{ keySymbol: string | null; mepsLanguage: number | null; issueTagNumber: number | null }> {
+  const fallback = { keySymbol: symbolHint, mepsLanguage: 5, issueTagNumber: 0 }; // 5 = Portuguese
+  const { supabase, user } = await requireUser();
+  if (!user || !Number.isInteger(mepsDocumentId)) return fallback;
+
+  const { data: chapter } = await supabase
+    .from("jwpub_chapters")
+    .select("publication_id")
+    .eq("meps_document_id", mepsDocumentId)
+    .limit(1)
+    .maybeSingle();
+  if (chapter) {
+    const { data: publication } = await supabase
+      .from("jwpub_publications")
+      .select("symbol, meps_language_index, issue_tag_number")
+      .eq("id", chapter.publication_id)
+      .maybeSingle();
+    if (publication) {
+      return {
+        keySymbol: publication.symbol,
+        mepsLanguage: publication.meps_language_index,
+        issueTagNumber: publication.issue_tag_number,
+      };
+    }
+  }
+
+  const { data: mark } = await supabase
+    .from("jwlibrary_usermarks")
+    .select("key_symbol, meps_language, issue_tag_number")
+    .eq("meps_document_id", mepsDocumentId)
+    .limit(1)
+    .maybeSingle();
+  if (mark?.key_symbol) {
+    return { keySymbol: mark.key_symbol, mepsLanguage: mark.meps_language, issueTagNumber: mark.issue_tag_number };
+  }
+  return fallback;
 }
 
 export interface PublicationHighlight extends ParagraphHighlight {

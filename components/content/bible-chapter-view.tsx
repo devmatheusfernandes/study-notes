@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { BibleVerseRow } from "@/app/(app)/bible-actions";
 import type { BibleVerseHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { HighlightSwatch } from "@/components/ui/highlight-swatch";
 import { wrapTokenRange, getTokenRangeForSelection, unwrapHighlightMarks } from "@/lib/jwlibrary/paragraph-tokens";
 
 interface BibleChapterViewProps {
@@ -469,16 +470,8 @@ export function BibleChapterView({
           }}
           className="z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_var(--shadow)]"
         >
-          {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
-            <button
-              key={index}
-              type="button"
-              onClick={() => confirmSelectionSpan(Number(index))}
-              aria-label={color.name}
-              title={color.name}
-              className="size-6 rounded-full border-2 border-transparent transition-transform hover:scale-110 active:scale-95"
-              style={{ backgroundColor: color.hex }}
-            />
+          {Object.keys(JWLIBRARY_HIGHLIGHT_COLORS).map((index) => (
+            <HighlightSwatch key={index} colorIndex={Number(index)} onClick={() => confirmSelectionSpan(Number(index))} />
           ))}
           <span className="mx-0.5 h-5 w-px bg-border" />
           <button

@@ -27,6 +27,7 @@ import { useDevice } from "@/hooks/ui/use-device";
 import { parseNotePreview } from "@/lib/note-preview";
 import { listJwlibraryContent, type JwlibraryNoteView, type JwlibraryTagView } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS, getPublicationFallbackTitle, firstWords } from "@/lib/jwlibrary/constants";
+import { useHighlightColorName } from "@/components/ui/highlight-swatch";
 import { ProcessingShimmer, UploadWaveProgress } from "./upload-progress-indicators";
 
 /** Strips tags for search matching — a note's content may be plain text (imported from a real backup) or Tiptap HTML (created here), same as notes.body elsewhere in the app. */
@@ -98,6 +99,7 @@ function ColorChip({
   onClick: () => void;
 }) {
   const color = JWLIBRARY_HIGHLIGHT_COLORS[colorIndex];
+  const name = useHighlightColorName(colorIndex);
   return (
     <button
       type="button"
@@ -108,7 +110,7 @@ function ColorChip({
       )}
     >
       <span className="size-2.5 rounded-full" style={{ backgroundColor: color.hex }} />
-      {color.name}
+      {name}
     </button>
   );
 }

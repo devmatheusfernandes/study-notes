@@ -6,6 +6,7 @@ import { FindInNote } from "@/lib/tiptap/find-in-note";
 import { NoteFindBar } from "@/components/content/note-find-bar";
 import { useIsMobile } from "@/hooks/ui/use-device";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { HighlightSwatch } from "@/components/ui/highlight-swatch";
 import { convertPastedJwpubLinks } from "@/lib/notes/jwpub-paste";
 import {
   forwardRef,
@@ -806,28 +807,20 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       >
         {showHighlightColors ? (
           <>
-            {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, { name, hex }]) => (
-              <button
+            {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, { hex }]) => (
+              <HighlightSwatch
                 key={index}
-                type="button"
+                size="xs"
+                colorIndex={Number(index)}
                 // Selection collapses on mousedown-then-blur — run before that happens.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   editor.chain().focus().setNoteHighlight(hex).run();
                   setShowHighlightColors(false);
                 }}
-                aria-label={`Destacar de ${name.toLowerCase()}`}
-                title={name}
-                className="flex size-7 items-center justify-center rounded-full transition-transform hover:scale-110"
-              >
-                <span
-                  className={cn(
-                    "size-5 rounded-full ring-offset-1 ring-offset-card",
-                    editor.isActive("highlight", { color: hex }) && "ring-2 ring-foreground/70"
-                  )}
-                  style={{ backgroundColor: hex }}
-                />
-              </button>
+                selected={editor.isActive("highlight", { color: hex })}
+                className="mx-0.5"
+              />
             ))}
             {editor.isActive("highlight") && (
               <>

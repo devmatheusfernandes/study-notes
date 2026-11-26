@@ -138,6 +138,7 @@ export function BibleAppendixContent({
             <SidebarHighlightedHtml
               html={appendix.contentHtml}
               mepsDocumentId={mepsDocumentId}
+              symbolHint={APPENDIX_SYMBOL}
               className={articleClass}
             />
           )}

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NotebookPen } from "lucide-react";
 import type { ParagraphHighlight } from "@/app/(app)/jwlibrary-actions";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { HighlightSwatch } from "@/components/ui/highlight-swatch";
 import { getTokenRangeForSelection } from "@/lib/jwlibrary/paragraph-tokens";
 import { drawParagraphHighlights, highlightFromClick, type HighlightClick } from "@/lib/jwlibrary/draw-highlights";
 
@@ -46,7 +47,10 @@ export function HighlightableHtml({
   onPickSpan,
 }: HighlightableHtmlProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const canSelect = Boolean(onCreateHighlight || onPickSpan);
+  // A stable object, so a re-render never rewrites the HTML (which would wipe the marks and the selection).
+  const markup = useMemo(() => ({ __html: html }), [html]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -66,7 +70,9 @@ export function HighlightableHtml({
     return () => container.removeEventListener("click", handleClick);
   }, [highlights, onHighlightClick]);
 
-  const [prompt, setPrompt] = useState<{ x: number; bottom: number; pid: string; range: Range } | null>(null);
+  // `left`/`top` are relative to the wrapper, not the viewport: inside a Vault (which is
+  // transformed) a `position: fixed` pill would land somewhere else entirely.
+  const [prompt, setPrompt] = useState<{ left: number; top: number; pid: string; range: Range } | null>(null);
 
   useEffect(() => {
     if (!canSelect) return;
@@ -99,7 +105,15 @@ export function HighlightableHtml({
       const pid = paragraphEl.dataset.pid;
       const cloned = range.cloneRange();
       delayTimer = setTimeout(() => {
-        setPrompt({ x: rect.left + rect.width / 2, bottom: rect.bottom, pid, range: cloned });
+        const box = wrapperRef.current?.getBoundingClientRect();
+        if (!box) return;
+        const half = Math.min(POPUP_HALF_WIDTH, box.width / 2);
+        setPrompt({
+          left: Math.min(Math.max(rect.left + rect.width / 2 - box.left, half), box.width - half),
+          top: Math.min(rect.bottom + 10, window.innerHeight - 52) - box.top,
+          pid,
+          range: cloned,
+        });
       }, SELECTION_PROMPT_DELAY_MS);
     }
 
@@ -127,33 +141,20 @@ export function HighlightableHtml({
   );
 
   return (
-    <>
-      <div ref={containerRef} className={className} dangerouslySetInnerHTML={{ __html: html }} />
+    <div ref={wrapperRef} className="relative">
+      <div ref={containerRef} className={className} dangerouslySetInnerHTML={markup} />
 
       {canSelect && prompt && (
         // BELOW the selection, never above — the mobile OS draws its own
         // "Copiar / Selecionar tudo" bar over the top of one (see the same
         // note in bible-chapter-view.tsx).
         <div
-          style={{
-            position: "fixed",
-            left: Math.min(Math.max(prompt.x, POPUP_HALF_WIDTH + 8), window.innerWidth - POPUP_HALF_WIDTH - 8),
-            top: Math.min(prompt.bottom + 10, window.innerHeight - 52),
-            transform: "translateX(-50%)",
-          }}
-          className="z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_var(--shadow)]"
+          style={{ left: prompt.left, top: prompt.top, transform: "translateX(-50%)" }}
+          className="absolute z-50 flex items-center gap-1 whitespace-nowrap rounded-full bg-card px-2 py-1.5 shadow-[0_8px_20px_var(--shadow)]"
         >
           {onCreateHighlight &&
-            Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
-              <button
-                key={index}
-                type="button"
-                onClick={() => confirm(Number(index))}
-                aria-label={color.name}
-                title={color.name}
-                className="size-6 rounded-full border-2 border-transparent transition-transform hover:scale-110 active:scale-95"
-                style={{ backgroundColor: color.hex }}
-              />
+            Object.keys(JWLIBRARY_HIGHLIGHT_COLORS).map((index) => (
+              <HighlightSwatch key={index} colorIndex={Number(index)} onClick={() => confirm(Number(index))} />
             ))}
           {onCreateHighlight && onPickSpan && <span className="mx-0.5 h-5 w-px bg-border" />}
           {onPickSpan && (
@@ -169,6 +170,6 @@ export function HighlightableHtml({
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }

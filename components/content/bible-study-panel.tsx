@@ -10,6 +10,7 @@ import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { InlineVideoCard } from "@/components/video/inline-video-card";
 import { bodyToPlainText } from "@/lib/note-preview";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { HighlightSwatch } from "@/components/ui/highlight-swatch";
 import type { ChapterVideo } from "@/app/(app)/bible-search-actions";
 import type { ResearchGuideExtract } from "@/app/(app)/research-guide-actions";
 import { useResearchGuideReference } from "@/hooks/use-research-guide-reference";
@@ -883,20 +884,15 @@ export function BibleStudyTabs({
                 <div className="flex flex-col gap-1.5">
                   <span className="text-[11.5px] text-muted-foreground">Cor do destaque</span>
                   <div className="flex items-center gap-1.5">
-                    {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
-                      <button
-                        key={index}
-                        type="button"
-                        onClick={() => onColorChangeActiveHighlight?.(Number(index))}
-                        aria-label={color.name}
-                        title={color.name}
-                        className="size-7 shrink-0 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
-                        style={{
-                          backgroundColor: color.hex,
-                          borderColor: activeHighlight.colorIndex === Number(index) ? "var(--foreground)" : "transparent",
-                        }}
-                      />
-                    ))}
+                    {Object.keys(JWLIBRARY_HIGHLIGHT_COLORS).map((index) => (
+                  <HighlightSwatch
+                    key={index}
+                    size="md"
+                    colorIndex={Number(index)}
+                    selected={activeHighlight.colorIndex === Number(index)}
+                    onClick={() => onColorChangeActiveHighlight?.(Number(index))}
+                  />
+                ))}
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5">

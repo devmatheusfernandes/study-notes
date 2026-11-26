@@ -11,6 +11,7 @@ import { RichTextEditor } from "@/components/content/rich-text-editor";
 import { BibleReferencePicker, type BibleReferenceValue } from "./bible-reference-picker";
 import { JwlibraryTagChip } from "./jwlibrary-tag-chip";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { HighlightColorName } from "@/components/ui/highlight-swatch";
 import { queueCreateNote, queueSetHighlightColor, queueUpdateNote } from "@/lib/offline/jwlibrary-mutations";
 import { useJwOutbox } from "@/lib/offline/jwlibrary-outbox";
 import {
@@ -471,7 +472,7 @@ export function JwlibraryNoteEditorVault({
                         <SelectItem key={index} value={index}>
                           <span className="flex items-center gap-2">
                             <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: color.hex }} />
-                            {color.name}
+                            <HighlightColorName colorIndex={Number(index)} />
                           </span>
                         </SelectItem>
                       ))}

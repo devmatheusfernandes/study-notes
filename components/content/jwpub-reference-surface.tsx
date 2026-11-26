@@ -147,10 +147,13 @@ function DownloadPrompt({
     <div className="flex flex-col items-start gap-3">
       {snapshot && !wantsFullArticle && (
         <>
-          <div
-            className="w-full text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
-            dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(snapshot) }}
-          />
+          <div className="w-full">
+            <SidebarHighlightedHtml
+              html={sanitizeChapterHtml(snapshot)}
+              mepsDocumentId={mepsDocumentId}
+              className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
+            />
+          </div>
           <p className="text-[12px] text-muted-foreground">
             Trecho salvo na sua nota — disponível offline.{" "}
             <button
@@ -168,11 +171,15 @@ function DownloadPrompt({
           <ReferenceContentSkeleton paragraphs={4} withHeading />
         </div>
       ) : article?.html ? (
-        <div
-          ref={articleRef}
-          className="w-full text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
-          dangerouslySetInnerHTML={{ __html: sanitizeChapterHtml(article.html) }}
-        />
+        <div ref={articleRef} className="w-full">
+          <SidebarHighlightedHtml
+            html={sanitizeChapterHtml(article.html)}
+            mepsDocumentId={mepsDocumentId}
+            // WOL names the publication on the article element ("pub-jv").
+            symbolHint={/\bpub-([a-z][a-z0-9-]*)/.exec(article.html)?.[1] ?? null}
+            className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_strong]:font-semibold"
+          />
+        </div>
       ) : null}
       {!snapshot && !article?.html && !loadingArticle && (
         <p className="text-[13.5px] text-muted-foreground">

@@ -6,6 +6,7 @@ import {
   BookOpen,
   DatabaseBackup,
   HardDriveDownload,
+  Highlighter,
   Library,
   Lock,
   LogOut,
@@ -29,6 +30,7 @@ import { InsightUploadCard } from "@/components/settings/insight-upload-card";
 import { ResearchGuideTopicsUploadCard } from "@/components/settings/research-guide-topics-upload-card";
 import { BackupExportCard } from "@/components/settings/backup-export-card";
 import { PrivacyLockCard } from "@/components/settings/privacy-lock-card";
+import { HighlightLabelsCard } from "@/components/settings/highlight-labels-card";
 import { TagsSettingsCard } from "@/components/settings/tags-settings-card";
 import { BackupsCard } from "@/components/settings/backups-card";
 import { OfflinePublicationsCard } from "@/components/settings/offline-publications-card";
@@ -40,7 +42,7 @@ interface SettingsViewProps {
   userEmail: string;
 }
 
-type SectionId = "account" | "appearance" | "offline" | "ai" | "library" | "data";
+type SectionId = "account" | "appearance" | "highlights" | "offline" | "ai" | "library" | "data";
 
 interface SectionMeta {
   id: SectionId;
@@ -58,6 +60,7 @@ interface SectionMeta {
 const SECTIONS: SectionMeta[] = [
   { id: "account", label: "Conta", hint: "E-mail, bloqueio, sair", icon: User },
   { id: "appearance", label: "Aparência", hint: "Tema, exibição e etiquetas", icon: Palette },
+  { id: "highlights", label: "Destaques", hint: "Etiquetas das cores", icon: Highlighter },
   { id: "offline", label: "Offline", hint: "Bíblia e publicações no aparelho", icon: HardDriveDownload },
   { id: "ai", label: "Inteligência artificial", hint: "Uso e indexação das notas", icon: Sparkles },
   { id: "library", label: "Biblioteca", hint: "Vídeos, Guia e Perspicaz", icon: Library },
@@ -232,6 +235,16 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                   </SettingRow>
                 </Panel>
                 <TagsSettingsCard />
+              </>
+            )}
+
+            {active === "highlights" && (
+              <>
+                <SectionIntro
+                  title={current.label}
+                  description="Associe cada cor do marcador a um assunto. O nome aparece ao passar o mouse sobre a cor."
+                />
+                <HighlightLabelsCard />
               </>
             )}
 

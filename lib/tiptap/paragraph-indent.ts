@@ -1,4 +1,4 @@
-import { Extension } from "@tiptap/core";
+import { Extension, type CommandProps } from "@tiptap/core";
 
 const INDENT_EM_PER_LEVEL = 2;
 const MAX_INDENT_LEVEL = 8;
@@ -14,15 +14,19 @@ declare module "@tiptap/core" {
 }
 
 /**
- * Google Docs-style Tab/Shift-Tab: indents/outdents the current paragraph(s)
- * with a left margin, for text that isn't inside a list. List items already
- * get Tab/Shift-Tab for free from @tiptap/extension-list's ListKeymap (nests
- * one level deeper / lifts out), so this extension explicitly steps aside
- * whenever the selection is inside a listItem/taskItem — it must be added
- * to the editor's extensions array AFTER TaskList/TaskItem/StarterKit for
- * that fallthrough to work: ProseMirror tries each extension's keymap in
- * registration order and stops at the first one that returns true, so the
- * list behaviour always gets first refusal.
+ * Google Docs-style Tab/Shift-Tab for text that isn't inside a list, in two
+ * stages: the first Tab indents only the first line (`firstLine`, a CSS
+ * text-indent), and every further Tab moves the whole paragraph (`indent`, a
+ * left margin). Shift-Tab — and Backspace at the very start of the paragraph —
+ * undo one stage at a time, in reverse.
+ *
+ * List items already get Tab/Shift-Tab for free from
+ * @tiptap/extension-list's ListKeymap (nests one level deeper / lifts out), so
+ * this extension explicitly steps aside whenever the selection is inside a
+ * listItem/taskItem — it must be added to the editor's extensions array AFTER
+ * TaskList/TaskItem/StarterKit for that fallthrough to work: ProseMirror tries
+ * each extension's keymap in registration order and stops at the first one
+ * that returns true, so the list behaviour always gets first refusal.
  */
 export const ParagraphIndent = Extension.create({
   name: "paragraphIndent",
@@ -45,22 +49,38 @@ export const ParagraphIndent = Extension.create({
               return { style: `margin-left: ${level * INDENT_EM_PER_LEVEL}em` };
             },
           },
+          firstLine: {
+            default: false,
+            parseHTML: (element) => parseFloat(element.style.textIndent || "0") > 0,
+            renderHTML: (attributes) =>
+              attributes.firstLine ? { style: `text-indent: ${INDENT_EM_PER_LEVEL}em` } : {},
+          },
         },
       },
     ];
   },
 
   addCommands() {
-    const step = (delta: 1 | -1) => () => ({ tr, state, dispatch }: { tr: any; state: any; dispatch?: (tr: any) => void }) => {
+    const step = (delta: 1 | -1) => () => ({ tr, state, dispatch }: CommandProps) => {
       const { from, to } = state.selection;
       let changed = false;
 
-      state.doc.nodesBetween(from, to, (node: any, pos: number) => {
+      state.doc.nodesBetween(from, to, (node, pos) => {
         if (!INDENTABLE_TYPES.includes(node.type.name)) return;
-        const current = (node.attrs.indent as number) ?? 0;
-        const next = Math.min(MAX_INDENT_LEVEL, Math.max(0, current + delta));
-        if (next === current) return;
-        tr.setNodeMarkup(pos, undefined, { ...node.attrs, indent: next });
+        const level = (node.attrs.indent as number) ?? 0;
+        const firstLine = Boolean(node.attrs.firstLine);
+        let next = { indent: level, firstLine };
+        if (delta === 1) {
+          // First stage only for an untouched paragraph.
+          if (!firstLine && level === 0) next = { indent: 0, firstLine: true };
+          else next = { indent: Math.min(MAX_INDENT_LEVEL, level + 1), firstLine };
+        } else if (level > 0) {
+          next = { indent: level - 1, firstLine };
+        } else {
+          next = { indent: 0, firstLine: false };
+        }
+        if (next.indent === level && next.firstLine === firstLine) return;
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...next });
         changed = true;
       });
 
@@ -91,6 +111,12 @@ export const ParagraphIndent = Extension.create({
         if (inList()) return false;
         this.editor.commands.outdent();
         return true;
+      },
+      Backspace: () => {
+        const { empty, $from } = this.editor.state.selection;
+        if (!empty || $from.parentOffset !== 0 || inList()) return false;
+        // False when there is nothing to undo, so the key joins paragraphs as usual.
+        return this.editor.commands.outdent();
       },
     };
   },

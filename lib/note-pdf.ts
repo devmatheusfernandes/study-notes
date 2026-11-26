@@ -40,6 +40,8 @@ interface Atom {
 }
 
 interface Ctx {
+  /** First-line indent of the paragraph being drawn. */
+  textIndent?: number;
   /** Left edge of the block, in pt (grows with lists/quotes). */
   x: number;
   /** Bullet/number/checkbox drawn on the first line emitted, then cleared. */
@@ -193,6 +195,9 @@ class Renderer {
     }
 
     const maxW = this.contentRight - ctx.x;
+    // Only the first line is pushed in (the editor's first Tab).
+    const firstIndent = ctx.textIndent ?? 0;
+    const widthOfLine = () => maxW - (lines.length === 0 ? firstIndent : 0);
     const lines: Atom[][] = [];
     let line: Atom[] = [];
     let used = 0;
@@ -208,7 +213,7 @@ class Renderer {
         continue;
       }
       if (atom.space && line.length === 0) continue;
-      if (!atom.space && used + atom.width > maxW && line.length > 0) flush();
+      if (!atom.space && used + atom.width > widthOfLine() && line.length > 0) flush();
       // A single unbreakable word wider than the page: split it by character.
       if (!atom.space && atom.width > maxW) {
         this.fontFor(atom.style, atom.size);
@@ -236,7 +241,8 @@ class Renderer {
       if (index === 0) this.drawMarker(ctx, lineH);
       this.drawQuoteBars(ctx, lineH);
       const isLast = index === lines.length - 1;
-      this.drawLine(atomsInLine, ctx, lineH, maxW, isLast);
+      const offset = index === 0 ? firstIndent : 0;
+      this.drawLine(atomsInLine, offset ? { ...ctx, x: ctx.x + offset } : ctx, lineH, maxW - offset, isLast);
       this.y += lineH;
     });
     this.y += opts.after ?? 0;
@@ -346,7 +352,9 @@ class Renderer {
     const align = (el.style.textAlign as Align) || ctx.align;
     const marginLeftEm = parseFloat(el.style.marginLeft || "0");
     const indent = Number.isFinite(marginLeftEm) ? marginLeftEm * ctx.size : 0;
-    const local: Ctx = { ...ctx, align, x: ctx.x + indent };
+    const textIndentEm = parseFloat(el.style.textIndent || "0");
+    const textIndent = Number.isFinite(textIndentEm) && textIndentEm > 0 ? textIndentEm * ctx.size : 0;
+    const local: Ctx = { ...ctx, align, x: ctx.x + indent, textIndent };
 
     switch (tag) {
       case "p":

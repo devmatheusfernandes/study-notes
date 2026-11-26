@@ -5,6 +5,7 @@ import DOMPurify from "dompurify";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { ConfirmVault } from "@/components/ui/confirm-vault";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
+import { HighlightSwatch } from "@/components/ui/highlight-swatch";
 import { queueDeleteHighlight, queueDeleteNote, queueSetHighlightColor } from "@/lib/offline/jwlibrary-mutations";
 import {
   listOwnJwlibraryTags,
@@ -170,18 +171,13 @@ export function JwlibraryHighlightNotePanel({
             <div className="flex flex-col gap-1.5">
               <span className="text-[11.5px] text-muted-foreground">Cor do destaque</span>
               <div className="flex items-center gap-1.5">
-                {Object.entries(JWLIBRARY_HIGHLIGHT_COLORS).map(([index, color]) => (
-                  <button
+                {Object.keys(JWLIBRARY_HIGHLIGHT_COLORS).map((index) => (
+                  <HighlightSwatch
                     key={index}
-                    type="button"
+                    size="md"
+                    colorIndex={Number(index)}
+                    selected={colorIndex === Number(index)}
                     onClick={() => handleColorChange(Number(index))}
-                    aria-label={color.name}
-                    title={color.name}
-                    className="size-7 shrink-0 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
-                    style={{
-                      backgroundColor: color.hex,
-                      borderColor: colorIndex === Number(index) ? "var(--foreground)" : "transparent",
-                    }}
                   />
                 ))}
               </div>
