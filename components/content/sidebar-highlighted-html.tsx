@@ -315,7 +315,8 @@ export function SidebarHighlightedHtml({
   const draftCanColor = view?.kind === "draft" && (!draftCreated || draftMarkId !== null);
 
   return (
-    <div ref={wrapRef} onPointerDownCapture={() => void getLocation()}>
+    // data-page-markers: the printed page numbers show in the margin, wherever the text has them (globals.css).
+    <div ref={wrapRef} data-page-markers onPointerDownCapture={() => void getLocation()}>
       {/* `a.b` is how the archive marks a scripture link; it only looks (and acts) like one once the Bible is downloaded. */}
       <div
         onClick={bibleDownloaded ? (event) => void openPassage(event) : undefined}

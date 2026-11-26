@@ -412,7 +412,7 @@ html[data-immersive] [data-app-sidebar] {
   user-select: none;
 }
 
-/* Printed page numbers in a cited text (components/content/jwpub-reference-surface.tsx):
+/* Printed page numbers in any side panel (components/content/sidebar-highlighted-html.tsx):
    a small tick where the page turns, and its number in the right margin of that line.
    Generated content, so highlight positions (counted over the text) don't move. */
 [data-page-markers] .pageNum::before {

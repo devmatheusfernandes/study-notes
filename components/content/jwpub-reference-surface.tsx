@@ -387,8 +387,7 @@ export function JwpubReferenceSurface({
       onClose={onClose}
       raiseKey={raiseKey}
     >
-      {/* data-page-markers: the printed page numbers show in the margin (globals.css). */}
-      <div ref={bodyRef} data-page-markers>
+      <div ref={bodyRef}>
       <Body
         safeHtml={safeHtml}
         excerpt={excerpt}

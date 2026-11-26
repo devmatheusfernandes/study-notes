@@ -260,6 +260,28 @@ export async function getWolArticle(mepsDocumentId: number): Promise<{ title?: s
   return { title: title || undefined, html };
 }
 
+const PAGE_MARKER = /<span\b[^>]*\bclass="pageNum"[^>]*>\s*<\/span>/g;
+
+/**
+ * Page markers sit in the running text, so cutting paragraphs out of an article
+ * loses some: the one for the page the cut starts on, and any between two of the
+ * paragraphs. Each goes to the start of the paragraph it opens.
+ */
+function withPageMarkers(article: string, parts: { index: number; html: string }[]): string[] {
+  const markers = [...article.matchAll(PAGE_MARKER)];
+  let after = 0;
+  return parts.map((part, i) => {
+    const earlier = markers.filter((m) => m.index >= after && m.index < part.index);
+    after = part.index + part.html.length;
+    const marker = earlier[earlier.length - 1]?.[0];
+    if (!marker) return part.html;
+    // The first paragraph may already open with its own number.
+    const own = part.html.search(PAGE_MARKER);
+    if (i === 0 && own !== -1 && !part.html.slice(0, own).replace(/<[^>]+>/g, "").trim()) return part.html;
+    return part.html.replace(/^<[^>]+>/, (open) => open + marker);
+  });
+}
+
 /** Flattens links (they'd point at wol.jw.org paths) and drops anything that isn't text. */
 function flattenArticleHtml(html: string): string {
   return html
@@ -286,11 +308,12 @@ async function fetchParagraph(
   const end = page.indexOf("</article>", start);
   if (start === -1 || end === -1) return undefined;
 
-  const body: { pid: number; pnum: number | null; html: string }[] = [];
-  for (const m of page.slice(start, end).matchAll(/<(p|li)\b([^>]*\bdata-pid="(\d+)"[^>]*)>[\s\S]*?<\/\1>/g)) {
+  const article = page.slice(start, end);
+  const body: { pid: number; pnum: number | null; html: string; index: number }[] = [];
+  for (const m of article.matchAll(/<(p|li)\b([^>]*\bdata-pid="(\d+)"[^>]*)>[\s\S]*?<\/\1>/g)) {
     const pnum = /data-pnum="(\d+)"/.exec(m[0]);
     const isBody = pnum !== null || /class="sb"/.test(m[2]);
-    if (isBody) body.push({ pid: Number(m[3]), pnum: pnum ? Number(pnum[1]) : null, html: m[0] });
+    if (isBody) body.push({ pid: Number(m[3]), pnum: pnum ? Number(pnum[1]) : null, html: m[0], index: m.index });
   }
 
   const inArticle = () =>
@@ -303,7 +326,7 @@ async function fetchParagraph(
   } else {
     picked = inArticle();
   }
-  return picked ? { pid: picked.pid, html: flattenArticleHtml(picked.html) } : undefined;
+  return picked ? { pid: picked.pid, html: flattenArticleHtml(withPageMarkers(article, [picked])[0]) } : undefined;
 }
 
 /** The paragraphs `first`…`last` (by data-pid) of one WOL document, in document order. */
@@ -315,12 +338,13 @@ async function fetchSnapshot(docId: number, first: number, last: number): Promis
   const end = page.indexOf("</article>", start);
   if (start === -1 || end === -1) return undefined;
 
-  const parts: string[] = [];
-  for (const m of page.slice(start, end).matchAll(/<(p|h[1-6]|li)\b[^>]*\bdata-pid="(\d+)"[^>]*>[\s\S]*?<\/\1>/g)) {
+  const article = page.slice(start, end);
+  const parts: { index: number; html: string }[] = [];
+  for (const m of article.matchAll(/<(p|h[1-6]|li)\b[^>]*\bdata-pid="(\d+)"[^>]*>[\s\S]*?<\/\1>/g)) {
     const pid = Number(m[2]);
-    if (pid >= first && pid <= last) parts.push(m[0]);
+    if (pid >= first && pid <= last) parts.push({ index: m.index, html: m[0] });
   }
   if (parts.length === 0) return undefined;
-  const html = flattenArticleHtml(parts.join("\n"));
+  const html = flattenArticleHtml(withPageMarkers(article, parts).join("\n"));
   return html.length > MAX_SNAPSHOT_CHARS ? undefined : html;
 }
