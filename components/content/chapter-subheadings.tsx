@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { List } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Vault, VaultContent, VaultTitle } from "@/components/ui/vault";
 
 /** How a chapter marks its subheadings: `h2`/`h3` in magazines, `p.ss` in books. */
 const SUBHEADING_SELECTOR = "h2[data-pid], h3[data-pid], p.ss[data-pid]";
@@ -16,50 +16,56 @@ function readSubheadings(html: string): { pid: string; text: string }[] {
   });
 }
 
-/** The chapter's subheadings, listed above it — each one scrolls the panel to its section. */
-export function ChapterSubheadings({
+/**
+ * A header button listing the chapter's subheadings in a Vault. Renders
+ * nothing for a text that has none.
+ */
+export function ChapterSubheadingsButton({
   html,
-  containerRef,
+  onSelect,
 }: {
-  /** The chapter being shown below. */
-  html: string;
-  containerRef: React.RefObject<HTMLElement | null>;
+  /** The whole chapter — read for its headings only, never rendered. */
+  html: string | null;
+  /** A subheading was picked; the Vault is already closing. */
+  onSelect: (pid: string) => void;
 }) {
-  const [open, setOpen] = useState(true);
-  const items = useMemo(() => readSubheadings(html), [html]);
+  const [open, setOpen] = useState(false);
+  // `html` only ever arrives from a client-side fetch, so DOMParser exists whenever it does.
+  const items = useMemo(() => (html ? readSubheadings(html) : []), [html]);
   if (items.length === 0) return null;
 
   return (
-    <nav aria-label="Subtítulos do capítulo" className="mb-3 w-full rounded-2xl border border-border/60 p-1.5">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        rightIcon={<ChevronDown className={cn("transition-transform", !open && "-rotate-90")} />}
-        className="w-full justify-between text-[12px] text-muted-foreground"
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Subtítulos do capítulo"
+        title="Subtítulos"
+        className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       >
-        Subtítulos · {items.length}
-      </Button>
-      {open && (
-        <div className="flex flex-col">
-          {items.map((item) => (
-            <Button
-              key={item.pid}
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                containerRef.current
-                  ?.querySelector(`[data-pid="${CSS.escape(item.pid)}"]`)
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
-              className="h-auto w-full justify-start whitespace-normal rounded-xl py-1.5 text-left text-[12.5px] leading-snug text-accent"
-            >
-              {item.text}
-            </Button>
-          ))}
-        </div>
-      )}
-    </nav>
+        <List className="size-4" />
+      </button>
+      <Vault open={open} onOpenChange={setOpen}>
+        <VaultContent aria-label="Subtítulos do capítulo">
+          <VaultTitle className="pb-3 font-heading text-base">Subtítulos</VaultTitle>
+          <nav className="flex flex-col gap-0.5">
+            {items.map((item) => (
+              <Button
+                key={item.pid}
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  onSelect(item.pid);
+                }}
+                className="h-auto w-full justify-start whitespace-normal rounded-xl py-2 text-left text-[13.5px] leading-snug"
+              >
+                {item.text}
+              </Button>
+            ))}
+          </nav>
+        </VaultContent>
+      </Vault>
+    </>
   );
 }

@@ -9,7 +9,7 @@ import type { IngestProgress } from "@/lib/store/ingest-progress-store";
 import { notify } from "@/components/ui/toaster";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
 import { excerptOfChapter } from "@/lib/notes/cited-excerpt";
-import { ChapterSubheadings } from "./chapter-subheadings";
+import { ChapterSubheadingsButton } from "./chapter-subheadings";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { getWolArticle } from "@/app/(app)/wol-lookup-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
@@ -95,11 +95,14 @@ function DownloadPrompt({
   pid,
   snapshot,
   progress,
+  onArticleHtml,
 }: {
   mepsDocumentId: number;
   pid?: string | null;
   snapshot?: string | null;
   progress: IngestProgress | null;
+  /** The full WOL article now on screen (null when it isn't) — the header lists its subheadings. */
+  onArticleHtml: (html: string | null) => void;
 }) {
 
   // The publication isn't in the library, but WOL has the text: show it now,
@@ -124,6 +127,12 @@ function DownloadPrompt({
   }, [mepsDocumentId, fetchArticle]);
   const loadingArticle = fetchArticle && article?.id !== mepsDocumentId;
   const articleRef = useRef<HTMLDivElement>(null);
+
+  const shownHtml = article?.id === mepsDocumentId ? article.html : null;
+  useEffect(() => {
+    onArticleHtml(shownHtml);
+    return () => onArticleHtml(null);
+  }, [shownHtml, onArticleHtml]);
 
   // Images come straight from wol.jw.org; offline (or on a miss) they would show a broken-image icon with
   // alt text, so a failed one is hidden. `error` doesn't bubble, hence the capture-phase listener.
@@ -178,7 +187,6 @@ function DownloadPrompt({
         </div>
       ) : article?.html ? (
         <div ref={articleRef} className="w-full">
-          <ChapterSubheadings html={sanitizeChapterHtml(article.html)} containerRef={articleRef} />
           <SidebarHighlightedHtml
             html={sanitizeChapterHtml(article.html)}
             mepsDocumentId={mepsDocumentId}
@@ -214,6 +222,9 @@ function Body({
   unresolvedPid,
   unresolvedSnapshot,
   downloadProgress,
+  wholeChapter,
+  onWholeChapter,
+  onArticleHtml,
 }: {
   target: JwpubReferenceTarget | null;
   html: string | null;
@@ -223,16 +234,18 @@ function Body({
   unresolvedPid?: string | null;
   unresolvedSnapshot?: string | null;
   downloadProgress: IngestProgress | null;
+  wholeChapter: boolean;
+  onWholeChapter: (whole: boolean) => void;
+  onArticleHtml: (html: string | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const safeHtml = useMemo(() => (html ? sanitizeChapterHtml(html) : ""), [html]);
-  const [wholeChapterFor, setWholeChapterFor] = useState<JwpubReferenceTarget | null>(null);
   const citedRange = target?.citedRange ?? null;
   const excerpt = useMemo(
     () => (safeHtml && citedRange ? excerptOfChapter(safeHtml, citedRange) : null),
     [safeHtml, citedRange]
   );
-  const showingExcerpt = excerpt !== null && wholeChapterFor !== target;
+  const showingExcerpt = excerpt !== null && !wholeChapter;
 
   // Same scroll-and-flash treatment JwpubChapterView gives its own `?pid=`
   // deep link — best-effort, since the cited paragraph number isn't
@@ -257,7 +270,7 @@ function Body({
 
   if (!target || !html) {
     if (!error && unresolvedMepsDocumentId) {
-      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} snapshot={unresolvedSnapshot} progress={downloadProgress} />;
+      return <DownloadPrompt mepsDocumentId={unresolvedMepsDocumentId} pid={unresolvedPid} snapshot={unresolvedSnapshot} progress={downloadProgress} onArticleHtml={onArticleHtml} />;
     }
     return <p className="text-[13.5px] text-muted-foreground">{error ?? "Conteúdo não encontrado."}</p>;
   }
@@ -268,13 +281,12 @@ function Body({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setWholeChapterFor(showingExcerpt ? target : null)}
+          onClick={() => onWholeChapter(showingExcerpt)}
           className="-ml-2 self-start text-[12px] text-muted-foreground"
         >
           {showingExcerpt ? "Ver capítulo inteiro" : "Só o trecho citado"}
         </Button>
       )}
-      {!showingExcerpt && <ChapterSubheadings html={safeHtml} containerRef={containerRef} />}
       <div ref={containerRef}>
         {/* The user's own highlights, with a square in the margin for each note — tapping one opens it right here (see SidebarHighlightedHtml). */}
         <SidebarHighlightedHtml
@@ -314,6 +326,18 @@ export function JwpubReferenceSurface({
   const router = useRouter();
   const canDownload = !isLoading && !error && !(target && html) && Boolean(unresolvedMepsDocumentId);
 
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [wholeChapterFor, setWholeChapterFor] = useState<JwpubReferenceTarget | null>(null);
+  const [articleHtml, setArticleHtml] = useState<string | null>(null);
+
+  function goToSubheading(pid: string) {
+    setWholeChapterFor(target);
+    // After the Vault has slid away (and the whole chapter, if only the excerpt was showing, is on screen).
+    setTimeout(() => {
+      bodyRef.current?.querySelector(`[data-pid="${CSS.escape(pid)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 400);
+  }
+
   return (
     <JwpubSidePanel
       open={open}
@@ -326,6 +350,7 @@ export function JwpubReferenceSurface({
             title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
             html={html}
           />
+          <ChapterSubheadingsButton html={target ? html : articleHtml} onSelect={goToSubheading} />
           {target?.noteId && html ? (
             <button
               type="button"
@@ -357,7 +382,11 @@ export function JwpubReferenceSurface({
       onClose={onClose}
       raiseKey={raiseKey}
     >
+      <div ref={bodyRef}>
       <Body
+        wholeChapter={target !== null && wholeChapterFor === target}
+        onWholeChapter={(whole) => setWholeChapterFor(whole ? target : null)}
+        onArticleHtml={setArticleHtml}
         target={target}
         html={html}
         isLoading={isLoading}
@@ -367,6 +396,7 @@ export function JwpubReferenceSurface({
         unresolvedSnapshot={unresolvedSnapshot}
         downloadProgress={progress}
       />
+      </div>
     </JwpubSidePanel>
   );
 }
