@@ -11,6 +11,7 @@ import { fromBase64, toBase64 } from "./base64";
 import { collaboratorColor } from "./colors";
 import { clearCollabDocument, collabDbName as idbName } from "./device-copy";
 import { useSharedStore } from "@/lib/store/shared-store";
+import { useNotesStore } from "@/lib/store/notes-store";
 
 /**
  * Opens a shared note as a collaborative Yjs document.
@@ -137,6 +138,15 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
 
     async function start() {
       if (!noteId) return;
+      // The user's own note can't be "revoked" from them, and one whose create
+      // is still queued doesn't exist on the server yet — it is edited normally.
+      const notesState = useNotesStore.getState();
+      const own = notesState.notes.some((n) => n.id === noteId);
+      if (own && Object.values(notesState.pendingOps).some((op) => op.kind === "createNote" && op.entityId === noteId)) {
+        setStatus("plain");
+        return;
+      }
+
       let opened: Awaited<ReturnType<typeof fetchCollabOpen>> | null = null;
       try {
         opened = await fetchCollabOpen(noteId);
@@ -147,8 +157,9 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
 
       if (opened && !opened.collaborative) {
         if (opened.role === null) {
-          // A shared note we no longer have access to.
-          if (knownSharedRef.current) await revoke();
+          // A shared note we no longer have access to. (For an own note, "no
+          // role" only means the server hasn't received it yet.)
+          if (knownSharedRef.current && !own) await revoke();
           else setStatus("plain");
           return;
         }
@@ -193,7 +204,8 @@ export function useCollabDoc(noteId: string | undefined, opts: { knownShared: bo
           return;
         }
         if (canWrite) {
-          seedTitle.current = opened.title ?? "";
+          // "Nova nota" is the stored stand-in for "no title yet", not text to edit.
+          seedTitle.current = opened.title === "Nova nota" ? "" : (opened.title ?? "");
           setSeedHtml(opened.body ?? "");
         } else {
           // A viewer can't seed; until an editor opens it, show the snapshot read-only.

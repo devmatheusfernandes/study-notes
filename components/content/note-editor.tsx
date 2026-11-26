@@ -162,7 +162,11 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     [createdId, notes, folders, outgoingNoteIds, outgoingFolderIds, lockedSet]
   );
   const knownShared = !!createdId && (createdId in collabRoles || ownShared);
-  const collab = useCollabDoc(createdId ?? undefined, { knownShared });
+  // A note born in this editor never switches to collaborative mode under the
+  // user's fingers (the server may not even have it yet) — only sharing it from
+  // here does. It opens collaboratively the next time.
+  const [sharedFromHere, setSharedFromHere] = useState(false);
+  const collab = useCollabDoc(noteId || sharedFromHere ? (createdId ?? undefined) : undefined, { knownShared });
   // While the server check is in flight, an existing note that MIGHT be shared
   // shows the skeleton rather than the ordinary editor — which would open
   // empty (or with a stale copy) and then visibly swap. "Might": the shared
@@ -184,17 +188,32 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const [shareOpen, setShareOpen] = useState(false);
   const applyCollabSnapshot = useNotesStore((s) => s.applyCollabSnapshot);
 
-  // ── New note inside a folder someone shared with this user ───────────────
-  // It must belong to the folder's owner (that's what puts it in the shared
-  // tree), so it's created server-side up front and then opened as an
-  // ordinary shared note — collaborative from its first keystroke.
+  // ── New note inside a shared folder ──────────────────────────────────────
+  // Created up front and then opened as an ordinary shared note, so it is
+  // collaborative from its first keystroke. In someone else's folder it must
+  // belong to the folder's owner (that's what puts it in the shared tree), so
+  // the server creates it.
   const sharedFolders = useSharedStore((s) => s.folders);
   const sharedTargetFolder = folderId ? sharedFolders.find((f) => f.id === folderId) : undefined;
   const ownFolderId = folderId && !sharedTargetFolder ? folderId : undefined;
   // Not known yet whether `folder` is the user's own or a shared one: wait.
   const folderUnresolved =
     !!folderId && !sharedTargetFolder && (!sharedHydrated || !hydrated) && !folders.some((f) => f.id === folderId);
-  const creatingInShared = !noteId && (sharedTargetFolder?.role === "editor" || folderUnresolved);
+  // The user's own folder that is shared (itself or through a folder above it).
+  const inOwnSharedFolder = useMemo(() => {
+    const parentOf = new Map(folders.map((f) => [f.id, f.parentId ?? null]));
+    const seen = new Set<string>();
+    let cursor: string | null = ownFolderId ?? null;
+    while (cursor && !seen.has(cursor)) {
+      if (outgoingFolderIds.includes(cursor)) return true;
+      seen.add(cursor);
+      cursor = parentOf.get(cursor) ?? null;
+    }
+    return false;
+  }, [ownFolderId, folders, outgoingFolderIds]);
+  const [creatingOwnShared, setCreatingOwnShared] = useState(false);
+  const creatingInShared =
+    !noteId && (sharedTargetFolder?.role === "editor" || folderUnresolved || creatingOwnShared);
   const sharedCreateStarted = useRef(false);
   useEffect(() => {
     if (noteId || !folderId || sharedTargetFolder?.role !== "editor" || sharedCreateStarted.current) return;
@@ -211,13 +230,49 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
           return;
         }
         void useSharedStore.getState().refresh();
-        router.replace("/notes/" + id);
+        router.replace("/notes/" + id + "?new=1");
       })
       .catch(() => {
         notify.error("Sem conexão", "Notas em pastas compartilhadas só podem ser criadas online.");
         router.replace("/notes");
       });
   }, [noteId, folderId, sharedTargetFolder?.role, initialBody, router]);
+
+  useEffect(() => {
+    if (noteId || createdId || !hydrated || !inOwnSharedFolder || sharedCreateStarted.current) return;
+    // Already typing (the share list arrived late): leave the note where it is.
+    if (title.trim() || body !== initialBody) return;
+    sharedCreateStarted.current = true;
+    const draft = initialBody
+      ? "<p>" + initialBody.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</p>"
+      : "";
+    queueMicrotask(() => setCreatingOwnShared(true));
+    const id = addNote({ title: "Nova nota", body: draft, folderId: ownFolderId });
+
+    // Wait for the server to have it before opening it as a shared note. If it
+    // can't be reached, keep editing right here, the ordinary offline way.
+    const settle = () => {
+      const state = useNotesStore.getState();
+      const note = state.notes.find((n) => n.id === id);
+      const queued = Object.values(state.pendingOps).some((op) => op.entityId === id);
+      if (note && note.syncStatus !== "synced" && !queued) return false;
+      if (!note) {
+        // The server refused it (the store already said so).
+        router.replace("/notes");
+      } else if (note.syncStatus === "synced") {
+        router.replace("/notes/" + id + "?new=1");
+      } else {
+        setCreatedId(id);
+        setCreatingOwnShared(false);
+        window.history.replaceState(null, "", `/notes/${id}`);
+      }
+      return true;
+    };
+    // Deliberately not torn down by the effect: it unsubscribes itself once.
+    const unsubscribe = useNotesStore.subscribe(() => {
+      if (settle()) unsubscribe();
+    });
+  }, [noteId, createdId, hydrated, inOwnSharedFolder, title, body, initialBody, ownFolderId, addNote, router]);
 
   // "@" note-linking candidates — plain notes only (not files/publications),
   // excludes this note itself so it can't reference its own text, and reads
@@ -392,8 +447,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   // every real edit.
   useEffect(() => {
     if (!hydrated) return;
-    // A shared note persists through its collaborative document instead.
-    if (inCollab) return;
+    // A shared note persists through its collaborative document instead, and
+    // one being created in a shared folder already has its row on the way.
+    if (inCollab || creatingInShared) return;
     if (!title.trim() && !body.trim()) return;
     if (lastSaved.current && title === lastSaved.current.title && body === lastSaved.current.body) return;
 
@@ -404,7 +460,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [title, body, hydrated, ensureNote, updateNote, createdId, inCollab]);
+  }, [title, body, hydrated, ensureNote, updateNote, createdId, inCollab, creatingInShared]);
 
   // Collaborative title: lives in the same Yjs doc as the text, so it syncs live.
   const collabDoc = collab.doc;
@@ -1052,7 +1108,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                   readOnly={!canWrite || !!collab.viewerFallback}
                   placeholder="Título da nota"
                   aria-label="Título da nota"
-                  autoFocus={!noteId}
+                  autoFocus={!noteId || searchParams.get("new") === "1"}
                   className="w-full bg-transparent font-heading text-3xl leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50"
                 />
 
@@ -1196,6 +1252,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
           onShared={() => {
             // Shared now: flush the last plain edit, then reopen it collaboratively.
             if (!inCollab) updateNote(createdId, { title: title.trim() || "Nova nota", body });
+            setSharedFromHere(true);
             setTimeout(() => collab.recheck(), 400);
           }}
         />
