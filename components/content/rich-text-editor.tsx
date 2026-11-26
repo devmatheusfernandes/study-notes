@@ -40,6 +40,7 @@ import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
 import * as Y from "yjs";
 import type { SupabaseYjsProvider } from "@/lib/collab/supabase-provider";
 import { toBase64 } from "@/lib/collab/base64";
+import { useIdleCaretCss } from "@/lib/collab/use-idle-carets";
 import {
   Bold,
   Italic,
@@ -155,6 +156,28 @@ function ToolbarButton({
   );
 }
 
+/** y-tiptap passes the client id as a second argument, which the extension's own types leave out. */
+function renderRemoteCaret(user: Record<string, string>, clientId?: number) {
+  const caret = document.createElement("span");
+  caret.className = "collaboration-carets__caret";
+  caret.setAttribute("style", `border-color: ${user.color}`);
+  caret.dataset.client = String(clientId);
+  const label = document.createElement("div");
+  label.className = "collaboration-carets__label";
+  label.setAttribute("style", `background-color: ${user.color}`);
+  label.textContent = user.name;
+  caret.appendChild(label);
+  return caret;
+}
+
+function renderRemoteSelection(user: Record<string, string>, clientId?: number) {
+  return {
+    class: "ProseMirror-yjs-selection",
+    style: `background-color: ${user.color}70`,
+    "data-client": String(clientId),
+  };
+}
+
 export interface RichTextEditorHandle {
   /** Opens the find-in-note bar (Ctrl+Shift+F does the same) — for a trigger button outside this component. */
   openFind: () => void;
@@ -219,6 +242,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   const collabProvider = collab?.provider;
   const collabUserName = collab?.user.name;
   const collabUserColor = collab?.user.color;
+  const idleCaretCss = useIdleCaretCss(collabProvider?.awareness, collabDoc);
   const collabExtensions = useMemo(
     () =>
       collabDoc && collabProvider
@@ -228,6 +252,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             CollaborationCaret.configure({
               provider: collabProvider,
               user: { name: collabUserName, color: collabUserColor },
+              // The library's own markup plus `data-client`, which is how an idle one gets hidden.
+              render: renderRemoteCaret,
+              selectionRender: renderRemoteSelection,
             }),
           ]
         : [StarterKit],
@@ -906,6 +933,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           </>
         )}
       </BubbleMenu>
+
+      {idleCaretCss && <style>{idleCaretCss}</style>}
 
       {/* Collapsing only exists where the chevrons do — not on phones. */}
       {outline && <NoteOutline editor={editor} {...outline} canCollapse={!isMobile} />}

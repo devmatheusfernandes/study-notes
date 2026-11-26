@@ -394,6 +394,8 @@ html[data-immersive] [data-app-sidebar] {
   border-right: 1px solid;
   word-break: normal;
   pointer-events: none;
+  /* Fades away while its owner is idle (lib/collab/use-idle-carets.ts). */
+  transition: opacity 0.4s ease;
 }
 .collaboration-carets__label {
   position: absolute;
