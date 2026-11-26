@@ -403,7 +403,8 @@ export function referenceKey(ref: NoteReference): string {
   if (ref.kind === "note") return `note:${ref.noteId}`;
   if (ref.kind === "verses") return `verses:${ref.firstVerseId}-${ref.lastVerseId}`;
   if (ref.kind === "extract") return `extract:${ref.publicationId}:${ref.extractIds.join(",")}`;
-  if (ref.kind === "pubref") return `pubref:${ref.mepsDocumentId}:${ref.pid ?? ""}`;
+  // The query tells "p. 631" from "p. 631-633", which start on the same paragraph.
+  if (ref.kind === "pubref") return `pubref:${ref.mepsDocumentId}:${ref.pid ?? ""}:${ref.query ?? ""}`;
   return `pub:${ref.symbol}:${ref.chapter ?? ""}:${ref.documentId ?? ""}`;
 }
 

@@ -16,6 +16,7 @@
  * the note is waiting behind.
  */
 
+import { citedRangeOf } from "./cited-excerpt";
 import {
   getBibleChapterVerses,
   getBibleVerseRange,
@@ -43,6 +44,10 @@ export interface ResolvedPublicationTarget {
   chapterTitle: string;
   documentId: number;
   mepsDocumentId?: number | null;
+  /** For a page citation: the first cited paragraph, the cited range and the citation as typed. */
+  pid?: string;
+  citedRange?: [number, number] | null;
+  query?: string;
 }
 
 /** A video, in the shape NoteVideoSurface's `video` wants. */
@@ -229,6 +234,9 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
             chapterTitle: shared.chapter.chapterTitle,
             documentId: shared.chapter.documentId,
             mepsDocumentId: reference.mepsDocumentId,
+            pid: reference.pid,
+            citedRange: citedRangeOf(reference.snapshot),
+            query: reference.query,
           },
           html: shared.chapter.html,
         };
@@ -247,6 +255,9 @@ async function fetchReference(reference: NoteReference): Promise<ResolvedReferen
         chapterTitle: hit.chapterTitle,
         documentId: hit.documentId,
         mepsDocumentId: hit.mepsDocumentId,
+        pid: reference.pid,
+        citedRange: citedRangeOf(reference.snapshot),
+        query: reference.query,
       },
       html,
     };

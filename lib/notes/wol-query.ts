@@ -270,8 +270,11 @@ function parseIssues(t: string): string[] {
 
 const MAX_CANDIDATES = 3;
 
+/** "631 a 633", "8 até 11", "8–11" → "8-11": a range is written with words as often as with a dash. */
+const RANGE_WORD = /(\d)\s*(?:\s(?:a|à|ao|at[ée])\s|[–—])\s*(?:(?:p[áa]g(?:ina)?s?|pp?)\.?\s*)?(?=\d)/gi;
+
 export function parseWolQueries(raw: string): WolQuery[] {
-  const original = raw.trim().replace(/\s+/g, " ");
+  const original = raw.trim().replace(/\s+/g, " ").replace(RANGE_WORD, "$1-");
   // A book's whole table of contents — an explicit exception to the length floor.
   if (/^od$/i.test(original)) return [{ kind: "issue", q: "od", label: "od" }];
   if (original.length < 3 || original.length > 80) return [];

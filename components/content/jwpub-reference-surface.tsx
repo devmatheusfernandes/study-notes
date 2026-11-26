@@ -8,6 +8,8 @@ import { Progress } from "@/components/ui/progress";
 import type { IngestProgress } from "@/lib/store/ingest-progress-store";
 import { notify } from "@/components/ui/toaster";
 import { sanitizeChapterHtml } from "@/lib/jwpub/sanitize";
+import { excerptOfChapter } from "@/lib/notes/cited-excerpt";
+import { ChapterSubheadings } from "./chapter-subheadings";
 import { downloadAndIngestPublication } from "@/lib/jwpub/download-publication";
 import { getWolArticle } from "@/app/(app)/wol-lookup-actions";
 import { JwpubSidePanel } from "./jwpub-side-panel";
@@ -25,6 +27,10 @@ export interface JwpubReferenceTarget {
   mepsDocumentId?: number | null;
   /** The cited paragraph, if the reference carried one — scrolled to and briefly highlighted once the content renders. Best-effort: a miss just means no scroll, not a bug. */
   pid?: string;
+  /** The cited pages as paragraph ids — when set, only those are shown until the whole chapter is asked for. */
+  citedRange?: [number, number] | null;
+  /** The citation as typed ("jv 631-633"), shown under the title. */
+  query?: string;
 }
 
 interface JwpubReferenceSurfaceProps {
@@ -172,6 +178,7 @@ function DownloadPrompt({
         </div>
       ) : article?.html ? (
         <div ref={articleRef} className="w-full">
+          <ChapterSubheadings html={sanitizeChapterHtml(article.html)} containerRef={articleRef} />
           <SidebarHighlightedHtml
             html={sanitizeChapterHtml(article.html)}
             mepsDocumentId={mepsDocumentId}
@@ -207,7 +214,6 @@ function Body({
   unresolvedPid,
   unresolvedSnapshot,
   downloadProgress,
-  onClose,
 }: {
   target: JwpubReferenceTarget | null;
   html: string | null;
@@ -217,17 +223,22 @@ function Body({
   unresolvedPid?: string | null;
   unresolvedSnapshot?: string | null;
   downloadProgress: IngestProgress | null;
-  onClose: () => void;
 }) {
-  const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const safeHtml = useMemo(() => (html ? sanitizeChapterHtml(html) : ""), [html]);
+  const [wholeChapterFor, setWholeChapterFor] = useState<JwpubReferenceTarget | null>(null);
+  const citedRange = target?.citedRange ?? null;
+  const excerpt = useMemo(
+    () => (safeHtml && citedRange ? excerptOfChapter(safeHtml, citedRange) : null),
+    [safeHtml, citedRange]
+  );
+  const showingExcerpt = excerpt !== null && wholeChapterFor !== target;
 
   // Same scroll-and-flash treatment JwpubChapterView gives its own `?pid=`
   // deep link — best-effort, since the cited paragraph number isn't
   // guaranteed to line up with the target document's own `data-pid`s.
   useEffect(() => {
-    if (!target?.pid || !html) return;
+    if (!target?.pid || !html || showingExcerpt) return;
     const container = containerRef.current;
     if (!container) return;
     const el = container.querySelector(`[data-pid="${target.pid}"]`);
@@ -236,7 +247,7 @@ function Body({
     el.classList.add("ring-2", "ring-accent", "bg-accent/20", "rounded-xl", "p-2.5", "transition-all", "duration-500");
     const timer = setTimeout(() => el.classList.remove("ring-2", "ring-accent", "bg-accent/20"), 4500);
     return () => clearTimeout(timer);
-  }, [html, target?.pid]);
+  }, [html, target?.pid, showingExcerpt]);
 
   if (isLoading) {
     return (
@@ -253,23 +264,22 @@ function Body({
 
   return (
     <div className="flex flex-col gap-3">
-      {target.noteId && (
+      {excerpt !== null && (
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
-          leftIcon={<ExternalLink />}
-          onClick={() => {
-            onClose();
-            router.push(`/notes/${target.noteId}?doc=${target.documentId}`);
-          }}
+          onClick={() => setWholeChapterFor(showingExcerpt ? target : null)}
+          className="-ml-2 self-start text-[12px] text-muted-foreground"
         >
-          Abrir publicação completa
+          {showingExcerpt ? "Ver capítulo inteiro" : "Só o trecho citado"}
         </Button>
       )}
+      {!showingExcerpt && <ChapterSubheadings html={safeHtml} containerRef={containerRef} />}
       <div ref={containerRef}>
         {/* The user's own highlights, with a square in the margin for each note — tapping one opens it right here (see SidebarHighlightedHtml). */}
         <SidebarHighlightedHtml
-          html={safeHtml}
+          key={showingExcerpt ? "excerpt" : "chapter"}
+          html={showingExcerpt ? excerpt : safeHtml}
           mepsDocumentId={target.mepsDocumentId ?? null}
           className="text-[13.5px] leading-relaxed text-foreground/90 [&_p]:my-2 [&_img]:my-2 [&_img]:max-w-full"
         />
@@ -301,13 +311,14 @@ export function JwpubReferenceSurface({
   raiseKey,
 }: JwpubReferenceSurfaceProps) {
   const { isDownloading, progress, download } = usePublicationDownload(unresolvedMepsDocumentId, onResolved);
+  const router = useRouter();
   const canDownload = !isLoading && !error && !(target && html) && Boolean(unresolvedMepsDocumentId);
 
   return (
     <JwpubSidePanel
       open={open}
       title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
-      subtitle={!target ? unresolvedQuery : null}
+      subtitle={target ? target.query : unresolvedQuery}
       headerActions={
         <>
           <RsvpButton
@@ -315,6 +326,20 @@ export function JwpubReferenceSurface({
             title={target ? `${target.publicationTitle} — ${target.chapterTitle}` : "Referência"}
             html={html}
           />
+          {target?.noteId && html ? (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                router.push(`/notes/${target.noteId}?doc=${target.documentId}`);
+              }}
+              aria-label="Abrir publicação completa"
+              title="Abrir publicação completa"
+              className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <ExternalLink className="size-4" />
+            </button>
+          ) : null}
           {canDownload ? (
           <button
             type="button"
@@ -341,7 +366,6 @@ export function JwpubReferenceSurface({
         unresolvedPid={unresolvedPid}
         unresolvedSnapshot={unresolvedSnapshot}
         downloadProgress={progress}
-        onClose={onClose}
       />
     </JwpubSidePanel>
   );

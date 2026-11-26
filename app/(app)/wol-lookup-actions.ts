@@ -172,6 +172,10 @@ export async function lookupWolReference(
       : undefined;
   const paraSuffix = wanted ? (wanted.scope === "page" ? ` §${wanted.n}` : ` par. ${wanted.n}`) : "";
 
+  // The chip should say which pages were meant, not only which article they're in.
+  const pages = / p\. (\d{1,4}(?:-\d{1,4})?)(?:$| )/.exec(label)?.[1];
+  const pageSuffix = pages ? `, p. ${pages}` : "";
+
   const all = await Promise.all(
     found.slice(0, 3).map(async (f): Promise<WolHit & { narrowed: boolean }> => {
       const hasRange = f.first !== undefined && f.last !== undefined;
@@ -179,7 +183,7 @@ export async function lookupWolReference(
       return {
         mepsDocumentId: f.docId,
         title: f.title || label,
-        label: f.title && f.source ? `${f.title} — ${f.source}${one ? paraSuffix : ""}` : label,
+        label: f.title && f.source ? `${f.title} — ${f.source}${pageSuffix}${one ? paraSuffix : ""}` : label,
         pid: one ? String(one.pid) : f.first !== undefined ? String(f.first) : undefined,
         query: query + (one ? paraSuffix : ""),
         snapshot: one ? one.html : hasRange ? await fetchSnapshot(f.docId, f.first!, f.last!) : undefined,
