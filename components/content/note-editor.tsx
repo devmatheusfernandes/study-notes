@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowLeft, AudioLines, FileDown, ImagePlus, Lock, Maximize2, Minimize2, PenLine, Pin, Search, Share, Users } from "lucide-react";
+import { ArrowLeft, AudioLines, FileDown, ImagePlus, ListTree, Lock, Maximize2, Minimize2, PenLine, Pin, Search, Share, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/components/ui/toaster";
@@ -293,6 +293,29 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
   const [penMode, setPenMode] = useState(false);
   // In fullscreen the bars tuck away on scrolling down and return on scrolling up; while writing they stay put.
   const barsHidden = useHideOnScroll(fullscreen.isFullscreen && !penMode);
+
+  // ── List of headings ─────────────────────────────────────────────────────
+  // Beside the text when the margin is wide enough (and then the choice is
+  // remembered), otherwise a sheet opened on demand.
+  const mainRef = useRef<HTMLElement>(null);
+  const [outlineFits, setOutlineFits] = useState(false);
+  const [outlineSheetOpen, setOutlineSheetOpen] = useState(false);
+  const showOutline = usePreferencesStore((s) => s.showOutline);
+  const setShowOutline = usePreferencesStore((s) => s.setShowOutline);
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    // The text column (672px) plus the list and its gap on each side.
+    const observer = new ResizeObserver(() => setOutlineFits(main.getBoundingClientRect().width >= 1120));
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, []);
+  const outlineOpen = !penMode && (outlineFits ? showOutline : outlineSheetOpen);
+  const outline = {
+    open: outlineOpen,
+    sheet: !outlineFits,
+    onClose: () => setOutlineSheetOpen(false),
+  };
   const [strokes, setStrokes] = useState<Stroke[]>(() => parseDoc(initialDrawing?.strokes).strokes);
   const [past, setPast] = useState<Stroke[][]>([]);
   const [future, setFuture] = useState<Stroke[][]>([]);
@@ -806,6 +829,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
     // instead of floating over the text the user is writing.
     <div className="flex min-h-dvh w-full">
       <motion.main
+        ref={mainRef}
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
@@ -923,6 +947,21 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                     className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   >
                     <Search className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => (outlineFits ? setShowOutline(!showOutline) : setOutlineSheetOpen(true))}
+                    aria-label={outlineOpen ? "Ocultar títulos" : "Mostrar títulos"}
+                    title={outlineOpen ? "Ocultar títulos" : "Mostrar títulos"}
+                    aria-pressed={outlineOpen}
+                    className={cn(
+                      "rounded-full p-2 transition-colors",
+                      outlineOpen
+                        ? "bg-primary/[0.18] text-accent"
+                        : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    )}
+                  >
+                    <ListTree className="size-4" />
                   </button>
                   <RsvpButton title={title || "Nova nota"} html={body} />
                   {/* Shown at every width: this header has no avatar menu to move it into. */}
@@ -1139,6 +1178,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 {collab.viewerFallback ? (
                   <RichTextEditor
                     key="viewer-fallback"
+                    outline={outline}
                     ref={editorRef}
                     content={collab.viewerFallback.body}
                     onChange={() => {}}
@@ -1156,6 +1196,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                     publications={publications}
                     notes={noteMentionOptions}
                     onReferenceClick={setOpenReference}
+                    outline={outline}
                     collab={{
                       doc: collab.doc,
                       provider: collab.provider,
@@ -1169,6 +1210,7 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
                 ) : (
                   <RichTextEditor
                     key="plain"
+                    outline={outline}
                     ref={editorRef}
                     content={body}
                     onChange={setBody}

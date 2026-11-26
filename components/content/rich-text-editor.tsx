@@ -4,6 +4,7 @@ import { NoteHighlight } from "@/lib/tiptap/note-highlight";
 import { CollapsibleHeadings } from "@/lib/tiptap/collapsible-headings";
 import { FindInNote } from "@/lib/tiptap/find-in-note";
 import { NoteFindBar } from "@/components/content/note-find-bar";
+import { NoteOutline, type NoteOutlineOptions } from "@/components/content/note-outline";
 import { useIsMobile } from "@/hooks/ui/use-device";
 import { JWLIBRARY_HIGHLIGHT_COLORS } from "@/lib/jwlibrary/constants";
 import { HighlightSwatch } from "@/components/ui/highlight-swatch";
@@ -204,10 +205,12 @@ interface RichTextEditorProps {
   collab?: RichTextEditorCollab;
   /** Read-only (non-collaborative) rendering — a viewer's fallback snapshot. */
   readOnly?: boolean;
+  /** The list of headings beside the text (see note-outline.tsx). */
+  outline?: NoteOutlineOptions;
 }
 
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
-  { content, onChange, placeholder, autoFocus, className, publications, notes, onReferenceClick, collab, readOnly = false },
+  { content, onChange, placeholder, autoFocus, className, publications, notes, onReferenceClick, collab, readOnly = false, outline },
   ref
 ) {
   const seeded = useRef(false);
@@ -903,6 +906,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           </>
         )}
       </BubbleMenu>
+
+      {/* Collapsing only exists where the chevrons do — not on phones. */}
+      {outline && <NoteOutline editor={editor} {...outline} canCollapse={!isMobile} />}
 
       <EditorContent editor={editor} />
 

@@ -13,6 +13,9 @@ interface PreferencesStore {
   highlightLabels: Record<string, string>;
   /** An empty label clears it. */
   setHighlightLabel: (colorIndex: number, label: string) => void;
+  /** The note's list of headings, kept open beside the text. Client-only, per device (it depends on the screen). */
+  showOutline: boolean;
+  setShowOutline: (showOutline: boolean) => void;
   /** Handwriting with a stylus only, so a resting palm (or a stray finger) scrolls instead of drawing. Client-only like `jwlibraryViewMode`, and deliberately so: whether there's a pen is a property of *this device*, not of the account. Auto-enables the first time a real pen event arrives. */
   penOnly: boolean;
   /** RSVP speed reader: words per minute, and whether it runs continuously ("flow") or stops at the end of every verse/paragraph ("study"). Client-only, per device. */
@@ -59,6 +62,9 @@ export const usePreferencesStore = create<PreferencesStore>()(
       setJwlibraryViewMode: (jwlibraryViewMode) => set({ jwlibraryViewMode }),
 
       setPenOnly: (penOnly) => set({ penOnly }),
+
+      showOutline: false,
+      setShowOutline: (showOutline) => set({ showOutline }),
 
       setSelectedSourceFilters: (selectedSourceFilters) => {
         set({ selectedSourceFilters });
