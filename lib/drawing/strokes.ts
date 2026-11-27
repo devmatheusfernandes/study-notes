@@ -138,6 +138,9 @@ function outlineFor(stroke: Stroke, points: DrawPoint[]) {
     {
       size: stroke.size,
       ...PEN_OPTIONS,
+      // Ends the outline on the last real point; otherwise streamlining leaves
+      // the line trailing short of the nib.
+      last: true,
       // A highlighter is a flat chisel — pressure thinning would make it look
       // like a fat pen instead.
       thinning: isHighlighter ? 0 : PEN_OPTIONS.thinning,

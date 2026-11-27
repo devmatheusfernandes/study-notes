@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   PAGE_WIDTH,
@@ -45,10 +45,16 @@ interface DrawingCanvasProps {
 const MAX_CANVAS_PIXELS = 12_000_000;
 
 /** How long after the stylus last reported (hover or contact) a touch is still treated as the writing hand. */
-const PEN_GRACE_MS = 700;
+const PEN_GRACE_MS = 1500;
 
 /** A fingertip reports a contact of roughly 10-20 CSS px; a resting palm or knuckle is far wider. */
 const PALM_CONTACT_PX = 32;
+
+/** How far a finger must travel before it scrolls — a resting or rocking hand stays under it, so the page holds still. */
+const TOUCH_SCROLL_SLOP_PX = 18;
+
+/** How many of the browser's predicted positions are drawn ahead of the nib (never stored). */
+const PREDICTED_SAMPLES = 2;
 
 /**
  * The S Pen's side button (or an eraser end, on pens that have one) held while
@@ -108,6 +114,11 @@ export function DrawingCanvas({
   const baseRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const liveCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const predictedRef = useRef<DrawPoint[]>([]);
+  const touchesRef = useRef(new Set<number>());
+  /** What the base layer currently shows, so an appended stroke can be painted alone. */
+  const paintedRef = useRef<{ strokes: Stroke[]; key: unknown[] } | null>(null);
   const themeAppearance = useInkAppearance();
   const appearance = appearanceOverride ?? themeAppearance;
 
@@ -132,7 +143,15 @@ export function DrawingCanvas({
     setDebugText(`${label} · ${e.pointerType ?? "mouse"} · button ${e.button} · buttons ${e.buttons}`);
   }
   const lastPenAtRef = useRef(-Infinity);
-  const touchScrollRef = useRef<{ pointerId: number; lastX: number; lastY: number; target: HTMLElement | null; targetX: HTMLElement | null } | null>(null);
+  const touchScrollRef = useRef<{
+    pointerId: number;
+    /** Where the finger landed until it passes the slop, then its previous position. */
+    lastX: number;
+    lastY: number;
+    moving: boolean;
+    target: HTMLElement | null;
+    targetX: HTMLElement | null;
+  } | null>(null);
   const liveDirtyRef = useRef<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
 
   useEffect(() => {
@@ -184,25 +203,86 @@ export function DrawingCanvas({
     [box]
   );
 
-  const clearLive = useCallback(() => {
-    const ctx = configure(liveRef.current);
+  /**
+   * Places the live layer over just the part of the note that's on screen. It
+   * is repainted on every pen movement, and a canvas as tall as the note makes
+   * the browser push megapixels to the screen each time — which is felt as the
+   * ink trailing behind the nib. Nothing scrolls during a stroke, so placing it
+   * once at pointerdown is enough.
+   */
+  function prepareLive() {
+    const canvas = liveRef.current;
+    const wrap = wrapRef.current;
+    liveCtxRef.current = null;
+    liveDirtyRef.current = null;
+    if (!canvas || !wrap) return;
+    const rect = wrap.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const height = Math.min(rect.height, window.innerHeight);
+    const top = Math.round(Math.max(0, Math.min(-rect.top, rect.height - height)));
+    canvas.style.top = `${top}px`;
+    canvas.style.height = `${height}px`;
+
+    const maxScale = Math.sqrt(MAX_CANVAS_PIXELS / (rect.width * height));
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, maxScale));
+    const pixelWidth = Math.round(rect.width * dpr);
+    const pixelHeight = Math.round(height * dpr);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pixelWidth, pixelHeight);
+    const unit = pixelWidth / PAGE_WIDTH;
+    // Shifted so stroke coordinates stay the note's own, not the window's.
+    ctx.setTransform(unit, 0, 0, unit, 0, -top * dpr);
+    liveCtxRef.current = ctx;
+  }
+
+  function clearLive() {
+    const ctx = liveCtxRef.current;
     const dirty = liveDirtyRef.current;
     if (ctx && dirty) {
       ctx.clearRect(dirty.minX, dirty.minY, dirty.maxX - dirty.minX, dirty.maxY - dirty.minY);
     }
     return ctx;
-  }, [configure]);
+  }
 
-  useEffect(() => {
+  // A layout effect so a finished stroke appears here in the same frame it leaves the live layer.
+  useLayoutEffect(() => {
     const ctx = configure(baseRef.current);
     if (!ctx) return;
+    const key = [configure, logicalHeight, appearance, revealUntilMs];
+    const painted = paintedRef.current;
+    paintedRef.current = { strokes, key };
+
+    // Writing only appends: redrawing a whole page of handwriting after every
+    // stroke stalls the start of the next one. A highlighter still redraws,
+    // because it has to go underneath the ink already there.
+    if (
+      painted &&
+      revealUntilMs === undefined &&
+      painted.key.every((value, i) => value === key[i]) &&
+      strokes.length >= painted.strokes.length &&
+      painted.strokes.every((stroke, i) => stroke === strokes[i])
+    ) {
+      const added = strokes.slice(painted.strokes.length);
+      if (added.every((stroke) => stroke.tool !== "highlighter")) {
+        for (const stroke of added) drawStroke(ctx, stroke, undefined, appearance);
+        return;
+      }
+    }
+
     ctx.clearRect(0, 0, PAGE_WIDTH, logicalHeight);
     renderStrokes(ctx, strokes, revealUntilMs, appearance);
   }, [strokes, revealUntilMs, configure, logicalHeight, appearance]);
 
   const toPagePoint = useCallback(
     (clientX: number, clientY: number) => {
-      const rect = liveRef.current?.getBoundingClientRect();
+      const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect || rect.width === 0) return null;
       return {
         x: ((clientX - rect.left) / rect.width) * PAGE_WIDTH,
@@ -214,10 +294,10 @@ export function DrawingCanvas({
     []
   );
 
-  const drawLive = useCallback(() => {
+  function drawLive() {
     const ctx = clearLive();
-    const points = pointsRef.current;
-    if (!ctx || points.length === 0) return;
+    if (!ctx || pointsRef.current.length === 0) return;
+    const points = [...pointsRef.current, ...predictedRef.current];
 
     drawStroke(ctx, {
       id: "live",
@@ -246,14 +326,13 @@ export function DrawingCanvas({
       maxX: maxX + pad,
       maxY: maxY + pad,
     };
-  }, [clearLive, color, size, tool, appearance]);
+  }
 
-  function pushPoint(event: React.PointerEvent, clientX: number, clientY: number, pressure: number) {
+  function makePoint(event: React.PointerEvent, clientX: number, clientY: number, pressure: number): DrawPoint | null {
     const point = toPagePoint(clientX, clientY);
-    if (!point) return;
     const start = strokeStartRef.current;
-    if (!start) return;
-    pointsRef.current.push([
+    if (!point || !start) return null;
+    return [
       Math.round(point.x * 10) / 10,
       Math.round(point.y * 10) / 10,
       // A mouse reports a constant 0.5 and some touchscreens report 0 — both
@@ -261,10 +340,15 @@ export function DrawingCanvas({
       // velocity instead (see `simulatePressure` in lib/drawing/strokes.ts).
       event.pointerType === "pen" ? pressure : 0,
       Math.round(performance.now() - start.perf),
-    ]);
+    ];
   }
 
-  function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+  function pushPoint(event: React.PointerEvent, clientX: number, clientY: number, pressure: number) {
+    const point = makePoint(event, clientX, clientY, pressure);
+    if (point) pointsRef.current.push(point);
+  }
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (!active) return;
     debug(event, "down");
     notePenActivity(event);
@@ -272,16 +356,25 @@ export function DrawingCanvas({
     // note rather than painting over the writing. The scrolling is done by
     // hand here because the layer has to keep `touch-action: none` — see the
     // note on the canvas element below.
+    if (event.pointerType === "pen") touchScrollRef.current = null;
     if (penOnly && event.pointerType === "touch") {
+      // A second contact means a hand, not a scrolling finger: stop, and ignore until all have lifted.
+      const alone = touchesRef.current.size === 0;
+      touchesRef.current.add(event.pointerId);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      if (!alone) {
+        touchScrollRef.current = null;
+        return;
+      }
       // A palm resting beside the nib must do nothing at all — not draw, and
       // not scroll the page out from under the hand that's writing. Pen near
       // the screen, or a contact too big to be a fingertip, means palm.
       if (penIsNear() || isPalmContact(event)) return;
-      event.currentTarget.setPointerCapture(event.pointerId);
       touchScrollRef.current = {
         pointerId: event.pointerId,
         lastX: event.clientX,
         lastY: event.clientY,
+        moving: false,
         target: scrollableAncestor(event.currentTarget),
         // A zoomed-in PDF page is wider than the screen, so the hand scrolls sideways too.
         targetX: scrollableAncestor(event.currentTarget, "x"),
@@ -309,6 +402,8 @@ export function DrawingCanvas({
 
     strokeStartRef.current = { perf: performance.now(), t: recordingElapsed?.() };
     pointsRef.current = [];
+    predictedRef.current = [];
+    prepareLive();
     pushPoint(event, event.clientX, event.clientY, event.pressure);
     drawLive();
   }
@@ -318,7 +413,7 @@ export function DrawingCanvas({
    * usually lands while the S Pen is still in the air, and waiting for the
    * first stroke to learn there's a pen is how the first palm touch drew.
    */
-  function notePenActivity(event: React.PointerEvent<HTMLCanvasElement>) {
+  function notePenActivity(event: React.PointerEvent<HTMLDivElement>) {
     if (event.pointerType !== "pen") return;
     lastPenAtRef.current = performance.now();
     if (!penReportedRef.current) {
@@ -332,15 +427,25 @@ export function DrawingCanvas({
     return performance.now() - lastPenAtRef.current < PEN_GRACE_MS;
   }
 
-  function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (active) notePenActivity(event);
     const scrolling = touchScrollRef.current;
     if (scrolling && event.pointerType === "pen") {
       // The pen arrived after a hand was already down: that hand is a palm.
       touchScrollRef.current = null;
     } else if (scrolling?.pointerId === event.pointerId) {
-      if (penIsNear()) {
+      // A palm often lands as a small contact and only then flattens out.
+      if (penIsNear() || isPalmContact(event)) {
         touchScrollRef.current = null;
+        return;
+      }
+      if (!scrolling.moving) {
+        const travelled = Math.hypot(event.clientX - scrolling.lastX, event.clientY - scrolling.lastY);
+        if (travelled < TOUCH_SCROLL_SLOP_PX) return;
+        // Scrolling starts from here, so crossing the slop doesn't jump the page.
+        scrolling.moving = true;
+        scrolling.lastX = event.clientX;
+        scrolling.lastY = event.clientY;
         return;
       }
       const delta = scrolling.lastY - event.clientY;
@@ -391,12 +496,20 @@ export function DrawingCanvas({
     } else {
       pushPoint(event, event.clientX, event.clientY, event.pressure);
     }
+    // Where the browser expects the nib to be by the time this frame is shown.
+    const predicted =
+      typeof native.getPredictedEvents === "function" ? native.getPredictedEvents() : [];
+    predictedRef.current = predicted
+      .slice(0, PREDICTED_SAMPLES)
+      .map((sample) => makePoint(event, sample.clientX, sample.clientY, sample.pressure))
+      .filter((point): point is DrawPoint => point !== null);
     drawLive();
   }
 
-  function endStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+  function endStroke(event: React.PointerEvent<HTMLDivElement>) {
     debug(event, event.type === "pointercancel" ? "cancel" : "up");
     if (event.pointerType !== "touch") penButtonHeldRef.current = false;
+    touchesRef.current.delete(event.pointerId);
     if (touchScrollRef.current?.pointerId === event.pointerId) {
       touchScrollRef.current = null;
       return;
@@ -412,6 +525,7 @@ export function DrawingCanvas({
     const start = strokeStartRef.current;
     const points = pointsRef.current;
     pointsRef.current = [];
+    predictedRef.current = [];
     strokeStartRef.current = null;
 
     // The stroke is about to be handed to the base layer, so the live one has
@@ -434,7 +548,7 @@ export function DrawingCanvas({
     // The wrapper must stay `pointer-events-none`: it spans the whole note, so
     // with the default it swallows every tap meant for the text underneath —
     // the ink layer would silently make the note impossible to type in. Only
-    // the live canvas opts back in, and only while drawing is active.
+    // the input surface opts back in, and only while drawing is active.
     <div ref={wrapRef} className={cn("pointer-events-none absolute inset-0", className)} aria-hidden={!active}>
       <canvas ref={baseRef} className="absolute inset-0 size-full" />
       {debugEnabled && debugText && (
@@ -442,10 +556,10 @@ export function DrawingCanvas({
           {debugText}
         </div>
       )}
-      <canvas
-        ref={liveRef}
+      <canvas ref={liveRef} className="absolute left-0 top-0 h-0 w-full" />
+      <div
         className={cn(
-          "absolute inset-0 size-full",
+          "absolute inset-0 select-none",
           active
             ? cn("pointer-events-auto", tool === "eraser" ? "cursor-cell" : "cursor-crosshair")
             : null

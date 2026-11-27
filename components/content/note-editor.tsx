@@ -841,7 +841,9 @@ export function NoteEditor({ noteId, initialNote, initialDrawing, onBack }: Note
             header's height. */}
         <div
           className={cn(
-            "sticky top-0 z-20 bg-background/85 backdrop-blur-md transition-transform duration-200",
+            "sticky top-0 z-20 transition-transform duration-200",
+            // No blur while writing: it is recomputed as the ink under it changes, which costs the pen frames.
+            penMode ? "bg-background" : "bg-background/85 backdrop-blur-md",
             barsHidden ? "-translate-y-full" : "translate-y-0"
           )}
         >

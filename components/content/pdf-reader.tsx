@@ -229,7 +229,7 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
         <div
           className={`sticky top-0 z-20 transition-transform duration-200 ${barsHidden ? "-translate-y-full" : "translate-y-0"}`}
         >
-        <header className="flex h-14 items-center gap-2 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6">
+        <header className={`flex h-14 items-center gap-2 border-b border-border px-4 sm:px-6 ${penMode ? "bg-background" : "bg-background/85 backdrop-blur-md"}`}>
           <Button
             variant="ghost"
             size="sm"
@@ -291,7 +291,7 @@ export function PdfReader({ noteId, initialNote, initialDrawing }: PdfReaderProp
         </header>
 
         {penMode && url && !error && (
-          <div className="flex items-center border-b border-border bg-background/85 px-4 py-1.5 backdrop-blur-md sm:px-6">
+          <div className="flex items-center border-b border-border bg-background px-4 py-1.5 sm:px-6">
             <DrawingToolbar
               tool={tool}
               color={inkColor}
